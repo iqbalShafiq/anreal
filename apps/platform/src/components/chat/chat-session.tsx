@@ -412,6 +412,13 @@ export function ChatSession({
   const composerInputRef = useRef<HTMLTextAreaElement>(null);
   const composerDockRef = useRef<HTMLDivElement>(null);
   const chatViewportRef = useRef<HTMLDivElement>(null);
+  /**
+   * True only after a real user gesture scrolls the transcript (wheel, touch,
+   * keys, or the custom scrollbar). Auto-follow pauses then so the reader is
+   * never yanked down mid-stream; it resumes on send, Latest, or scrolling
+   * back to the bottom.
+   */
+  const chatDetachedRef = useRef(false);
   const wasActiveRunRef = useRef(false);
   /**
    * Deferred share composer (pre-fork): the thread stays frozen like an
@@ -2513,6 +2520,86 @@ export function ChatSession({
     [chat.messages],
   );
 
+  /**
+   * Sending your own message re-arms auto-follow. The viewport only sticks
+   * while it reads as "at bottom", so an instant scroll here flips that state
+   * back before the answer streams. Scrolling up during a run still disengages
+   * (no forced jump) — the floating "Latest" button brings you back.
+   */
+  const userMessageCount = useMemo(
+    () => chat.messages.filter((message) => message.role === "user").length,
+    [chat.messages],
+  );
+  const seenUserMessageCountRef = useRef<number | null>(null);
+  useEffect(() => {
+    const previous = seenUserMessageCountRef.current;
+    seenUserMessageCountRef.current = userMessageCount;
+    if (previous === null || userMessageCount <= previous) return;
+    chatDetachedRef.current = false;
+    const viewport = chatViewportRef.current;
+    if (!viewport) return;
+    const frame = requestAnimationFrame(() => {
+      viewport.scrollTo({ top: viewport.scrollHeight, behavior: "auto" });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [userMessageCount]);
+
+  /**
+   * Follow the streaming answer every frame. Layout shifts (activity cards
+   * collapsing, chart images loading, rails opening) move the transcript
+   * without any user intent and make the library's own "at bottom" heuristic
+   * give up, which is what left the answer streaming below the fold. Pinning
+   * here keeps the tail visible until the reader detaches with a real scroll
+   * gesture.
+   */
+  useEffect(() => {
+    if (chat.status !== "submitted" && chat.status !== "streaming") return;
+    let frame = 0;
+    const tick = () => {
+      const viewport = chatViewportRef.current;
+      if (viewport && !chatDetachedRef.current) {
+        const distance = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+        if (distance > 1) {
+          viewport.scrollTo({ top: viewport.scrollHeight, behavior: "auto" });
+        }
+      }
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [chat.status]);
+
+  /**
+   * Detach only on real scroll intent (wheel, touch, scrolling keys, or the
+   * custom scrollbar drag); re-attach once the reader is back near the bottom.
+   */
+  useEffect(() => {
+    const viewport = chatViewportRef.current;
+    if (!viewport) return;
+    const detach = () => {
+      chatDetachedRef.current = true;
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (["PageUp", "PageDown", "ArrowUp", "ArrowDown", "Home", "End", " "].includes(event.key)) {
+        detach();
+      }
+    };
+    const handleScroll = () => {
+      const distance = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+      if (distance < 80) chatDetachedRef.current = false;
+    };
+    viewport.addEventListener("wheel", detach, { passive: true });
+    viewport.addEventListener("touchstart", detach, { passive: true });
+    viewport.addEventListener("keydown", handleKeyDown);
+    viewport.addEventListener("scroll", handleScroll, { passive: true });
+    return () => {
+      viewport.removeEventListener("wheel", detach);
+      viewport.removeEventListener("touchstart", detach);
+      viewport.removeEventListener("keydown", handleKeyDown);
+      viewport.removeEventListener("scroll", handleScroll);
+    };
+  }, []);
+
   const generatedImages = useMemo(
     () => mergeGeneratedImages(liveGeneratedImages, sessionImages),
     [liveGeneratedImages, sessionImages],
@@ -2913,6 +3000,9 @@ export function ChatSession({
                 scrollRef={chatViewportRef}
                 top="calc(3.5rem + 24px)"
                 bottom="calc(var(--composer-dock-h, 7.5rem) + var(--chat-composer-gap, 40px))"
+                onUserScroll={() => {
+                  chatDetachedRef.current = true;
+                }}
               />
 
               {/* Below the composer dock so Add as context cannot cover the field. */}
@@ -2928,7 +3018,24 @@ export function ChatSession({
               >
                 <div className="pointer-events-auto relative mx-auto w-full max-w-[760px] px-3">
                   <ThreadPrimitive.ViewportFooter className="pointer-events-none absolute inset-x-3 bottom-full mb-2 flex justify-center">
-                    <ThreadPrimitive.ScrollToBottom className="pointer-events-auto glass glass-interactive inline-flex min-h-10 cursor-pointer items-center rounded-full px-4 text-sm font-medium text-text-muted transition hover:text-text active:scale-[0.98] data-[state=bottom]:invisible">
+                    <ThreadPrimitive.ScrollToBottom
+                      onClick={(event) => {
+                        // Land exactly at the bottom and re-arm auto-follow.
+                        // The library's smooth scroll can end short while the
+                        // answer is still streaming, leaving the viewport
+                        // "away" and the follow disengaged.
+                        const viewport = chatViewportRef.current;
+                        if (!viewport) return;
+                        event.preventDefault();
+                        chatDetachedRef.current = false;
+                        const pin = () => {
+                          viewport.scrollTo({ top: viewport.scrollHeight, behavior: "auto" });
+                        };
+                        pin();
+                        requestAnimationFrame(pin);
+                      }}
+                      className="pointer-events-auto glass glass-interactive inline-flex min-h-10 cursor-pointer items-center rounded-full px-4 text-sm font-medium text-text-muted transition hover:text-text active:scale-[0.98] data-[state=bottom]:invisible"
+                    >
                       Latest
                     </ThreadPrimitive.ScrollToBottom>
                   </ThreadPrimitive.ViewportFooter>

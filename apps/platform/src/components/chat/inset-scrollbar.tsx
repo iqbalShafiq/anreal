@@ -18,6 +18,7 @@ export function InsetScrollbar({
   top,
   bottom,
   className = "",
+  onUserScroll,
 }: {
   scrollRef: RefObject<HTMLElement | null>;
   /** CSS length for track offset from top of the positioning parent */
@@ -25,6 +26,8 @@ export function InsetScrollbar({
   /** CSS length for track offset from bottom of the positioning parent */
   bottom: string;
   className?: string;
+  /** Fired when the reader grabs the thumb or track to scroll deliberately. */
+  onUserScroll?: () => void;
 }) {
   const trackRef = useRef<HTMLDivElement>(null);
   const dragging = useRef(false);
@@ -85,6 +88,7 @@ export function InsetScrollbar({
   const onThumbPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
+    onUserScroll?.();
     dragging.current = true;
     const thumbTop = metrics.thumbTop;
     const rect = trackRef.current?.getBoundingClientRect();
@@ -108,6 +112,7 @@ export function InsetScrollbar({
 
   const onTrackPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (e.target !== e.currentTarget) return;
+    onUserScroll?.();
     const thumbH = metrics.thumbH || 28;
     scrollFromPointer(e.clientY, thumbH / 2);
   };
