@@ -34,8 +34,8 @@ function tool(
   return part;
 }
 
-function assistant(parts: UIMessagePart[]): UIMessage {
-  return { id: "a1", role: "assistant", parts };
+function assistant(parts: UIMessagePart[], id = "a1"): UIMessage {
+  return { id, role: "assistant", parts };
 }
 
 describe("finalizeInterruptedTools", () => {
