@@ -16,6 +16,8 @@ const createReportSchema = z.object({
   title: z.string().trim().min(1).max(120),
   markdown: z.string().min(1).max(100_000),
   svgAssets: z.array(z.string().max(200_000)).max(10).optional(),
+  svgAssetIds: z.array(z.string().max(120)).max(10).optional(),
+  svgCaptions: z.array(z.string().max(300)).max(10).optional(),
   citationMap: z.array(citationSchema).max(100).optional(),
 });
 
@@ -63,6 +65,8 @@ export const reportsRouter = new Hono<{ Variables: AuthVariables }>()
         title: z.string().trim().min(1).max(120).optional(),
         markdown: z.string().min(1).max(100_000).optional(),
         svgAssets: z.array(z.string().max(200_000)).max(10).optional(),
+        svgAssetIds: z.array(z.string().max(120)).max(10).optional(),
+        svgCaptions: z.array(z.string().max(300)).max(10).optional(),
         citationMap: z.array(citationSchema).max(100).optional(),
       })
       .safeParse(await c.req.json().catch(() => null));

@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   deleteObject: vi.fn(async () => undefined),
   getObjectBuffer: vi.fn(async () => new Uint8Array([37, 80, 68, 70])),
   buildReportPdf: vi.fn(async () => new Uint8Array([37, 80, 68, 70, 45])),
+  countPdfPages: vi.fn(() => 3),
   documentCreate: vi.fn(),
   documentUpdate: vi.fn(),
   documentFindFirst: vi.fn(),
@@ -20,7 +21,10 @@ vi.mock("../../lib/r2.js", () => ({
     `docs/${userId}/${sessionId}/${documentId}/${filename}`,
 }));
 
-vi.mock("./service.js", () => ({ buildReportPdf: mocks.buildReportPdf }));
+vi.mock("./service.js", () => ({
+  buildReportPdf: mocks.buildReportPdf,
+  countPdfPages: mocks.countPdfPages,
+}));
 
 vi.mock("../../utils/prisma.js", () => ({
   prisma: {
@@ -67,13 +71,20 @@ describe("createReport", () => {
       title: "Laporan",
       markdown: "# Isi",
       svgAssets: ["<svg/>"],
+      svgCaptions: ["Revenue by region"],
       imageIds: ["img-1"],
     });
     expect(documentCreate).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           kind: "report",
-          reportSource: { markdown: "# Isi", svgAssets: ["<svg/>"], imageIds: ["img-1"] },
+          pageCount: 3,
+          reportSource: {
+            markdown: "# Isi",
+            svgAssets: ["<svg/>"],
+            svgCaptions: ["Revenue by region"],
+            imageIds: ["img-1"],
+          },
         }),
       }),
     );

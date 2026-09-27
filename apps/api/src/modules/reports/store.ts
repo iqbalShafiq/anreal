@@ -4,6 +4,7 @@ import { buildDocumentR2Key, deleteObject, getObjectBuffer, putObject } from "..
 import { artifactWhere } from "../artifacts/scope.js";
 import {
   buildReportPdf,
+  countPdfPages,
   type ReportCitation,
   type ReportRasterAsset,
 } from "./service.js";
@@ -12,6 +13,10 @@ import {
 export type ReportSource = {
   markdown: string;
   svgAssets?: string[];
+  svgAssetIds?: string[];
+  svgCaptions?: string[];
+  rasterAssetIds?: string[];
+  rasterCaptions?: string[];
   imageIds?: string[];
 };
 
@@ -25,8 +30,12 @@ export async function createReport(input: {
   title: string;
   markdown: string;
   svgAssets?: string[];
+  svgAssetIds?: string[];
+  svgCaptions?: string[];
   imageIds?: string[];
   rasterAssets?: ReportRasterAsset[];
+  rasterAssetIds?: string[];
+  rasterCaptions?: string[];
   citationMap?: ReportCitation[];
 }): Promise<{ documentId: string; filename: string }> {
   const session = await prisma.chatSession.findFirst({
@@ -39,7 +48,11 @@ export async function createReport(input: {
     title: input.title,
     markdown: input.markdown,
     svgAssets: input.svgAssets,
+    svgAssetIds: input.svgAssetIds,
+    svgCaptions: input.svgCaptions,
     rasterAssets: input.rasterAssets,
+    rasterAssetIds: input.rasterAssetIds,
+    rasterCaptions: input.rasterCaptions,
     citationMap: input.citationMap,
   });
   const filename = `${sanitizeTitle(input.title)}.pdf`;
@@ -49,6 +62,10 @@ export async function createReport(input: {
   const reportSource: ReportSource = {
     markdown: input.markdown,
     ...(input.svgAssets?.length ? { svgAssets: input.svgAssets } : {}),
+    ...(input.svgAssetIds?.length ? { svgAssetIds: input.svgAssetIds } : {}),
+    ...(input.svgCaptions?.length ? { svgCaptions: input.svgCaptions } : {}),
+    ...(input.rasterAssetIds?.length ? { rasterAssetIds: input.rasterAssetIds } : {}),
+    ...(input.rasterCaptions?.length ? { rasterCaptions: input.rasterCaptions } : {}),
     ...(input.imageIds?.length ? { imageIds: input.imageIds } : {}),
   };
   let doc: { id: string; filename: string };
@@ -63,7 +80,7 @@ export async function createReport(input: {
         mimeType: "application/pdf",
         sizeBytes: pdf.byteLength,
         r2Key,
-        pageCount: 1,
+        pageCount: countPdfPages(pdf),
         status: "ready",
         summary: input.title.slice(0, 500),
         firstPageSummary: input.title.slice(0, 500),
@@ -99,7 +116,11 @@ export async function editReport(input: {
   title?: string;
   markdown?: string;
   svgAssets?: string[];
+  svgAssetIds?: string[];
+  svgCaptions?: string[];
   imageIds?: string[];
+  rasterAssetIds?: string[];
+  rasterCaptions?: string[];
   citationMap?: ReportCitation[];
   /** Re-fetch stored raster assets (image store) for a full re-render. */
   fetchRasterAssets?: (imageIds: string[]) => Promise<ReportRasterAsset[]>;
@@ -119,6 +140,10 @@ export async function editReport(input: {
   const title = input.title?.trim() || existing.filename.replace(/\.pdf$/, "");
   const markdown = input.markdown ?? source?.markdown ?? "";
   const svgAssets = input.svgAssets ?? source?.svgAssets;
+  const svgAssetIds = input.svgAssetIds ?? source?.svgAssetIds;
+  const svgCaptions = input.svgCaptions ?? source?.svgCaptions;
+  const rasterAssetIds = input.rasterAssetIds ?? source?.rasterAssetIds;
+  const rasterCaptions = input.rasterCaptions ?? source?.rasterCaptions;
   const imageIds = input.imageIds ?? source?.imageIds ?? [];
   const rasterAssets =
     input.fetchRasterAssets && imageIds.length > 0
@@ -131,7 +156,11 @@ export async function editReport(input: {
     title,
     markdown,
     svgAssets,
+    svgAssetIds,
+    svgCaptions,
     rasterAssets,
+    rasterAssetIds,
+    rasterCaptions,
     citationMap: input.citationMap,
   });
   await putObject(existing.r2Key, Buffer.from(pdf), "application/pdf");
@@ -142,6 +171,10 @@ export async function editReport(input: {
   const reportSource: ReportSource = {
     markdown,
     ...(svgAssets?.length ? { svgAssets } : {}),
+    ...(svgAssetIds?.length ? { svgAssetIds } : {}),
+    ...(svgCaptions?.length ? { svgCaptions } : {}),
+    ...(rasterAssetIds?.length ? { rasterAssetIds } : {}),
+    ...(rasterCaptions?.length ? { rasterCaptions } : {}),
     ...(imageIds.length ? { imageIds } : {}),
   };
   const doc = await prisma.document.update({
@@ -149,6 +182,7 @@ export async function editReport(input: {
     data: {
       filename: nextFilename,
       sizeBytes: pdf.byteLength,
+      pageCount: countPdfPages(pdf),
       summary: title.slice(0, 500),
       firstPageSummary: title.slice(0, 500),
       reportSource,

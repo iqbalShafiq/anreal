@@ -1486,13 +1486,17 @@ export async function reconstructChatRunInput(input: {
     ...createReportTools({
       createReport: async ({ title, markdown, assetIds, citationMap }) => {
         const svgAssets: string[] = [];
+        const svgAssetIds: string[] = [];
+        const svgCaptions: string[] = [];
         const rasterAssets: { buffer: Uint8Array; mediaType: string }[] = [];
+        const rasterAssetIds: string[] = [];
+        const rasterCaptions: string[] = [];
         const imageIds: string[] = [];
         const rejected: string[] = [];
         for (const assetId of assetIds ?? []) {
           const image = await prisma.generatedImage.findFirst({
             where: { id: assetId, userId, projectId },
-            select: { r2Key: true, mediaType: true },
+            select: { r2Key: true, mediaType: true, caption: true },
           });
           if (!image || !isReportAssetMediaType(image.mediaType)) {
             rejected.push(assetId);
@@ -1501,8 +1505,12 @@ export async function reconstructChatRunInput(input: {
           const bytes = await getObjectBuffer(image.r2Key);
           if (image.mediaType === "image/svg+xml") {
             svgAssets.push(new TextDecoder().decode(bytes));
+            svgAssetIds.push(assetId);
+            svgCaptions.push(image.caption?.trim() ?? "");
           } else {
             rasterAssets.push({ buffer: new Uint8Array(bytes), mediaType: image.mediaType });
+            rasterAssetIds.push(assetId);
+            rasterCaptions.push(image.caption?.trim() ?? "");
           }
           imageIds.push(assetId);
         }
@@ -1517,7 +1525,11 @@ export async function reconstructChatRunInput(input: {
           title,
           markdown,
           ...(svgAssets.length > 0 ? { svgAssets } : {}),
+          ...(svgAssetIds.length > 0 ? { svgAssetIds } : {}),
+          ...(svgCaptions.length > 0 ? { svgCaptions } : {}),
           ...(rasterAssets.length > 0 ? { rasterAssets } : {}),
+          ...(rasterAssetIds.length > 0 ? { rasterAssetIds } : {}),
+          ...(rasterCaptions.length > 0 ? { rasterCaptions } : {}),
           ...(imageIds.length > 0 ? { imageIds } : {}),
           ...(citationMap ? { citationMap: citationMap as never } : {}),
         });
