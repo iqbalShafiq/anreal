@@ -108,9 +108,7 @@ describe("Deep Research server wiring", () => {
     expect(input).toMatch(
       /additionalTools: \[\.\.\.researchTools, \.\.\.researchBudget\.controlTools\(\)\]/,
     );
-    expect(input).toMatch(
-      /middlewares: \[researchBudget\.middleware\(\)\]/,
-    );
+    expect(input).toMatch(/middlewares: \[\s*researchBudget\.middleware\(\),/);
     expect(input).toContain("researchBudget.instructions");
     expect(input).toMatch(/waitBudget: researchBudget/);
   });

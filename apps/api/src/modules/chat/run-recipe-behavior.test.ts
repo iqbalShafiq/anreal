@@ -435,6 +435,7 @@ describe("run recipe reconstruction capability boundary", () => {
     ).toEqual(
       expect.arrayContaining([expect.stringMatching(/do not write user-facing prose/i)]),
     );
-    expect(researcherOptions?.middlewares).toHaveLength(1);
+    // Wait-budget middleware plus the vision bridge middleware.
+    expect(researcherOptions?.middlewares).toHaveLength(2);
   });
 });
