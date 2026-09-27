@@ -1,6 +1,7 @@
 import type { UIMessage, UIMessagePart } from "@anvia/client";
 import type { UseChatStatus } from "@anvia/react";
 import { MessagePrimitive, useMessage } from "@anvia/react-ui";
+import { FileText } from "lucide-react";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { MessageActionsBar } from "#/components/chat/message-actions-bar";
 import { ContextSnippetChip } from "#/components/chat/context-snippet-chip";
@@ -205,6 +206,32 @@ export const ChatMessageRow = memo(function ChatMessageRow({
     }).citations;
   }, [message.role, message.metadata, rawText]);
 
+  const userFileAttachments = useMemo(() => {
+    if (message.role !== "user") return [];
+    const list: { key: string; name: string }[] = [];
+    for (const part of message.parts) {
+      if (part.type === "attachment" && part.attachment?.type !== "image") {
+        list.push({
+          key: part.id,
+          name:
+            part.attachment.name?.trim() ||
+            (part.attachment.type === "document"
+              ? "Attached document"
+              : "Attached file"),
+        });
+      }
+    }
+    if (list.length > 0) return list;
+    // Memory-rebuilt messages no longer carry attachment parts; the file
+    // names ride along in metadata so the chips survive a reload.
+    for (const doc of readChatMessageMeta(message.metadata).attachedDocuments ??
+      []) {
+      const name = doc.name?.trim();
+      if (name) list.push({ key: `meta:${name}`, name });
+    }
+    return list;
+  }, [message.role, message.parts, message.metadata]);
+
   const row = (
     <div
       data-role={message.role}
@@ -218,6 +245,13 @@ export const ChatMessageRow = memo(function ChatMessageRow({
           intermediate ? "gap-1" : "gap-1.5"
         }`}
       >
+        {!isEditing && message.role === "user" && userFileAttachments.length > 0 ? (
+          <div className="flex max-w-full flex-wrap items-center justify-end gap-1.5">
+            {userFileAttachments.map((attachment) => (
+              <UserAttachmentChip key={attachment.key} name={attachment.name} />
+            ))}
+          </div>
+        ) : null}
         <MessagePrimitive.Content
           ref={contentRef}
           className="glass-bubble min-w-0 max-w-full text-sm leading-relaxed group-data-[role=user]:max-w-[min(100%,42rem)] group-data-[role=user]:rounded-2xl group-data-[role=user]:px-4 group-data-[role=user]:py-3 group-data-[role=user]:text-text group-data-[role=assistant]:w-full group-data-[role=assistant]:max-w-full group-data-[role=assistant]:text-text"
@@ -387,9 +421,11 @@ export function isRenderablePart(part: MessagePart, role: UIMessage["role"]): bo
     part.type === "error"
   ) return true;
   if (part.type === "attachment") {
-    // Image attachments (active image context) render in the user bubble;
-    // file/document attachments retain a bounded visible row for every role.
-    return part.attachment?.type === "image" ? role === "user" : true;
+    // Image attachments (active image context) render inside the user bubble;
+    // file attachments render as chips above it for the user role, and keep a
+    // bounded visible row for every other role.
+    if (part.attachment?.type === "image") return role === "user";
+    return role !== "user";
   }
   return false;
 }
@@ -405,6 +441,19 @@ const PARTS_STACK_CLASS = [
   "[&>[data-part=text]+[data-part=reasoning]]:mt-4",
   "[&>[data-part=text]+[data-part=tool]]:mt-4",
 ].join(" ");
+
+/** Composer-style chip for a file attachment, shown above the user bubble. */
+function UserAttachmentChip({ name }: { name: string }) {
+  return (
+    <span
+      title={name}
+      className="glass-pane inline-flex max-w-[min(100%,20rem)] items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium text-text"
+    >
+      <FileText className="size-4 shrink-0 text-accent" strokeWidth={1.75} />
+      <span className="min-w-0 truncate">{name}</span>
+    </span>
+  );
+}
 
 function ChatMessageParts({
   chatStatus,
