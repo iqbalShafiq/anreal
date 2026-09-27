@@ -561,7 +561,7 @@ body {
 
 ::view-transition-old(root),
 ::view-transition-new(root) {
-  animation-duration: 320ms;
+  animation-duration: 360ms;
   animation-timing-function: var(--ease-out-premium);
 }
 
@@ -570,12 +570,12 @@ body {
   272px). Group morph interpolates that width for a continuous handoff.
 */
 ::view-transition-group(app-sidebar) {
-  animation-duration: 420ms;
+  animation-duration: 520ms;
   animation-timing-function: var(--ease-out-premium);
 }
 
 ::view-transition-group(app-topbar) {
-  animation-duration: 360ms;
+  animation-duration: 460ms;
   animation-timing-function: var(--ease-out-premium);
 }
 
@@ -588,12 +588,51 @@ body {
   overflow: clip;
 }
 
+/*
+  Sidebar content drifts with the morph instead of crossfading in place:
+  the old pane exits toward -x while the new pane settles in from +x.
+  Transform + opacity only, so the whole handoff stays on the compositor.
+*/
+::view-transition-old(app-sidebar) {
+  animation: vt-sidebar-out 520ms var(--ease-out-premium);
+}
+
+::view-transition-new(app-sidebar) {
+  animation: vt-sidebar-in 520ms var(--ease-out-premium);
+}
+
+@keyframes vt-sidebar-out {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(-14px);
+  }
+}
+
+@keyframes vt-sidebar-in {
+  from {
+    opacity: 0;
+    transform: translateX(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
 /* Prefer reduced motion: skip fancy morph, keep instant swap */
 @media (prefers-reduced-motion: reduce) {
   ::view-transition-old(root),
   ::view-transition-new(root),
   ::view-transition-group(app-sidebar),
-  ::view-transition-group(app-topbar) {
+  ::view-transition-group(app-topbar),
+  ::view-transition-old(app-sidebar),
+  ::view-transition-new(app-sidebar),
+  ::view-transition-old(app-topbar),
+  ::view-transition-new(app-topbar) {
     animation-duration: 0.01ms !important;
   }
 }

@@ -101,6 +101,10 @@ export function WorkspaceShell({
   const activeSessionId = routeSessionId ?? "";
 
   const handleAuthFailure = useCallback(() => {
+    // Already on an auth page (e.g. a stray 401 racing an intentional
+    // logout): navigating again would nest ?redirect= params and replay
+    // the transition.
+    if (pathname === "/login" || pathname === "/register") return;
     void navigate({
       to: "/login",
       search: { redirect: `${pathname}${location.searchStr}` },
