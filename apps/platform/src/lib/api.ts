@@ -694,6 +694,8 @@ export interface SessionDocument {
   origin?: string | null;
   parentDocumentId?: string | null;
   originUrl?: string | null;
+  /** `report` documents render through the PDF report preview. */
+  kind?: string | null;
 }
 
 export type UserLibraryDocument = {

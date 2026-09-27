@@ -491,6 +491,7 @@ export async function resolveActiveDocuments(input: {
           origin: true,
           parentDocumentId: true,
           originUrl: true,
+          kind: true,
         },
       },
     },

@@ -2750,7 +2750,7 @@ export function ChatSession({
 
   return (
     <ChatProvider<ChatClientMetadata, ChatDataMap> controller={chat}>
-      <CitationSessionProvider sessionDocuments={sessionDocuments}>
+      <CitationSessionProvider sessionDocuments={sessionDocuments} sessionId={sessionId}>
       <ToolWaitProgressProvider value={toolWait}>
       <ChartRegistryProvider messages={chat.messages}>
       {/*
@@ -2993,7 +2993,7 @@ export function ChatSession({
                       className="mb-2 flex items-center gap-2 rounded-xl border border-accent/25 bg-accent/[0.07] px-3 py-2 animate-fade-in"
                     >
                       <p className="min-w-0 flex-1 truncate text-[11px] text-text">
-                        Agent menunjuk {artifactFocus.artifactType}
+                        Agent focused {artifactFocus.artifactType}
                         {artifactFocus.label ? `: ${artifactFocus.label}` : ""}
                       </p>
                       <button

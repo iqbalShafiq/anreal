@@ -6,6 +6,8 @@ export type PreviewableDocument = {
   pageCount?: number;
   sizeBytes?: number;
   firstPageSummary?: string;
+  /** `report` documents render through the PDF report preview. */
+  kind?: string;
 };
 
 export type DocumentPreviewOpenInput = {
@@ -16,6 +18,8 @@ export type DocumentPreviewOpenInput = {
   sizeBytes?: number;
   pageCount?: number;
   firstPageSummary?: string;
+  /** `report` documents render through the PDF report preview. */
+  kind?: string;
 };
 
 /** Normalize filenames for fuzzy match (case / separators / extension). */
