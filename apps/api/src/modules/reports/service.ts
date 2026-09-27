@@ -250,6 +250,20 @@ function stripInlineImages(text: string): string {
   return text.replace(/!\[([^\]]*)\]\([^)]+\)/g, "$1").trim();
 }
 
+/** Raw HTML (page-break divs, stray <br>, spans) never belongs in the PDF. */
+export function stripRawHtml(text: string): string {
+  return text
+    .replace(/<br\s*\/?>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+/** Clean a markdown line before inline parsing / block detection. */
+function sanitizeLine(text: string): string {
+  return stripRawHtml(stripInlineImages(text));
+}
+
 /** Parse the report markdown into renderable blocks. */
 function parseBlocks(markdown: string): Block[] {
   const lines = markdown.split("\n");
@@ -258,21 +272,27 @@ function parseBlocks(markdown: string): Block[] {
 
   const flushParagraph = () => {
     if (paragraph.length > 0) {
-      blocks.push({ kind: "paragraph", text: stripInlineImages(paragraph.join(" ")) });
+      blocks.push({ kind: "paragraph", text: sanitizeLine(paragraph.join(" ")) });
       paragraph = [];
     }
   };
 
   for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i]!.trim();
-    if (!line) {
+    const raw = lines[i]!.trim();
+    if (!raw) {
       flushParagraph();
       continue;
     }
-    const figure = /^!\[([^\]]*)\]\(([^)]+)\)\s*$/.exec(line);
+    const figure = /^!\[([^\]]*)\]\(([^)]+)\)\s*$/.exec(raw);
     if (figure) {
       flushParagraph();
       blocks.push({ kind: "figure", alt: figure[1]!.trim(), target: figure[2]!.trim() });
+      continue;
+    }
+    // A line that was nothing but HTML (page-break divs, stray tags) vanishes.
+    const line = sanitizeLine(raw);
+    if (!line) {
+      flushParagraph();
       continue;
     }
     if (/^(-{3,}|\*{3,}|_{3,})$/.test(line)) {
@@ -299,6 +319,18 @@ function parseBlocks(markdown: string): Block[] {
         i += 1;
       }
       i -= 1;
+      // Models sometimes repeat the header row inside the body; drop the echo
+      // (bold/italic/code decorations must not defeat the comparison).
+      if (rows.length > 1) {
+        const plain = (cell: string) =>
+          cell.replace(/[*_`]/g, "").trim().replace(/\s+/g, " ").toLowerCase();
+        const header = rows[0]!.map(plain).join("|");
+        const deduped = rows.filter(
+          (row, index) => index === 0 || row.map(plain).join("|") !== header,
+        );
+        rows.length = 0;
+        rows.push(...deduped);
+      }
       if (rows.length > 0) blocks.push({ kind: "table", rows });
       continue;
     }
@@ -306,7 +338,7 @@ function parseBlocks(markdown: string): Block[] {
       flushParagraph();
       const items: string[] = [];
       while (i < lines.length && /^[-*+]\s+/.test(lines[i]!.trim())) {
-        items.push(stripInlineImages(lines[i]!.trim().replace(/^[-*+]\s+/, "")));
+        items.push(sanitizeLine(lines[i]!.trim().replace(/^[-*+]\s+/, "")));
         i += 1;
       }
       i -= 1;
@@ -317,14 +349,14 @@ function parseBlocks(markdown: string): Block[] {
       flushParagraph();
       const items: string[] = [];
       while (i < lines.length && /^\d+[.)]\s+/.test(lines[i]!.trim())) {
-        items.push(stripInlineImages(lines[i]!.trim().replace(/^\d+[.)]\s+/, "")));
+        items.push(sanitizeLine(lines[i]!.trim().replace(/^\d+[.)]\s+/, "")));
         i += 1;
       }
       i -= 1;
       blocks.push({ kind: "numbers", items });
       continue;
     }
-    paragraph.push(line);
+    paragraph.push(raw);
   }
   flushParagraph();
   return blocks;
@@ -357,6 +389,10 @@ function renderParagraph(doc: PdfDoc, text: string): void {
 
 function renderListItems(doc: PdfDoc, items: string[], numbered: boolean): void {
   const textX = MARGIN.left + 16;
+  // Keep short lists intact so a stray bullet never lands alone on a page.
+  if (items.length > 0 && items.length <= 5) {
+    ensureSpace(doc, Math.min(items.length * 36 + 8, 220));
+  }
   items.forEach((item, index) => {
     ensureSpace(doc, TYPE.body + BODY_LINE_GAP + 8);
     const lineY = doc.y;
@@ -436,7 +472,9 @@ function renderTable(doc: PdfDoc, rows: string[][]): void {
     if (doc.y + needed > CONTENT_BOTTOM) {
       doc.addPage();
       resetCursor(doc);
-      drawRow(rows[0] ?? [], { header: true }); // repeat the header on every page
+      // Repeat the header only when a *data* row breaks; drawing it here for
+      // the header row itself would duplicate it.
+      if (index > 0) drawRow(rows[0] ?? [], { header: true });
     }
     drawRow(cells, { header: index === 0 });
   });

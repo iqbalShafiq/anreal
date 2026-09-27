@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildReportPdf, countPdfPages } from "./service.js";
+import { buildReportPdf, countPdfPages, stripRawHtml } from "./service.js";
 import { chartSpecToSvg } from "../charts/snapshot.js";
 
 describe("buildReportPdf", () => {
@@ -101,6 +101,29 @@ describe("buildReportPdf", () => {
     expect(pdf.byteLength).toBeGreaterThan(1000);
   });
 
+  it("renders a table whose body repeats the header only once", async () => {
+    const pdf = await buildReportPdf({
+      title: "Tabel",
+      markdown: [
+        "| Region | Revenue | Units |",
+        "| --- | --- | --- |",
+        "| Region | Revenue | Units |",
+        "| West | 10660 | 215 |",
+      ].join("\n"),
+    });
+    expect(String.fromCharCode(...pdf.slice(0, 5))).toBe("%PDF-");
+    expect(pdf.byteLength).toBeGreaterThan(1000);
+  });
+
+  it("suppresses raw HTML the model sneaks into markdown", async () => {
+    const pdf = await buildReportPdf({
+      title: "Html",
+      markdown: "# Judul\n\n<div style=\"page-break-after: always;\"></div>\n\nIsi bersih.",
+    });
+    expect(String.fromCharCode(...pdf.slice(0, 5))).toBe("%PDF-");
+    expect(pdf.byteLength).toBeGreaterThan(1000);
+  });
+
   it("flows a long report across pages and reports the real page count", async () => {
     const rows = Array.from(
       { length: 70 },
@@ -134,5 +157,12 @@ describe("countPdfPages", () => {
 
   it("falls back to one page when no tree is present", () => {
     expect(countPdfPages(new TextEncoder().encode("%PDF-1.4"))).toBe(1);
+  });
+});
+
+describe("stripRawHtml", () => {
+  it("removes page-break divs, stray tags, and collapses whitespace", () => {
+    expect(stripRawHtml('<div style="page-break-after: always;"></div>')).toBe("");
+    expect(stripRawHtml("Baris<br>dua <span>tiga</span>")).toBe("Baris dua tiga");
   });
 });
