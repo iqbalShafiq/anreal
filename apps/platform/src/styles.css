@@ -307,13 +307,22 @@ body {
   the floating shape — the bar itself stays borderless.
 */
 .glass-composer,
-.glass {
+.glass,
+.glass-chip {
   background: rgb(5 5 5 / 0.82);
   background-clip: padding-box;
   border: 1px solid rgb(255 255 255 / 0.1);
   box-shadow: none;
   -webkit-backdrop-filter: blur(24px) saturate(1.2);
   backdrop-filter: blur(24px) saturate(1.2);
+}
+
+/*
+  Status chip (artifact focus) — the same frost as the composer, with an
+  accent hairline so the status signal survives the near-black base.
+*/
+.glass-chip {
+  border-color: rgb(232 163 23 / 0.22);
 }
 
 .glass-composer {

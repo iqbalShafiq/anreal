@@ -3097,7 +3097,7 @@ export function ChatSession({
                   {artifactFocus ? (
                     <div
                       role="status"
-                      className="mb-2 flex items-center gap-2 rounded-xl border border-accent/25 bg-accent/[0.07] px-3 py-2 animate-fade-in"
+                      className="glass glass-chip mb-2 flex items-center gap-2 rounded-xl px-3 py-2 animate-fade-in"
                     >
                       <p className="min-w-0 flex-1 truncate text-[11px] text-text">
                         Agent focused {artifactFocus.artifactType}
