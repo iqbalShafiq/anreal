@@ -144,7 +144,11 @@ describe("finalizeInterruptedTools", () => {
 });
 
 describe("settleStoppedRunTools", () => {
-  it("keeps a pending approval card open while settling everything else", () => {
+  it("leaves every open card untouched while an approval is pending", () => {
+    // A suspended approval also ends its stream, so nothing in the turn has
+    // settled yet: the approval's card stays open, and so do the siblings the
+    // suspension cancelled — finalizing them would show "Stopped" beside the
+    // prompt that caused the stop.
     const messages: UIMessage[] = [
       assistant([
         tool("input-available"),
@@ -161,8 +165,8 @@ describe("settleStoppedRunTools", () => {
     );
     // The approval-gated tool keeps its in-flight state...
     expect(parts[0]?.state).toBe("input-available");
-    // ...while the unrelated unfinished tool is still finalized.
-    expect(parts[1]?.state).toBe("error");
+    // ...and its cancelled sibling is left open too, not shown as stopped.
+    expect(parts[1]?.state).toBe("input-available");
   });
 
   it("still settles a finished call of a tool that later waits for approval", () => {
@@ -222,10 +226,15 @@ describe("settleStoppedRunTools", () => {
 });
 
 describe("stillOpenToolCards", () => {
-  it("reports an unfinished card that no approval explains", () => {
-    const messages: UIMessage[] = [assistant([tool("input-available")])];
+  it("reports an unfinished card only when no suspension explains it", () => {
+    const messages: UIMessage[] = [
+      assistant([tool("input-available", { toolName: "web_search" })]),
+    ];
+    // No approval pending: the open card is unexplained, reconcile from memory.
     expect(stillOpenToolCards(messages)).toBe(true);
-    expect(stillOpenToolCards(messages, ["generate_image"])).toBe(false);
+    // Any pending approval means the run is suspended: every open card,
+    // including cancelled siblings, is an expected shape.
+    expect(stillOpenToolCards(messages, ["web_fetch"])).toBe(false);
   });
 
   it("reports nothing when every card settled", () => {

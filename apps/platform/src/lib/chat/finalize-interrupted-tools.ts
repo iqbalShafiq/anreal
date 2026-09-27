@@ -70,12 +70,19 @@ export function finalizeInterruptedTools<
 }
 
 /**
- * Settle the tool cards of a run that has ended, except the ones still waiting
- * for the user's decision.
+ * Settle the tool cards of a run that has ended, unless the run is only
+ * suspended waiting on the user.
+ *
+ * A pending approval ends the stream without ending the turn: answering the
+ * decision resumes it as a new attempt. While that decision is still owed,
+ * every open card is left exactly as it is — including siblings of the
+ * approval that the suspension cancelled, which used to settle as "Stopped
+ * before this tool finished." right beside the prompt that caused the stop.
+ * Once the decision arrives those cards are either superseded by the resumed
+ * attempt or settled when the run truly ends.
  *
  * Run this instead of calling `finalizeInterruptedTools` directly whenever a
- * pending approval may exist, so an approval prompt never sits above an error
- * card for the same tool.
+ * pending approval may exist.
  */
 export type SettleStoppedRunToolsOptions = {
   /** Approvals still awaiting a decision; their cards stay open. */
@@ -85,14 +92,12 @@ export type SettleStoppedRunToolsOptions = {
 /**
  * Settle the tool cards of a run that has ended.
  *
- * An unfinished card is not stopped work when either:
- * - its approval is still pending, because that prompt is still open; or
- * - the same tool produced a later part in the same transcript, because then
- *   the card was superseded: answering an approval resumes the run as a new
- *   attempt, the tool runs again under a new call id, and its result lands on
- *   the new attempt rather than on the card that asked for approval.
- *
- * Anything else that never finished is genuinely interrupted.
+ * With no approval pending, an unfinished card is not stopped work when the
+ * same tool produced a later part in the same transcript, because then the
+ * card was superseded: answering an approval resumes the run as a new attempt,
+ * the tool runs again under a new call id, and its result lands on the new
+ * attempt rather than on the card that asked for approval. Anything else that
+ * never finished is genuinely interrupted.
  */
 export function settleStoppedRunTools<
   Metadata extends ClientMetadata = ClientMetadata,
@@ -107,20 +112,21 @@ export function settleStoppedRunTools<
     messages as UIMessage<ClientMetadata, ClientDataMap>[],
     keep,
   ) as UIMessage<Metadata, Data>[];
-  const finalizeOptions = keep.size > 0 ? { keepPendingApprovalTools: keep } : {};
-  return finalizeInterruptedTools(
-    reconcileWaitedTools(cleaned),
-    reason ?? STOPPED_TOOL_MESSAGE,
-    finalizeOptions,
-  );
+  const reconciled = reconcileWaitedTools(cleaned);
+  if (keep.size > 0) {
+    return reconciled;
+  }
+  return finalizeInterruptedTools(reconciled, reason ?? STOPPED_TOOL_MESSAGE);
 }
 
 /**
- * Whether any tool card is still unfinished for reasons other than an approval
- * that is currently waiting on the user.
+ * Whether any tool card is still unfinished for reasons other than a run that
+ * is suspended waiting on the user.
  *
- * Callers use this after a run ends to decide whether the browser's view needs
- * to be reconciled from server memory.
+ * A pending approval leaves its own card open, and the suspension may have
+ * cancelled siblings that stay open with it; those are expected shapes, not
+ * lost work. Callers use this after a run ends to decide whether the browser's
+ * view needs to be reconciled from server memory.
  */
 export function stillOpenToolCards<
   Metadata extends ClientMetadata = ClientMetadata,
@@ -129,15 +135,18 @@ export function stillOpenToolCards<
   messages: readonly UIMessage<Metadata, Data>[],
   pendingApprovalToolNames: Iterable<string> = [],
 ): boolean {
-  const keep = new Set(pendingApprovalToolNames);
+  const approvals = [...pendingApprovalToolNames];
+  if (approvals.length > 0) {
+    return false;
+  }
   return messages.some(
     (message) =>
       message.role === "assistant" &&
       message.parts.some(
         (part) =>
           part.type === "tool" &&
-          !keep.has(part.toolName) &&
-          (part.state === "input-available" || part.state === "input-streaming"),
+          (part.state === "input-available" ||
+            part.state === "input-streaming"),
       ),
   );
 }
