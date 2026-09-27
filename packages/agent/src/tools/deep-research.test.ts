@@ -372,9 +372,10 @@ describe("buildDeepResearchPrompt", () => {
   it("requires a bounded, source-grounded report", () => {
     const prompt = buildDeepResearchPrompt(args.prompt, 4);
     expect(prompt).toContain(args.prompt);
-    expect(prompt).toContain("Plan -> search documents/web -> analyze -> synthesize -> verify");
-    expect(prompt).toContain("First, produce a numbered research plan");
-    expect(prompt).toContain("Do not retrieve evidence before the plan");
+    expect(prompt).toContain("plan -> search documents/web -> analyze -> synthesize -> verify");
+    expect(prompt).toContain("Open with a brief numbered research plan");
+    expect(prompt).toContain("never end the run on it");
+    expect(prompt).toContain("return the final cited report as your last message");
     expect(prompt).toContain("Before finalizing, verify each material claim");
     expect(prompt).toContain("Do not make more than 4 search or fetch calls");
     expect(prompt).toContain("[[cite:N]]");
