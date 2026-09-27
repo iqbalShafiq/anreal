@@ -64,7 +64,7 @@ const renderedChartSchema = z.discriminatedUnion("kind", [
 const createPdfReportSpec = {
   name: "create_pdf_report",
   description:
-    "Build a PDF report from markdown plus chart/image asset ids (SVG chart snapshots, PNG, or JPEG) and a citation map. Saves as a derived report document in scope.",
+    "Build a PDF report from markdown plus chart/image asset ids (SVG chart snapshots from snapshot_chart, PNG, or JPEG) and a citation map. When the report should show charts, pass every snapshot_chart imageId in assetIds so the charts render in the PDF; markdown alone is text-only. Saves as a derived report document in scope.",
   inputSchema: z.object({
     title: z.string().min(1).max(120),
     markdown: z.string().min(1).max(100_000),

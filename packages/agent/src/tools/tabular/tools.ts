@@ -57,7 +57,7 @@ const sourceSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("upload"), documentId: z.string().min(1), sheet: z.string().optional() }),
   z.object({ type: z.literal("document_table"), documentId: z.string().min(1), pageIndex: z.number().int().min(0), tableIndex: z.number().int().min(0) }),
 ]) as z.ZodType<DatasetRef>;
-const operationSchema = z.discriminatedUnion("op", [
+const strictOperationSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("profile"), column: z.string().optional() }),
   z.object({
     op: z.literal("aggregate"),
@@ -87,7 +87,34 @@ const operationSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("anova"), column: z.string(), groupBy: z.string() }),
   z.object({ op: z.literal("outliers"), column: z.string(), method: z.enum(["iqr", "zscore"]).optional(), threshold: z.number().finite().optional() }),
   z.object({ op: z.literal("crosstab"), x: z.string(), y: z.string(), metric: z.enum(["count", "sum", "mean"]).optional(), valueColumn: z.string().optional() }),
-]) as z.ZodType<AnalysisOperation>;
+]);
+
+/**
+ * Near-miss shapes models occasionally emit: aggregate or correlation
+ * arguments without the required `op` discriminator. Accepting them keeps a
+ * formatting slip from surfacing as a tool error in the transcript; the op is
+ * inferred before execution (see withInferredAnalysisOp).
+ */
+const tolerantOperationSchema = z.union([
+  z.object({
+    groupBy: z.array(z.string()),
+    metrics: z.array(
+      z.object({
+        column: z.string(),
+        fn: z.enum(["sum", "mean", "count", "min", "max", "median", "count_distinct", "stddev"]),
+      }),
+    ),
+  }),
+  z.object({ x: z.string(), y: z.string() }),
+  z
+    .string()
+    .min(1)
+    .describe("The same analysis operation object, JSON-encoded as a string"),
+]);
+
+const operationSchema = z
+  .union([strictOperationSchema, tolerantOperationSchema])
+  .describe("Analysis operation — always include `op`") as unknown as z.ZodType<AnalysisOperation>;
 const jsonOutputSchema = z.json();
 
 const saveAsSchema = z.object({
@@ -153,6 +180,37 @@ function validateSaveAsName(name: string): string {
   const clean = name.trim();
   if (!clean) throw new Error("saveAs.name must be non-empty.");
   return clean;
+}
+
+/** Fill in a missing `op` and decode near-miss shapes the models emit. */
+function withInferredAnalysisOp(operation: unknown): AnalysisOperation {
+  if (typeof operation === "string") {
+    try {
+      return withInferredAnalysisOp(JSON.parse(operation));
+    } catch {
+      return operation as unknown as AnalysisOperation;
+    }
+  }
+  const raw = operation as Record<string, unknown> | null;
+  if (raw && typeof raw === "object" && typeof raw.op === "string" && raw.op.trim().startsWith("{")) {
+    try {
+      const inner = JSON.parse(raw.op) as Record<string, unknown>;
+      const merged: Record<string, unknown> = { ...inner, ...raw };
+      if (typeof inner.op === "string") merged.op = inner.op;
+      return withInferredAnalysisOp(merged);
+    } catch {
+      /* fall through */
+    }
+  }
+  if (raw && typeof raw === "object" && raw.op === undefined) {
+    if (Array.isArray(raw.groupBy)) {
+      return { ...raw, op: "aggregate" } as unknown as AnalysisOperation;
+    }
+    if (typeof raw.x === "string" && typeof raw.y === "string") {
+      return { ...raw, op: "correlation" } as unknown as AnalysisOperation;
+    }
+  }
+  return operation as AnalysisOperation;
 }
 
 function sheetFromAnalysisResult(name: string, result: { columns: TabularColumn[]; rows: (string | number | boolean | null)[][] }): TabularSheet {
@@ -302,7 +360,7 @@ export function createTabularAnalysisTools(deps: TabularToolDeps): AnyTool[] {
     outputSchema: jsonOutputSchema,
     execute: async ({ source, operation, saveAs }, context) => {
       const sheet = await resolver.resolveSheet(source);
-      const analysis = runAnalysis(sheet, operation, resolvedLimits);
+      const analysis = runAnalysis(sheet, withInferredAnalysisOp(operation), resolvedLimits);
       if (!saveAs) return jsonOutputSchema.parse(analysis);
       if (!analysis.result) {
         throw new Error("This operation returns no table to save. Use an operation with a result (aggregate, filter, sort, top_n) or save a SQL query instead.");
