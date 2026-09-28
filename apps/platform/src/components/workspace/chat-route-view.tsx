@@ -15,6 +15,7 @@ import {
   applySiteVersionEvent,
   SiteBuildPanel,
   stableSiteUrls,
+  type SiteBuildPhaseName,
   type SiteBuildState,
   type SiteVersionEntry,
 } from "#/components/sites/site-build-panel";
@@ -144,7 +145,7 @@ export function ChatRouteView(input: {
     if (!response.ok) return;
     setSiteBuild((prev) =>
       prev?.siteId === siteId
-        ? { ...prev, phase: "starting", message: "Mengulang build." }
+        ? { ...prev, phase: "starting", message: "Retrying the build." }
         : prev,
     );
   }, []);
@@ -190,32 +191,37 @@ export function ChatRouteView(input: {
       }),
     );
     if (latest.status === "ready" || latest.status === "failed") {
-      setSiteBuild((prev) =>
-        prev?.siteId === latest.siteId
-          ? prev
-          : {
-              siteId: latest.siteId,
-              version: latest.version,
-              phase: latest.status === "ready" ? "ready" : "failed",
-              message: latest.status === "ready" ? "Situs siap diunduh." : "Build gagal.",
-              previewUrl: latest.previewUrl,
-              downloadUrl: latest.downloadUrl,
-            },
-      );
+      const phase: SiteBuildPhaseName = latest.status === "ready" ? "ready" : "failed";
+      setSiteBuild((prev) => {
+        if (prev && prev.siteId === latest.siteId) {
+          if (prev.version > latest.version) return prev; // stale response
+          if (prev.version === latest.version && prev.phase === phase) return prev;
+        }
+        return {
+          siteId: latest.siteId,
+          version: latest.version,
+          phase,
+          message: latest.status === "ready" ? "Site ready to download." : "Build failed.",
+          previewUrl: latest.previewUrl,
+          downloadUrl: latest.downloadUrl,
+        };
+      });
     } else {
-      setSiteBuild((prev) =>
-        prev?.siteId === latest.siteId
-          ? prev
-          : {
-              siteId: latest.siteId,
-              version: latest.version,
-              phase: latest.status === "queued" ? "starting" : "building",
-              message:
-                latest.status === "queued" ? "Menunggu antrean build." : "Membangun situs.",
-              previewUrl: null,
-              downloadUrl: null,
-            },
-      );
+      setSiteBuild((prev) => {
+        if (prev && prev.siteId === latest.siteId) {
+          if (prev.version > latest.version) return prev; // stale response
+          if (prev.version === latest.version) return prev; // live events are ahead
+        }
+        return {
+          siteId: latest.siteId,
+          version: latest.version,
+          phase: latest.status === "queued" ? "starting" : "building",
+          message:
+            latest.status === "queued" ? "Waiting in the build queue." : "Building the site.",
+          previewUrl: null,
+          downloadUrl: null,
+        };
+      });
     }
   }, []);
 
@@ -224,6 +230,20 @@ export function ChatRouteView(input: {
     setSiteVersions([]);
     void refreshSiteVersions(input.sessionId);
   }, [input.sessionId, refreshSiteVersions]);
+
+  /**
+   * The build finishes after the run's stream has closed, so the ready event
+   * never reaches the client. Poll while the panel waits on a build so the
+   * preview button appears without a page reload.
+   */
+  useEffect(() => {
+    if (!siteBuild) return;
+    if (siteBuild.phase === "ready" || siteBuild.phase === "failed") return;
+    const timer = window.setInterval(() => {
+      void refreshSiteVersions(input.sessionId);
+    }, 3500);
+    return () => window.clearInterval(timer);
+  }, [siteBuild, input.sessionId, refreshSiteVersions]);
 
   if (route.status === "missing") {
     return <SessionNotFound projectId={input.projectId} />;

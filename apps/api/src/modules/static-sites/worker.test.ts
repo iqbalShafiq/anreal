@@ -504,7 +504,7 @@ describe("markSiteBuildFailed", () => {
       {
         sessionId: "session-9",
         appEvent: {
-          type: "site_build_progress", siteId, version: 2, phase: "failed", message: "Build gagal.",
+          type: "site_build_progress", siteId, version: 2, phase: "failed", message: "Build failed.",
         },
       },
     ]);

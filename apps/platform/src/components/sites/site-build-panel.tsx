@@ -8,21 +8,21 @@ import { API_BASE } from "#/lib/api";
 import type { SiteBuildProgress, SiteBuildReady } from "../../lib/chat/client-data.js";
 
 export const SITE_BUILD_PHASES = [
-  { phase: "starting", label: "Menyiapkan" },
-  { phase: "planning", label: "Menyusun brief" },
-  { phase: "building", label: "Membangun halaman" },
-  { phase: "bundling", label: "Build production" },
-  { phase: "preview", label: "Menyiapkan pratinjau" },
-  { phase: "ready", label: "Siap" },
+  { phase: "starting", label: "Preparing" },
+  { phase: "planning", label: "Drafting the brief" },
+  { phase: "building", label: "Building pages" },
+  { phase: "bundling", label: "Production build" },
+  { phase: "preview", label: "Preparing preview" },
+  { phase: "ready", label: "Ready" },
 ] as const;
 
 export type SiteBuildPhaseName = (typeof SITE_BUILD_PHASES)[number]["phase"] | "failed";
 
 const VERSION_STATUS_LABELS: Record<SiteVersionEntry["status"], string> = {
-  queued: "menunggu",
-  running: "berjalan",
-  ready: "siap",
-  failed: "gagal",
+  queued: "waiting",
+  running: "building",
+  ready: "ready",
+  failed: "failed",
 };
 
 export type SiteBuildState = {
@@ -71,7 +71,7 @@ export function applySiteBuildEvent(
     siteId: event.data.siteId,
     version: event.data.version,
     phase: "ready",
-    message: "Situs siap diunduh.",
+    message: "Site ready to download.",
     previewUrl: event.data.previewUrl,
     downloadUrl: event.data.downloadUrl,
   };
@@ -156,12 +156,12 @@ export function SiteBuildPanel({
   const canRollback = selectedEntry?.status === "ready" && !selectedEntry.stable;
   const versionOptions: SelectOption[] = sortedVersions.map((entry) => ({
     value: String(entry.version),
-    label: `v${entry.version}${entry.stable ? " (stabil)" : entry.status === "ready" ? "" : ` • ${VERSION_STATUS_LABELS[entry.status]}`}`,
+    label: `v${entry.version}${entry.stable ? " (stable)" : entry.status === "ready" ? "" : ` • ${VERSION_STATUS_LABELS[entry.status]}`}`,
   }));
   const versionControls = sortedVersions.length > 1 ? (
     <>
       <Select
-        ariaLabel="Versi"
+        ariaLabel="Version"
         value={effectiveVersion !== undefined ? String(effectiveVersion) : ""}
         onChange={(optionValue) => setSelectedVersion(Number(optionValue))}
         options={versionOptions}
@@ -170,7 +170,7 @@ export function SiteBuildPanel({
       <button
         type="button"
         disabled={!canRollback}
-        title={canRollback ? `Kembalikan ke v${effectiveVersion}` : "Pilih versi ready yang bukan stabil"}
+        title={canRollback ? `Roll back to v${effectiveVersion}` : "Pick a ready version that is not stable"}
         onClick={() => {
           if (effectiveVersion !== undefined) onRollback(build.siteId, effectiveVersion);
         }}
@@ -205,7 +205,7 @@ export function SiteBuildPanel({
           onClick={() => setOpen((current) => !current)}
           className="inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-lg px-1.5 py-1 text-[10px] font-medium text-text-muted transition duration-150 ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-white/[0.06] hover:text-text active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-ring"
         >
-          <span>{open ? "Sembunyikan" : "Tampilkan"}</span>
+          <span>{open ? "Hide" : "Show"}</span>
           <ChevronDown
             className={`size-3 transition-transform duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none ${
               open ? "rotate-180" : ""
@@ -255,14 +255,14 @@ export function SiteBuildPanel({
               >
                 <Expand className="size-3.5 shrink-0 text-text-muted" strokeWidth={2} aria-hidden="true" />
                 <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-text">
-                  Lihat pratinjau
+                  View preview
                 </span>
               </button>
               {versionControls}
             </div>
           ) : (
             <>
-              <div role="status" className="skeleton-shimmer rounded-lg px-3 py-2 text-[11px] text-text-muted">Pratinjau segera hadir.</div>
+              <div role="status" className="skeleton-shimmer rounded-lg px-3 py-2 text-[11px] text-text-muted">Preview coming up shortly.</div>
               {sortedVersions.length > 1 ? (
                 <div className="flex items-center gap-2">
                   {versionControls}
@@ -278,12 +278,12 @@ export function SiteBuildPanel({
                 className={downloadButtonClass}
               >
                 <Download className="size-3.5" strokeWidth={2} aria-hidden="true" />
-                Unduh zip
+                Download zip
               </a>
             ) : null}
             {build.phase === "failed" ? (
               <Button size="sm" variant="secondary" onClick={() => onRetry(build.siteId)}>
-                Coba lagi
+                Try again
               </Button>
             ) : null}
           </div>
@@ -292,13 +292,13 @@ export function SiteBuildPanel({
       <DialogShell
         open={previewOpen}
         onClose={() => setPreviewOpen(false)}
-        title={`Pratinjau v${build.version}`}
+        title={`Preview v${build.version}`}
         size="xl"
         footer={
           downloadUrl ? (
             <a href={downloadUrl} download className={downloadButtonClass}>
               <Download className="size-3.5" strokeWidth={2} aria-hidden="true" />
-              Unduh zip
+              Download zip
             </a>
           ) : undefined
         }

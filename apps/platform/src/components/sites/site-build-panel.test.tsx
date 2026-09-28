@@ -158,16 +158,16 @@ describe("SiteBuildPanel", () => {
       />,
     );
     expect(screen.getByText("v2 · Build production.")).toBeTruthy();
-    expect(screen.getByText("Menyiapkan").getAttribute("data-state")).toBe("done");
-    expect(screen.getByText("Build production").getAttribute("aria-current")).toBe("step");
-    expect(screen.getByText("Siap").getAttribute("data-state")).toBe("todo");
-    expect(screen.getByRole("status").textContent).toContain("Pratinjau segera hadir.");
-    const activeStep = screen.getByText("Build production");
+    expect(screen.getByText("Preparing").getAttribute("data-state")).toBe("done");
+    expect(screen.getByText("Production build").getAttribute("aria-current")).toBe("step");
+    expect(screen.getByText("Ready").getAttribute("data-state")).toBe("todo");
+    expect(screen.getByRole("status").textContent).toContain("Preview coming up shortly.");
+    const activeStep = screen.getByText("Production build");
     expect(activeStep.className).toMatch(/text-accent/);
-    const doneStep = screen.getByText("Menyiapkan");
+    const doneStep = screen.getByText("Preparing");
     expect(doneStep.className).toMatch(/text-text-muted/);
     expect(doneStep.querySelector("svg")).toBeTruthy();
-    const todoStep = screen.getByText("Siap");
+    const todoStep = screen.getByText("Ready");
     expect(todoStep.className).toMatch(/text-text-faint/);
     expect(screen.getByRole("status").className).toMatch(/skeleton-shimmer/);
   });
@@ -189,7 +189,7 @@ describe("SiteBuildPanel", () => {
         onRollback={() => undefined}
       />,
     );
-    expect(screen.getByText("Lihat pratinjau")).toBeTruthy();
+    expect(screen.getByText("View preview")).toBeTruthy();
 
     rerender(
       <SiteBuildPanel
@@ -206,7 +206,7 @@ describe("SiteBuildPanel", () => {
         onRollback={() => undefined}
       />,
     );
-    screen.getByText("Coba lagi").click();
+    screen.getByText("Try again").click();
     expect(onRetry).toHaveBeenCalledWith("s");
   });
 
@@ -229,7 +229,7 @@ describe("SiteBuildPanel", () => {
     const dialog = () => document.querySelector("dialog") as HTMLDialogElement | null;
     expect(dialog()?.open).toBe(false);
     act(() => {
-      screen.getByText("Lihat pratinjau").click();
+      screen.getByText("View preview").click();
     });
     const frame = screen.getByTitle("Preview s");
     expect(frame.getAttribute("src")).toBe(
@@ -286,13 +286,13 @@ describe("SiteBuildPanel", () => {
     );
     // Shared Select trigger shows the stable version; options open on click.
     act(() => {
-      screen.getByRole("button", { name: /Versi, v2 \(stabil\)/ }).click();
+      screen.getByRole("button", { name: /Version, v2 \(stable\)/ }).click();
     });
-    const listbox = await screen.findByRole("listbox", { name: "Versi" });
+    const listbox = await screen.findByRole("listbox", { name: "Version" });
     const options = Array.from(listbox.querySelectorAll('[data-option-value]')).map((o) =>
       o.textContent,
     );
-    expect(options).toEqual(["v3", "v2 (stabil)", "v1 • gagal"]);
+    expect(options).toEqual(["v3", "v2 (stable)", "v1 • failed"]);
     // Stable version is selected by default, so rollback starts disabled.
     expect((screen.getByRole("button", { name: "Rollback" }) as HTMLButtonElement).disabled).toBe(true);
     const option = listbox.querySelector('[data-option-value="3"]');
@@ -327,7 +327,7 @@ describe("SiteBuildPanel", () => {
         onRollback={() => undefined}
       />,
     );
-    expect(screen.queryByRole("button", { name: /Versi/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Version/ })).toBeNull();
   });
 
   it("marks every step done with no spinner once ready", () => {
@@ -346,7 +346,7 @@ describe("SiteBuildPanel", () => {
         onRollback={() => undefined}
       />,
     );
-    expect(screen.getByText("Siap").getAttribute("data-state")).toBe("done");
+    expect(screen.getByText("Ready").getAttribute("data-state")).toBe("done");
     expect(screen.queryByRole("button", { name: /langkah|step/i })).toBeNull();
     expect(container.querySelector(".animate-spin")).toBeNull();
   });
@@ -398,7 +398,7 @@ describe("SiteBuildPanel", () => {
         onRollback={() => undefined}
       />,
     );
-    const links = screen.getAllByText("Unduh zip").map((node) => node.closest("a"));
+    const links = screen.getAllByText("Download zip").map((node) => node.closest("a"));
     expect(links).toHaveLength(2);
     for (const link of links) {
       expect(link?.getAttribute("href")).toBe(

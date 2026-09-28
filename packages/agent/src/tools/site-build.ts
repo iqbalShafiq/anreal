@@ -86,10 +86,10 @@ export function createSiteBuildTools(deps: SiteBuildToolDeps): AnyTool[] {
           action: "ask",
           brief,
           activeSite,
-          question: `Iterate "${activeSite.siteName}" sebagai versi baru, atau mulai situs baru?`,
+          question: `Iterate "${activeSite.siteName}" as a new version, or start a new site?`,
           choices: [
-            { id: "iterate", label: `Iterate ${activeSite.siteName} (versi baru)` },
-            { id: "new-site", label: "Mulai situs baru" },
+            { id: "iterate", label: `Iterate ${activeSite.siteName} (new version)` },
+            { id: "new-site", label: "Start a new site" },
           ],
           recommendation: "iterate",
         } as const;
