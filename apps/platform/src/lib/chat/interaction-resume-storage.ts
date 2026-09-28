@@ -57,11 +57,10 @@ export function peekPendingResumeInteractionIds(
 }
 
 /**
- * Tool names of approvals that are still waiting for the user.
- *
- * A suspended approval ends its stream, so those tools have no result in
- * memory yet; callers need their names to avoid treating a pending prompt as a
- * stopped tool.
+ * Tool names of interactions that are still waiting for the user: approvals
+ * **and** clarifications. A suspended interaction ends its stream, so those
+ * tools have no result in memory yet; callers need their names to avoid
+ * treating a pending prompt as a stopped tool.
  */
 export function peekPendingApprovalToolNames(
   storage: Storage,
@@ -69,7 +68,9 @@ export function peekPendingApprovalToolNames(
 ): string[] {
   const names = new Set<string>();
   for (const item of peekPendingInteractions(storage, sessionId)) {
-    if (item.type === "tool-approval" && item.toolName) names.add(item.toolName);
+    if ((item.type === "tool-approval" || item.type === "tool-question") && item.toolName) {
+      names.add(item.toolName);
+    }
   }
   return [...names];
 }

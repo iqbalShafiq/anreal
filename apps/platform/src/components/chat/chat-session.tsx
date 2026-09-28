@@ -1011,15 +1011,16 @@ export function ChatSession({
 
   chatRef.current = chat;
 
-  // Approvals the user has not answered yet. They must survive finalization:
-  // a suspended approval also ends its stream, so its tool has no result and
-  // would otherwise be shown as "stopped" beside the prompt asking for it.
+  // Decisions the user has not answered yet (approvals and clarifications).
+  // They must survive finalization: a suspended interaction also ends its
+  // stream, so its tool has no result and would otherwise be shown as
+  // "stopped" beside the prompt asking for it.
   pendingApprovalToolNamesRef.current = [
     ...new Set([
       ...peekPendingApprovalToolNames(window.sessionStorage, sessionId),
       ...(chat.interactions.pending ?? []).flatMap((interaction) => {
         const request = interaction.request as { type?: unknown; toolName?: unknown };
-        return request.type === "tool-approval" &&
+        return (request.type === "tool-approval" || request.type === "tool-question") &&
           typeof request.toolName === "string" &&
           request.toolName.length > 0
           ? [request.toolName]
