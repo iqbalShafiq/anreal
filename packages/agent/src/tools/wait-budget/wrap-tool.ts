@@ -62,12 +62,13 @@ export function wrapToolWithWaitBudget(tool: AnyTool, deps: WrapWaitBudgetDeps):
   const wrapped: AnyTool = {
     name: tool.name,
     definition: (prompt) => tool.definition(prompt),
-    call: async (args, context) => {      const taken = deps.ids?.take(tool.name);
+    call: async (args, context) => {
+      const taken = deps.ids?.take(tool.name);
       const jobId = taken?.jobId ?? deps.nextId?.() ?? randomUUID();
       const providerToolCallId = taken?.providerToolCallId;
       await emitCallProgress(deps, {
         jobId,
-        providerToolCallId,
+        ...(providerToolCallId !== undefined ? { providerToolCallId } : {}),
         toolName: tool.name,
         phase: "running",
         elapsedMs: 0,
@@ -110,7 +111,7 @@ export async function finishObserve(
   if (observed.kind === "settled") {
     await emitCallProgress(deps, {
       jobId: toolCallId,
-      providerToolCallId,
+      ...(providerToolCallId !== undefined ? { providerToolCallId } : {}),
       toolName,
       phase: "completed",
       elapsedMs: 0,
@@ -121,7 +122,7 @@ export async function finishObserve(
   if (observed.kind === "still_running") {
     await emitCallProgress(deps, {
       jobId: observed.payload.toolCallId,
-      providerToolCallId,
+      ...(providerToolCallId !== undefined ? { providerToolCallId } : {}),
       toolName: observed.payload.toolName,
       phase: "wait_elapsed",
       elapsedMs: observed.payload.elapsedMs,
@@ -133,7 +134,7 @@ export async function finishObserve(
   if (observed.kind === "cancelled") {
     await emitCallProgress(deps, {
       jobId: observed.payload.toolCallId,
-      providerToolCallId,
+      ...(providerToolCallId !== undefined ? { providerToolCallId } : {}),
       toolName: observed.payload.toolName,
       phase: "cancelled",
       elapsedMs: observed.payload.elapsedMs,
@@ -144,7 +145,7 @@ export async function finishObserve(
   }
   await emitCallProgress(deps, {
     jobId: toolCallId,
-    providerToolCallId,
+    ...(providerToolCallId !== undefined ? { providerToolCallId } : {}),
     toolName,
     phase: "failed",
     elapsedMs: 0,
