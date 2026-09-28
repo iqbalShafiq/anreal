@@ -69,7 +69,7 @@ const browseSiteInput = z.object({
 const browseSiteSpec = {
   name: "browse_site",
   description:
-    "Browse a workspace site interactively: open a live session, then scroll or click one step at a time. Every action returns a fresh screenshot (imageId) plus page title/url; vision models receive the pixels, text-only models pass imageId to view_image. Call snapshot before concluding and close when done. Links that leave the local preview origin are blocked. Never ask the user for screenshots.",
+    "Browse a workspace site interactively: open a live session, then scroll or click one step at a time. Every action returns a fresh screenshot (imageId) plus page title/url; vision models receive the pixels, text-only models pass imageId to view_image. Open only once the build version is ready — opening while the build runs fails without a screenshot. Call snapshot before concluding and close when done. Links that leave the local preview origin are blocked. Never ask the user for screenshots.",
   inputSchema: browseSiteInput,
 } as const;
 
@@ -127,9 +127,12 @@ export function createViewSitePageTools(
         ...(version !== undefined ? { version } : {}),
         ...(question !== undefined ? { question } : {}),
       });
-      deps.onFocus?.({ artifactId: result.siteId, artifactType: "site", label: result.title });
-      let imageBytesIncluded = false;
-      if (result.imageId && deps.includeImageBytes !== false && deps.pushVisionImage) {
+      // A not-ready version answers with a retryable partial result (empty
+      // imageId); do not flash an artifact-focus chip for it.
+      if (result.imageId) {
+        deps.onFocus?.({ artifactId: result.siteId, artifactType: "site", label: result.title });
+      }
+      let imageBytesIncluded = false;      if (result.imageId && deps.includeImageBytes !== false && deps.pushVisionImage) {
         try {
           await deps.pushVisionImage({ imageId: result.imageId });
           imageBytesIncluded = true;
@@ -186,7 +189,7 @@ export function createBrowseSiteTools(deps: {
         ...(text !== undefined ? { text } : {}),
         ...(to !== undefined ? { to } : {}),
       });
-      if (action === "open") {
+      if (action === "open" && result.imageId) {
         deps.onFocus?.({ artifactId: result.siteId, artifactType: "site", label: result.title });
       }
       let imageBytesIncluded = false;

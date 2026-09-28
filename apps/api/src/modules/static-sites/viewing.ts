@@ -391,7 +391,27 @@ export async function viewSitePage(input: {
   if (!manifest) throw new Error("Site not found in the current scope.");
   const versionStatus = manifest.versions?.[ref.version]?.status ?? manifest.status;
   if (versionStatus !== "ready") {
-    throw new Error(`Site ${ref.siteId} v${ref.version} is ${versionStatus} — nothing viewable yet.`);
+    // Not an operational failure — the build is simply not done. Answer with
+    // a retryable partial result so the transcript stays clean and the agent
+    // can tell the user the site is still building.
+    return {
+      siteId: ref.siteId,
+      version: ref.version,
+      status: versionStatus,
+      title: "",
+      headings: [],
+      excerpt: "",
+      excerptTruncated: false,
+      imageId: "",
+      capturedAt: "",
+      viewport: SITE_SCREENSHOT_VIEWPORT,
+      fullPage: false,
+      truncated: false,
+      mediaType: "image/png",
+      focus: input.question ?? null,
+      captureError: `v${ref.version} is still ${versionStatus} — the preview is not viewable yet. Wait for the build to finish (watch the build panel), then view again.`,
+      retryable: true,
+    };
   }
   const text = await (input.excerpt ?? extractSiteExcerpt)({
     ref,

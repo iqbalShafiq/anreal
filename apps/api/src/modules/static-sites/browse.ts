@@ -7,6 +7,7 @@ import {
   SITE_SCREENSHOT_VIEWPORT,
   acquireCaptureSlot,
   launchChromium,
+  readSiteIndexHtml,
   releaseCaptureSlot,
   resolveSiteVersion,
   type ViewingBrowser,
@@ -87,6 +88,8 @@ export type BrowseSessionsDeps = {
     siteId: string;
     version?: number;
   }) => Promise<{ siteId: string; version: number; label?: string }>;
+  /** Presence check for a version's preview; overridable for tests. */
+  previewExists?: (ref: { siteId: string; version: number }) => Promise<boolean>;
 };
 
 export type BrowseActInput = {
@@ -152,6 +155,15 @@ async function defaultResolve(input: {
   return { ...ref, ...(label ? { label } : {}) };
 }
 
+async function defaultPreviewExists(ref: { siteId: string; version: number }): Promise<boolean> {
+  try {
+    await readSiteIndexHtml(ref);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export class BrowseSessionManager {
   private readonly sessions = new Map<string, BrowseSession>();
   private readonly deps: BrowseSessionsDeps;
@@ -182,6 +194,31 @@ export class BrowseSessionManager {
       ...(input.version !== undefined ? { version: input.version } : {}),
     });
     const label = input.label ?? resolved.label ?? resolved.siteId;
+    // Opening a browser on a preview that does not exist yet captures the
+    // API's "preview not found" page and stores it as a session image. Check
+    // first and answer with a retryable partial result — the build is simply
+    // not done, which is not an operational error.
+    const exists = await (this.deps.previewExists ?? defaultPreviewExists)({
+      siteId: resolved.siteId,
+      version: resolved.version,
+    });
+    if (!exists) {
+      return {
+        siteId: resolved.siteId,
+        version: resolved.version,
+        action: "open",
+        title: label,
+        url: "",
+        imageId: "",
+        blocked: false,
+        note: `Preview v${resolved.version} of "${label}" isn't ready yet — the build is still running. Wait for it to finish, then open the live view again.`,
+        actionsUsed: 0,
+        actionsRemaining: BROWSE_MAX_ACTIONS,
+        sessionState: "closed",
+        captureError: `v${resolved.version} is still building — there is no preview to open yet.`,
+        retryable: true,
+      };
+    }
     await (this.deps.acquire ?? acquireCaptureSlot)();
     let browser: BrowseSessionBrowser | null = null;
     let session: BrowseSession | null = null;

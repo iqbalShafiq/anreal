@@ -41,6 +41,7 @@ function manager(
     clearFrame?: (sessionId: string) => Promise<void>;
     notify?: (event: { state: "started" | "stopped"; siteId: string; label: string }) => Promise<void>;
     release?: () => void;
+    previewExists?: (ref: { siteId: string; version: number }) => Promise<boolean>;
   } = {},
 ) {
   return new BrowseSessionManager({
@@ -53,6 +54,7 @@ function manager(
     release: ops.release ?? (() => undefined),
     now: ops.now ?? (() => 1_000_000),
     resolve: async ({ siteId, version }) => ({ siteId, version: version ?? 1 }),
+    previewExists: ops.previewExists ?? (async () => true),
   });
 }
 
@@ -93,8 +95,22 @@ describe("browse session manager", () => {
     expect(notify).toHaveBeenLastCalledWith({ state: "stopped", siteId: "kedai", label: "Kedai" });
   });
 
-  it("rejects actions without an open session", async () => {
-    const sessions = manager(fakePage());
+  it("answers retryably when the preview is not built yet", async () => {
+    const page = fakePage();
+    const sessions = manager(page, { previewExists: async () => false });
+    const opened = await sessions.open(OPEN);
+    expect(opened).toMatchObject({
+      action: "open",
+      sessionState: "closed",
+      imageId: "",
+      retryable: true,
+    });
+    expect(String(opened.captureError)).toMatch(/still building/);
+    expect(page.goto).not.toHaveBeenCalled();
+    expect(page.startScreencast).not.toHaveBeenCalled();
+  });
+
+  it("rejects actions without an open session", async () => {    const sessions = manager(fakePage());
     await expect(sessions.act({ ...OPEN, action: "scroll" })).rejects.toThrow(/not open/i);
   });
 
