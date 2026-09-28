@@ -247,7 +247,7 @@ export async function processSiteBuildJob(
 
     await progress("building", "Building the pages section by section.");
     await runAgent({
-      prompt: buildSiteBuilderPrompt(brief),
+      prompt: buildSiteBuilderPrompt(brief, prompt),
       tools: [...tools] as { name: string }[],
     });
 
