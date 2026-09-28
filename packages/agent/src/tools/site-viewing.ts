@@ -29,7 +29,7 @@ const viewSitePageInput = z.object({
 const viewSitePageSpec = {
   name: "view_site_page",
   description:
-    "View a workspace site's content and appearance. Always returns a bounded text excerpt plus provenance (siteId, version, imageId, capturedAt). Vision models receive the screenshot bytes directly; text-only models must pass imageId to view_image for a description. Never ask the user for screenshots.",
+    "View a workspace site's content and appearance. Use it once the version is Ready — a version that is still queued or building answers with a retryable note instead of a screenshot, so wait for the build panel to flip to Ready (or ask the user to ping you) before reviewing. Always returns a bounded text excerpt plus provenance (siteId, version, imageId, capturedAt). Vision models receive the screenshot bytes directly; text-only models must pass imageId to view_image for a description. Never ask the user for screenshots.",
   inputSchema: viewSitePageInput,
 } as const;
 

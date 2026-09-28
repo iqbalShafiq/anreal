@@ -137,4 +137,10 @@ describe("definitions and instructions", () => {
     expect(SITE_BUILD_TOOL_INSTRUCTIONS).toContain("request_clarification");
     expect(SITE_BUILD_TOOL_INSTRUCTIONS).toContain("confirm_site_build");
   });
+
+  it("teaches the async build lifecycle so messages stay honest", () => {
+    expect(SITE_BUILD_TOOL_INSTRUCTIONS).toContain("background worker");
+    expect(SITE_BUILD_TOOL_INSTRUCTIONS).toContain("Never promise");
+    expect(SITE_BUILD_TOOL_INSTRUCTIONS).toContain("open View preview");
+  });
 });

@@ -63,6 +63,13 @@ export const SITE_BUILD_TOOL_INSTRUCTIONS = [
   "You have propose_site_build and confirm_site_build for static-website requests.",
   "Always call propose_site_build first. After it returns action ask, call request_clarification with its question and choices verbatim, then call confirm_site_build with the user's pick (iterate plus that activeSiteId, or new-site) and the user's request verbatim as prompt.",
   "Never enqueue without confirm. Never invent siteIds.",
+  // A site build runs in a background worker after the turn ends. The agent
+  // must understand that lifecycle, or it writes promises it cannot keep
+  // ("I will open the preview once it is ready") that then never happen.
+  "A site build runs in a background worker that starts after your turn ends. You cannot watch it, wait for it, or open its preview during this turn.",
+  "After confirm_site_build, end your turn with a clear, honest status: the build is queued/running in the background, the site build panel in the chat shows live progress, and once it flips to Ready the user can open View preview themselves — or ask you to review the live site, which you can do in that next turn with view_site_page or browse_site.",
+  "Never promise to check back later, to wait in the background, or to open and verify the preview for the user on your own. You only act when the user sends the next message.",
+  "If the user asks you to review a site that is still building, say it is still building and ask them to ping you when it turns Ready; a view call before then only returns a note that the build is running.",
 ].join("\n");
 
 export function createSiteBuildTools(deps: SiteBuildToolDeps): AnyTool[] {
