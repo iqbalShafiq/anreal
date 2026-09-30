@@ -22,6 +22,7 @@ import {
   isReservedConnectionSlug,
   PROVIDER_MODEL_SLUG_RE,
   MAX_SLUG_ATTEMPTS,
+  SLUG_MAX,
   suffixSlug,
 } from "../../lib/provider-slug.js";
 import { SKILL_NAME_RE } from "../skills/service.js";
@@ -166,6 +167,12 @@ export function validateConnectionInput(
       "slug",
       "Slug must be lowercase letters, numbers, and hyphens, e.g. my-openrouter",
     );
+  }
+  // A derived slug is bounded by SLUG_MAX, but an explicit one has to be too:
+  // a longer prefix stops matching the connection slug the model ids are built
+  // on. (Zod bounds the request field only loosely.)
+  if (provided !== null && provided.length > SLUG_MAX) {
+    fail("slug", `Slug must be at most ${SLUG_MAX} characters`);
   }
   const baseSlug = provided ?? deriveConnectionSlug(label);
   if (isReservedConnectionSlug(baseSlug)) {

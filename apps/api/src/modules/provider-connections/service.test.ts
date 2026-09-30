@@ -21,6 +21,7 @@ import {
   decodeProviderCredentials,
   encodeProviderCredentials,
 } from "./credentials.js";
+import { SLUG_MAX } from "../../lib/provider-slug.js";
 
 const OK_CONNECTION = {
   kind: "compatible",
@@ -101,6 +102,22 @@ describe("validateConnectionInput", () => {
     expect(() =>
       validateConnectionInput({ ...OK_CONNECTION, slug: "Bad Slug!" }, [], 0),
     ).toThrow(ProviderInputError);
+  });
+
+  it("rejects a provided slug longer than SLUG_MAX", () => {
+    expect(() =>
+      validateConnectionInput(
+        { ...OK_CONNECTION, slug: "a".repeat(SLUG_MAX + 1) },
+        [],
+        0,
+      ),
+    ).toThrow(new RegExp(`at most ${SLUG_MAX}`));
+  });
+
+  it("accepts a provided slug exactly SLUG_MAX long", () => {
+    const slug = "a".repeat(SLUG_MAX);
+    const value = validateConnectionInput({ ...OK_CONNECTION, slug }, [], 0);
+    expect(value.slug).toBe(slug);
   });
 
   it("enforces the connection cap", () => {
