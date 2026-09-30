@@ -24,6 +24,7 @@ import {
   listConnections,
   prefillConnectionModel,
   setConnectionEnabled,
+  testProviderConnection,
   updateConnection,
   updateConnectionModel,
   type ProviderIssue,
@@ -78,6 +79,19 @@ const prefillBodySchema = z
     reasoningEfforts: z.array(z.string().max(40)).max(20).nullable().optional(),
   })
   .strict();
+
+/**
+ * Deliberately non-strict: the editor may send fields the test does not need
+ * (label, slug); unknown keys are stripped, not rejected.
+ */
+const connectionTestSchema = z.object({
+  kind: z.string().min(1).max(40),
+  baseUrl: z.string().max(2048).nullable().optional(),
+  api: z.string().max(20).nullable().optional(),
+  apiKey: z.string().max(4096).nullable().optional(),
+  headers: z.unknown().optional(),
+  connectionId: z.string().max(256).nullable().optional(),
+});
 
 /**
  * The service may be mocked in focused tests, where class identity is lost, so
@@ -147,6 +161,24 @@ export const providerConnectionsRouter = new Hono<{ Variables: AuthVariables }>(
   .get("/", async (c) =>
     c.json(await listConnections(prisma, c.get("user").id)),
   )
+  // Registered before `/:id` so "test" is never captured as an id.
+  .post("/test", async (c) => {
+    const parsed = connectionTestSchema.safeParse(
+      await c.req.json().catch(() => null),
+    );
+    if (!parsed.success) {
+      return c.json({ error: "Invalid provider test request" }, 400);
+    }
+    try {
+      return c.json(
+        await testProviderConnection(prisma, c.get("user").id, parsed.data),
+      );
+    } catch (error) {
+      const response = providerErrorResponse(error);
+      if (response) return c.json(response.body, response.status);
+      throw error;
+    }
+  })
   .post("/", async (c) => {
     const parsed = connectionCreateSchema.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) {

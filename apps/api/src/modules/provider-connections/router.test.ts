@@ -12,6 +12,7 @@ const service = vi.hoisted(() => ({
   deleteConnectionModel: vi.fn(async () => undefined),
   setConnectionEnabled: vi.fn(async () => ({ id: "pc_1", hasCredentials: true })),
   discoverConnectionModels: vi.fn(async () => ({ data: [] })),
+  testProviderConnection: vi.fn(async () => ({ ok: true, modelCount: 0 })),
 }));
 
 vi.mock("./service.js", async (importOriginal) => {
@@ -139,5 +140,64 @@ describe("provider routes", () => {
     const body = (await res.json()) as Record<string, unknown>;
     expect(body.hasCredentials).toBe(true);
     expect(body).not.toHaveProperty("credentialsRef");
+  });
+
+  it("tests a connection without persisting it", async () => {
+    service.testProviderConnection.mockResolvedValueOnce({
+      ok: true,
+      modelCount: 3,
+    });
+    const res = await app.request("/api/providers/test", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        kind: "compatible",
+        baseUrl: "https://gw.example/v1",
+        apiKey: "sk-abcdefgh",
+      }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, modelCount: 3 });
+  });
+
+  it("returns the mapped provider message when a test fails", async () => {
+    service.testProviderConnection.mockRejectedValueOnce(
+      Object.assign(new Error("The provider reported an invalid API key"), {
+        name: "ProviderInputError",
+        issues: [
+          {
+            path: "baseUrl",
+            message: "The provider reported an invalid API key",
+          },
+        ],
+      }),
+    );
+    const res = await app.request("/api/providers/test", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        kind: "compatible",
+        baseUrl: "https://gw.example/v1",
+        apiKey: "sk-abcdefgh",
+      }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error?: string };
+    expect(body.error).toMatch(/invalid api key/i);
+  });
+
+  it("is registered before the :id route", async () => {
+    service.testProviderConnection.mockClear();
+    const res = await app.request("/api/providers/test", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        kind: "compatible",
+        baseUrl: "https://gw.example/v1",
+        apiKey: "sk-abcdefgh",
+      }),
+    });
+    expect(res.status).toBe(200);
+    expect(service.testProviderConnection).toHaveBeenCalled();
   });
 });

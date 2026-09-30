@@ -2500,3 +2500,36 @@ export async function prefillProviderModel(
     providerReported: data.providerReported === true,
   };
 }
+
+/**
+ * Probe a connection without persisting anything. A blank `apiKey` with a
+ * `connectionId` reuses that owned connection's stored credential server-side,
+ * so an empty key field does not force re-entry. Editor fields the test does
+ * not need may be sent and are ignored.
+ */
+export async function testProviderConnection(input: {
+  kind: string;
+  baseUrl?: string | null;
+  api?: string | null;
+  apiKey?: string | null;
+  headers?: Record<string, string>;
+  connectionId?: string;
+}): Promise<{ ok: true; modelCount: number }> {
+  const response = await apiFetch(`${API_BASE}/api/providers/test`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) {
+    await throwSkillError(response, "Failed to test provider connection");
+  }
+  const data: unknown = await response.json();
+  if (
+    !isRecord(data) ||
+    data.ok !== true ||
+    typeof data.modelCount !== "number"
+  ) {
+    throw new Error("Unexpected provider test response shape");
+  }
+  return { ok: true, modelCount: data.modelCount };
+}

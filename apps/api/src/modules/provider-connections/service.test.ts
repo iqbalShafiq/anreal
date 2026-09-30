@@ -10,6 +10,7 @@ import {
   listConnectionModels,
   prefillConnectionModel,
   setConnectionEnabled,
+  testProviderConnection,
   toPublicConnection,
   updateConnection,
   updateConnectionModel,
@@ -507,6 +508,151 @@ describe("discoverConnectionModels", () => {
     await expect(
       discoverConnectionModels(db, "u_1", "pc_1"),
     ).rejects.toThrow(/invalid api key/i);
+  });
+});
+
+describe("testProviderConnection", () => {
+  it("probes the provider and reports how many models it found", async () => {
+    const db = makeDb();
+    const result = await testProviderConnection(db, "u_1", {
+      kind: "compatible",
+      baseUrl: "https://gw.example/v1",
+      apiKey: "sk-live",
+    });
+    expect(result).toEqual({ ok: true, modelCount: 2 });
+  });
+
+  it("reuses the stored credential when the key is blank", async () => {
+    const agent = await import("@anreal/agent");
+    vi.mocked(agent.listProviderModels).mockClear();
+    const db = makeDb({
+      providerConnection: {
+        findFirst: vi.fn(async () => ({
+          id: "pc_1",
+          userId: "u_1",
+          kind: "compatible",
+          baseUrl: "https://gw.example/v1",
+          credentialsRef: encodeProviderCredentials({ apiKey: "sk-stored" }),
+        })),
+      },
+    });
+
+    const result = await testProviderConnection(db, "u_1", {
+      kind: "compatible",
+      baseUrl: "https://gw.example/v1",
+      apiKey: "  ",
+      connectionId: "pc_1",
+    });
+
+    expect(result).toEqual({ ok: true, modelCount: 2 });
+    expect(vi.mocked(agent.listProviderModels)).toHaveBeenLastCalledWith({
+      kind: "compatible",
+      credentials: {
+        apiKey: "sk-stored",
+        baseUrl: "https://gw.example/v1",
+        headers: null,
+      },
+    });
+  });
+
+  it("reuses the stored headers when none are supplied", async () => {
+    const agent = await import("@anreal/agent");
+    vi.mocked(agent.listProviderModels).mockClear();
+    const db = makeDb({
+      providerConnection: {
+        findFirst: vi.fn(async () => ({
+          id: "pc_1",
+          userId: "u_1",
+          kind: "compatible",
+          baseUrl: "https://gw.example/v1",
+          credentialsRef: encodeProviderCredentials({
+            apiKey: "sk-stored",
+            headers: { "X-Org": "acme" },
+          }),
+        })),
+      },
+    });
+
+    await testProviderConnection(db, "u_1", {
+      kind: "compatible",
+      baseUrl: "https://gw.example/v1",
+      connectionId: "pc_1",
+    });
+
+    expect(vi.mocked(agent.listProviderModels)).toHaveBeenLastCalledWith({
+      kind: "compatible",
+      credentials: {
+        apiKey: "sk-stored",
+        baseUrl: "https://gw.example/v1",
+        headers: { "X-Org": "acme" },
+      },
+    });
+  });
+
+  it("requires a key when no connection is being reused", async () => {
+    const db = makeDb();
+    await expect(
+      testProviderConnection(db, "u_1", {
+        kind: "compatible",
+        baseUrl: "https://gw.example/v1",
+      }),
+    ).rejects.toThrow(/api key/i);
+  });
+
+  it("404s a connection the caller does not own", async () => {
+    const db = makeDb();
+    await expect(
+      testProviderConnection(db, "u_1", {
+        kind: "compatible",
+        baseUrl: "https://gw.example/v1",
+        connectionId: "pc_other",
+      }),
+    ).rejects.toThrow(/not found/i);
+  });
+
+  it("maps a provider auth failure to a redacted message", async () => {
+    const agent = await import("@anreal/agent");
+    vi.mocked(agent.listProviderModels).mockRejectedValueOnce(
+      new Error("401 Unauthorized for key sk-leaked-abcdef123456"),
+    );
+    const db = makeDb();
+    await expect(
+      testProviderConnection(db, "u_1", {
+        kind: "compatible",
+        baseUrl: "https://gw.example/v1",
+        apiKey: "sk-live",
+      }),
+    ).rejects.toThrow(/invalid api key/i);
+  });
+
+  it("rejects an unknown kind", async () => {
+    const db = makeDb();
+    await expect(
+      testProviderConnection(db, "u_1", {
+        kind: "nope",
+        baseUrl: "https://gw.example/v1",
+        apiKey: "sk-live",
+      }),
+    ).rejects.toThrow(/kind/i);
+  });
+
+  it("requires a base url for the compatible kind", async () => {
+    const db = makeDb();
+    await expect(
+      testProviderConnection(db, "u_1", { kind: "compatible", apiKey: "sk-live" }),
+    ).rejects.toThrow(/base url/i);
+  });
+
+  it("rejects a reserved authorization header", async () => {
+    const db = makeDb();
+    await expect(
+      testProviderConnection(db, "u_1", {
+        kind: "compatible",
+        baseUrl: "https://gw.example/v1",
+        apiKey: "sk-live",
+        headers: { authorization: "Bearer x" },
+      }),
+    ).rejects.toThrow(/authorization/i);
   });
 });
 

@@ -15,11 +15,9 @@ import {
   useProviderModels,
 } from "#/hooks/use-provider-connections";
 import {
-  createProviderConnection,
-  deleteProviderConnection,
-  discoverProviderModels,
   listProviderKinds,
   listProviderModels,
+  testProviderConnection,
   type ProviderConnection,
   type ProviderConnectionInput,
   type ProviderKindInfo,
@@ -127,47 +125,31 @@ export function ProvidersSection({ active }: { active: boolean }) {
   const rows = connections.data ?? [];
 
   /**
-   * Test a connection. An existing one probes its provider listing directly;
-   * a new one has no server route without an id, so it is created, probed, and
-   * rolled back — that keeps the save path the only thing that persists.
+   * Probe a connection against the provider without persisting anything. An
+   * existing connection is passed by id so a blank key field reuses the stored
+   * credential server-side; a new one sends its own key. The Test-before-Save
+   * gate is applied by the editor from the outcome.
    */
   const runTest = async (
     input: ProviderConnectionInput,
     existingId: string | null,
   ): Promise<TestOutcome> => {
-    if (existingId) {
-      try {
-        const models = await connections.discover(existingId);
-        return { ok: true, count: models.length };
-      } catch (error) {
-        return {
-          ok: false,
-          message: messageOf(error, "Connection failed"),
-          issues: issuesFromError(error),
-        };
-      }
-    }
-
-    let probeId: string | null = null;
     try {
-      const created = await createProviderConnection(input);
-      probeId = created.id;
-      const models = await discoverProviderModels(created.id);
-      return { ok: true, count: models.length };
+      const result = await testProviderConnection({
+        kind: input.kind,
+        baseUrl: input.baseUrl ?? null,
+        api: input.api ?? null,
+        apiKey: input.apiKey ?? null,
+        ...(input.headers ? { headers: input.headers } : {}),
+        ...(existingId ? { connectionId: existingId } : {}),
+      });
+      return { ok: true, count: result.modelCount };
     } catch (error) {
       return {
         ok: false,
         message: messageOf(error, "Connection failed"),
         issues: issuesFromError(error),
       };
-    } finally {
-      if (probeId) {
-        try {
-          await deleteProviderConnection(probeId);
-        } catch {
-          // Best effort: a stray probe connection is harmless but avoidable.
-        }
-      }
     }
   };
 

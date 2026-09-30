@@ -404,6 +404,16 @@ function isBlankKey(value: unknown): boolean {
   );
 }
 
+/** A plain object with at least one key (used to detect supplied headers). */
+function isNonEmptyRecord(value: unknown): boolean {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    Object.keys(value as Record<string, unknown>).length > 0
+  );
+}
+
 async function findOwnedConnection(
   db: ProviderConnectionsDb,
   userId: string,
@@ -740,6 +750,72 @@ export async function discoverConnectionModels(
       "baseUrl",
       mapListingError(error, [credentials.apiKey ?? ""]),
     );
+  }
+}
+
+/**
+ * Probe a provider without persisting anything, mirroring the MCP
+ * `POST /mcp-servers/test` route. A blank api key reuses an owned connection's
+ * stored credential (and stored headers when none are supplied), so editing a
+ * connection never requires re-entering it. Everything save would reject is
+ * validated here first, so the test cannot accept what saving would refuse.
+ */
+export async function testProviderConnection(
+  db: ProviderConnectionsDb,
+  userId: string,
+  input: {
+    kind: string;
+    baseUrl?: string | null;
+    /** Accepted for editor parity; model listing does not depend on it. */
+    api?: string | null;
+    apiKey?: string | null;
+    headers?: unknown;
+    /** Reuse this owned connection's stored credential when apiKey is blank. */
+    connectionId?: string | null;
+  },
+): Promise<{ ok: true; modelCount: number }> {
+  if (!isProviderKind(input.kind)) {
+    fail("kind", `Provider kind must be one of: ${PROVIDER_KINDS.join(", ")}`);
+  }
+  const kind: ProviderKind = input.kind;
+  const meta = PROVIDER_KIND_META[kind];
+
+  let apiKey = typeof input.apiKey === "string" ? input.apiKey.trim() : "";
+  let rawHeaders = input.headers;
+
+  if (apiKey.length === 0) {
+    if (!input.connectionId) {
+      fail("apiKey", "An API key is required");
+    }
+    const connection = await findOwnedConnection(db, userId, input.connectionId);
+    if (!connection) notFound();
+    const stored = decodeProviderCredentials(connection.credentialsRef);
+    apiKey = stored.apiKey;
+    if (!isNonEmptyRecord(rawHeaders)) rawHeaders = stored.headers ?? null;
+  }
+
+  const sanitized = sanitizeHeaders(rawHeaders);
+  if (!sanitized.ok) fail("headers", sanitized.message);
+
+  const rawBaseUrl =
+    typeof input.baseUrl === "string" ? input.baseUrl.trim() : "";
+  let baseUrl: string | null = null;
+  if (rawBaseUrl.length === 0) {
+    if (meta.requiresBaseUrl) {
+      fail("baseUrl", "A base URL is required for this provider kind");
+    }
+  } else {
+    baseUrl = validateBaseUrl(rawBaseUrl);
+  }
+
+  try {
+    const result = await listProviderModels({
+      kind,
+      credentials: { apiKey, baseUrl, headers: sanitized.headers },
+    });
+    return { ok: true, modelCount: result.data.length };
+  } catch (error) {
+    return fail("baseUrl", mapListingError(error, [apiKey]));
   }
 }
 
