@@ -8,6 +8,7 @@ import { imagesPaths } from "./paths/images.js";
 import { mcpServersPaths } from "./paths/mcp-servers.js";
 import { artifactsPaths } from "./paths/artifacts.js";
 import { modelsPaths } from "./paths/models.js";
+import { providersPaths } from "./paths/providers.js";
 import { profilingPaths } from "./paths/profiling.js";
 import { projectsPaths } from "./paths/projects.js";
 import { skillsPaths } from "./paths/skills.js";
@@ -100,6 +101,11 @@ export function buildOpenApiDocument(input?: {
       { name: "Documents", description: "Upload, library, attach, preview, delete." },
       { name: "Images", description: "Generated and uploaded images + session pins." },
       { name: "Models", description: "Text and image model catalog." },
+      {
+        name: "Providers",
+        description:
+          "Bring your own key: user-owned provider connections and the models registered on them.",
+      },
       { name: "McpServers", description: "User-owned MCP server connections." },
       { name: "Projects", description: "Project CRUD and last-opened." },
       { name: "Profiling", description: "User / project personalization profiles." },
@@ -114,6 +120,7 @@ export function buildOpenApiDocument(input?: {
       ...documentsPaths,
       ...imagesPaths,
       ...modelsPaths,
+      ...providersPaths,
       ...mcpServersPaths,
       ...projectsPaths,
       ...profilingPaths,

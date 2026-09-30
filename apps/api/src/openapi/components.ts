@@ -683,8 +683,116 @@ export const profileDtoSchema = {
   },
 } as const;
 
-export const modelInfoSchema = {
+/**
+ * A user-owned provider connection. Deliberately has no `apiKey` or
+ * `credentialsRef` property: the credential is write-only and is reported only
+ * as `hasCredentials`.
+ */
+export const providerConnectionSchema = {
   type: "object",
+  required: [
+    "id",
+    "kind",
+    "label",
+    "slug",
+    "isActive",
+    "sortOrder",
+    "hasCredentials",
+  ],
+  properties: {
+    id: { type: "string" },
+    kind: {
+      type: "string",
+      enum: ["openai", "anthropic", "gemini", "grok", "mistral", "compatible"],
+    },
+    label: { type: "string" },
+    slug: {
+      type: "string",
+      description: "Prefixes every model id on this connection.",
+    },
+    baseUrl: { type: ["string", "null"] },
+    api: { type: ["string", "null"], enum: ["chat", "responses", null] },
+    isActive: { type: "boolean" },
+    sortOrder: { type: "integer" },
+    hasCredentials: {
+      type: "boolean",
+      description: "Always true in practice; the key itself is never returned.",
+    },
+    createdAt: { type: "string" },
+    updatedAt: { type: "string" },
+  },
+};
+
+/** Server-owned descriptor for one provider kind. */
+export const providerKindSchema = {
+  type: "object",
+  required: [
+    "kind",
+    "label",
+    "credentialPlaceholder",
+    "supportsBaseUrl",
+    "requiresBaseUrl",
+    "apiVariants",
+    "defaultApi",
+    "imageStyle",
+  ],
+  properties: {
+    kind: { type: "string" },
+    label: { type: "string" },
+    credentialPlaceholder: { type: "string" },
+    supportsBaseUrl: { type: "boolean" },
+    requiresBaseUrl: { type: "boolean" },
+    apiVariants: { type: "array", items: { type: "string" } },
+    defaultApi: { type: ["string", "null"] },
+    imageStyle: {
+      type: "string",
+      enum: ["openrouter-images", "gemini-native", "grok-native", "none"],
+    },
+  },
+};
+
+/** A model registered on a user connection. Carries no credential material. */
+export const providerModelSchema = {
+  type: "object",
+  required: [
+    "id",
+    "slug",
+    "upstreamId",
+    "name",
+    "label",
+    "outputType",
+    "reasoningEfforts",
+    "isActive",
+    "connectionId",
+  ],
+  properties: {
+    id: { type: "string" },
+    slug: {
+      type: "string",
+      description: "The model id used everywhere else in the API.",
+    },
+    upstreamId: { type: "string" },
+    name: { type: "string" },
+    label: { type: "string" },
+    hint: { type: ["string", "null"] },
+    description: { type: ["string", "null"] },
+    iconSvg: { type: "string" },
+    outputType: { type: "string", enum: ["text", "image"] },
+    contextWindowTokens: { type: ["integer", "null"] },
+    maxInputTokens: { type: ["integer", "null"] },
+    maxOutputTokens: { type: ["integer", "null"] },
+    reasoningEfforts: { type: "array", items: { type: "string" } },
+    capabilities: { type: ["object", "null"] },
+    imageCapabilities: { type: ["object", "null"] },
+    isActive: { type: "boolean" },
+    sortOrder: { type: "integer" },
+    connectionId: { type: "string" },
+    createdAt: { type: "string" },
+    updatedAt: { type: "string" },
+  },
+};
+
+export const modelInfoSchema = {  type: "object",
   required: [
     "modelId",
     "label",
@@ -815,5 +923,8 @@ export const openApiComponents = {
     StorageUsage: storageUsageSchema,
     Profile: profileDtoSchema,
     ModelInfo: modelInfoSchema,
+    ProviderConnection: providerConnectionSchema,
+    ProviderKind: providerKindSchema,
+    ProviderModel: providerModelSchema,
   },
 };

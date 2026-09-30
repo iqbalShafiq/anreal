@@ -888,3 +888,22 @@ export async function deleteConnectionModel(
   await requireOwnedModel(db, userId, connectionId, modelId);
   await db.providerModel.delete({ where: { id: modelId } });
 }
+/**
+ * Build a model handle from a stored connection so the UI can prefill display
+ * name, context window, and the adapter's own reasoning vocabulary. The API
+ * key never leaves the server.
+ */
+export async function prefillConnectionModel(
+  db: ProviderConnectionsDb,
+  userId: string,
+  connectionId: string,
+  input: { upstreamId: string; reasoningEfforts?: string[] | null },
+): Promise<ModelPrefill> {
+  const connection = await requireConnection(db, userId, connectionId);
+  return prefillModelFromUpstream({
+    kind: connectionProviderKind(connection),
+    upstreamId: input.upstreamId,
+    credentials: modelCredentials(connection),
+    reasoningEfforts: input.reasoningEfforts ?? null,
+  });
+}

@@ -8,6 +8,7 @@ import {
   discoverConnectionModels,
   listConnections,
   listConnectionModels,
+  prefillConnectionModel,
   toPublicConnection,
   updateConnection,
   updateConnectionModel,
@@ -577,6 +578,39 @@ describe("deleteConnectionModel", () => {
 
     await expect(
       deleteConnectionModel(db, "u_1", "pc_1", "pm_other"),
+    ).rejects.toThrow(/not found/i);
+  });
+});
+describe("prefillConnectionModel", () => {
+  it("builds from the stored credentials and reports adapter metadata", async () => {
+    const db = makeDb({
+      providerConnection: {
+        findFirst: vi.fn(async () => ({
+          id: "pc_1",
+          userId: "u_1",
+          kind: "compatible",
+          slug: "gw",
+          baseUrl: "https://gw.example/v1",
+          api: "chat",
+          credentialsRef: encodeProviderCredentials({ apiKey: "sk-stored" }),
+        })),
+      },
+    });
+
+    const result = await prefillConnectionModel(db, "u_1", "pc_1", {
+      upstreamId: "openai/gpt-5.6-luna",
+    });
+
+    expect(result.name).toBe("openai/gpt-5.6-luna");
+    expect(result.reasoningEfforts).toContain("high");
+    expect(result.providerReported).toBe(true);
+  });
+
+  it("404s a connection the caller does not own", async () => {
+    const db = makeDb();
+
+    await expect(
+      prefillConnectionModel(db, "u_1", "pc_other", { upstreamId: "x" }),
     ).rejects.toThrow(/not found/i);
   });
 });
