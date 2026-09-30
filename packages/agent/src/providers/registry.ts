@@ -25,6 +25,9 @@ export const PROVIDER_KINDS = [
 ] as const;
 export type ProviderKind = (typeof PROVIDER_KINDS)[number];
 
+/** Re-exported so consumers depend on this package, not on @anvia/core directly. */
+export type { ModelContextLimits } from "@anvia/core/completion";
+
 /**
  * Which image endpoint shape a kind speaks. Image generation is not one axis:
  * OpenRouter-shaped gateways use POST /images, Gemini and Grok have native

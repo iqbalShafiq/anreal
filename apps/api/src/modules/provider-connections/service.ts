@@ -1,7 +1,13 @@
 import {
   PROVIDER_KIND_META,
   PROVIDER_KINDS,
+  createCompletionModelFor,
+  describeModel,
   effortVocabulary,
+  listProviderModels,
+  redactProviderError,
+  type ModelContextLimits,
+  type ProviderCredentials,
   type ProviderKind,
   type ProviderKindMeta,
 } from "@anreal/agent";
@@ -12,7 +18,10 @@ import {
 } from "./credentials.js";
 import {
   deriveConnectionSlug,
+  deriveModelSlug,
   isReservedConnectionSlug,
+  PROVIDER_MODEL_SLUG_RE,
+  MAX_SLUG_ATTEMPTS,
   suffixSlug,
 } from "../../lib/provider-slug.js";
 import { SKILL_NAME_RE } from "../skills/service.js";
@@ -516,4 +525,366 @@ export async function deleteConnection(
   const row = await findOwnedConnection(db, userId, id);
   if (!row) notFound();
   await db.providerConnection.delete({ where: { id } });
+}
+// --- Model CRUD, discovery, and prefill -------------------------------------
+
+export type ProviderModelsDb = ProviderConnectionsDb & {
+  chatModel: {
+    findFirst(args: unknown): Promise<unknown | null>;
+  };
+  providerModel: {
+    count(args?: unknown): Promise<number>;
+    findMany(args: unknown): Promise<unknown[]>;
+    findFirst(args: unknown): Promise<unknown | null>;
+    create(args: { data: Record<string, unknown> }): Promise<unknown>;
+    update(args: {
+      where: { id: string };
+      data: Record<string, unknown>;
+    }): Promise<unknown>;
+    delete(args: { where: { id: string } }): Promise<unknown>;
+  };
+};
+
+type ModelRow = {
+  id: string;
+  slug: string;
+  upstreamId: string;
+  name: string;
+  label: string;
+  hint: string | null;
+  description: string | null;
+  iconSvg: string;
+  outputType: string;
+  contextWindowTokens: number | null;
+  maxInputTokens: number | null;
+  maxOutputTokens: number | null;
+  reasoningEfforts: string[];
+  capabilities: unknown;
+  imageCapabilities: unknown;
+  isActive: boolean;
+  sortOrder: number;
+  connectionId: string;
+  createdAt?: unknown;
+  updatedAt?: unknown;
+};
+
+export type ModelPrefill = {
+  name: string;
+  contextWindowTokens: number | null;
+  maxInputTokens: number | null;
+  maxOutputTokens: number | null;
+  reasoningEfforts: string[];
+  defaultReasoningEffort: string | null;
+  capabilities: Record<string, unknown> | null;
+  /** False when the adapter has no limits-table entry for the id. */
+  providerReported: boolean;
+};
+
+function statusCodeOf(error: unknown): number | undefined {
+  if (typeof error !== "object" || error === null) return undefined;
+  const value = (error as { statusCode?: unknown }).statusCode;
+  return typeof value === "number" ? value : undefined;
+}
+
+/**
+ * Turn a provider listing failure into a readable, credential-free message.
+ * Some gateways report the status only inside the message body, so a bare
+ * 401/403 in the text is treated as an auth failure too.
+ */
+function mapListingError(error: unknown, secrets: readonly string[]): string {
+  const status = statusCodeOf(error);
+  const text = error instanceof Error ? error.message : String(error);
+  const authFailure =
+    status !== undefined
+      ? status === 401 || status === 403
+      : /(^|\D)40[13](\D|$)/.test(text);
+  if (authFailure) {
+    return "The provider reported an invalid API key; check the key and its model-list permissions";
+  }
+  if (status === 404) {
+    return "The provider has no model list at this base URL; check that it includes the API root (for example /v1)";
+  }
+  if (status === 429) {
+    return "The provider rate limit was reached; try again shortly";
+  }
+  return redactProviderError(error, secrets);
+}
+
+/** Never expose the credential reference; model rows carry no secrets. */
+export function toPublicModel(row: ModelRow) {
+  return {
+    id: row.id,
+    slug: row.slug,
+    upstreamId: row.upstreamId,
+    name: row.name,
+    label: row.label,
+    hint: row.hint,
+    description: row.description,
+    iconSvg: row.iconSvg,
+    outputType: row.outputType === "image" ? "image" : "text",
+    contextWindowTokens: row.contextWindowTokens,
+    maxInputTokens: row.maxInputTokens,
+    maxOutputTokens: row.maxOutputTokens,
+    reasoningEfforts: [...row.reasoningEfforts],
+    capabilities: row.capabilities ?? null,
+    imageCapabilities: row.imageCapabilities ?? null,
+    isActive: row.isActive,
+    sortOrder: row.sortOrder,
+    connectionId: row.connectionId,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+async function requireConnection(
+  db: ProviderConnectionsDb,
+  userId: string,
+  connectionId: string,
+): Promise<ConnectionRow> {
+  const row = await findOwnedConnection(db, userId, connectionId);
+  if (!row) notFound("connectionId");
+  return row;
+}
+
+async function requireOwnedModel(
+  db: ProviderModelsDb,
+  userId: string,
+  connectionId: string,
+  modelId: string,
+): Promise<ModelRow> {
+  const row = (await db.providerModel.findFirst({
+    where: { id: modelId, connectionId, userId },
+  })) as ModelRow | null;
+  if (!row) notFound("modelId");
+  return row;
+}
+
+function connectionProviderKind(connection: ConnectionRow): ProviderKind {
+  const kind = connection.kind as ProviderKind;
+  if (!(PROVIDER_KINDS as readonly string[]).includes(kind)) {
+    fail("kind", "Connection provider kind is not recognised");
+  }
+  return kind;
+}
+
+function modelCredentials(connection: ConnectionRow): ProviderCredentials {
+  const stored = decodeProviderCredentials(connection.credentialsRef);
+  return {
+    apiKey: stored.apiKey,
+    baseUrl: connection.baseUrl,
+    headers: stored.headers ?? null,
+  };
+}
+
+/** Build the model once and read the adapter's own declaration back out. */
+export async function prefillModelFromUpstream(input: {
+  kind: ProviderKind;
+  upstreamId: string;
+  credentials: ProviderCredentials;
+  contextLimits?: ModelContextLimits | null;
+  reasoningEfforts?: readonly string[] | null;
+}): Promise<ModelPrefill> {
+  const model = createCompletionModelFor({
+    kind: input.kind,
+    upstreamId: input.upstreamId,
+    credentials: input.credentials,
+    contextLimits: input.contextLimits ?? null,
+    reasoningEfforts: input.reasoningEfforts ?? null,
+  });
+  const description = describeModel(model);
+  const limits = description.contextLimits;
+  return {
+    name: description.modelId,
+    contextWindowTokens: limits?.contextWindow ?? null,
+    maxInputTokens: limits?.maxInputTokens ?? null,
+    maxOutputTokens: limits?.maxOutputTokens ?? null,
+    reasoningEfforts: description.reasoningEfforts,
+    defaultReasoningEffort: description.defaultReasoningEffort,
+    capabilities: description.capabilities,
+    providerReported: limits !== null,
+  };
+}
+
+export async function discoverConnectionModels(
+  db: ProviderConnectionsDb,
+  userId: string,
+  connectionId: string,
+) {
+  const connection = await requireConnection(db, userId, connectionId);
+  const credentials = modelCredentials(connection);
+  try {
+    return await listProviderModels({
+      kind: connectionProviderKind(connection),
+      credentials,
+    });
+  } catch (error) {
+    return fail(
+      "baseUrl",
+      mapListingError(error, [credentials.apiKey ?? ""]),
+    );
+  }
+}
+
+export async function listConnectionModels(
+  db: ProviderModelsDb,
+  userId: string,
+  connectionId: string,
+) {
+  await requireConnection(db, userId, connectionId);
+  const rows = (await db.providerModel.findMany({
+    where: { connectionId, userId },
+    orderBy: [{ sortOrder: "asc" }, { slug: "asc" }],
+  })) as ModelRow[];
+  return rows.map(toPublicModel);
+}
+
+/**
+ * Derive a slug unique inside the user's scope and distinct from the global
+ * catalog, then persist the validated model.
+ */
+async function resolveModelSlug(
+  db: ProviderModelsDb,
+  userId: string,
+  connectionSlug: string,
+  upstreamId: string,
+  takenSlugs: ReadonlySet<string>,
+): Promise<string> {
+  const base = deriveModelSlug(connectionSlug, upstreamId);
+  for (let attempt = 1; attempt <= MAX_SLUG_ATTEMPTS; attempt += 1) {
+    const candidate = suffixSlug(base, attempt);
+    if (!PROVIDER_MODEL_SLUG_RE.test(candidate)) continue;
+    if (takenSlugs.has(candidate)) continue;
+    const clash = await db.chatModel.findFirst({
+      where: { modelId: candidate },
+      select: { id: true },
+    });
+    if (clash) continue;
+    return candidate;
+  }
+  return fail(
+    "upstreamId",
+    "Could not derive a unique model id; rename the connection or choose another model id",
+  );
+}
+
+async function collectModelSlugs(
+  db: ProviderModelsDb,
+  userId: string,
+  exclude?: string,
+): Promise<Set<string>> {
+  const rows = (await db.providerModel.findMany({
+    where: { userId },
+    select: { slug: true },
+  })) as { slug?: unknown }[];
+  return new Set(
+    rows
+      .map((row) => row.slug)
+      .filter((slug): slug is string => typeof slug === "string")
+      .filter((slug) => slug !== exclude),
+  );
+}
+
+export async function createConnectionModel(
+  db: ProviderModelsDb,
+  userId: string,
+  connectionId: string,
+  input: ProviderModelInput,
+) {
+  const connection = await requireConnection(db, userId, connectionId);
+  const meta = PROVIDER_KIND_META[connectionProviderKind(connection)];
+
+  const count = await db.providerModel.count({ where: { userId } });
+  if (count >= MAX_MODELS_PER_USER) {
+    fail(
+      "upstreamId",
+      `You can register at most ${MAX_MODELS_PER_USER} models`,
+    );
+  }
+
+  const value = validateModelInput(input, meta);
+  const taken = await collectModelSlugs(db, userId);
+  const slug = await resolveModelSlug(
+    db,
+    userId,
+    connection.slug,
+    value.upstreamId,
+    taken,
+  );
+
+  return db.providerModel.create({
+    data: {
+      userId,
+      connectionId,
+      slug,
+      upstreamId: value.upstreamId,
+      name: value.name,
+      label: value.label,
+      hint: value.hint,
+      description: value.description,
+      iconSvg: value.iconSvg,
+      outputType: value.outputType,
+      contextWindowTokens: value.contextWindowTokens,
+      maxInputTokens: value.maxInputTokens,
+      maxOutputTokens: value.maxOutputTokens,
+      reasoningEfforts: value.reasoningEfforts,
+    },
+  });
+}
+
+export async function updateConnectionModel(
+  db: ProviderModelsDb,
+  userId: string,
+  connectionId: string,
+  modelId: string,
+  input: ProviderModelInput,
+) {
+  const connection = await requireConnection(db, userId, connectionId);
+  const existing = await requireOwnedModel(db, userId, connectionId, modelId);
+  const meta = PROVIDER_KIND_META[connectionProviderKind(connection)];
+
+  const value = validateModelInput(
+    { ...input, upstreamId: input.upstreamId ?? existing.upstreamId },
+    meta,
+  );
+  // A changed upstream id needs a fresh slug; an unchanged one keeps its id so
+  // existing references stay valid.
+  const slug =
+    value.upstreamId === existing.upstreamId
+      ? existing.slug
+      : await resolveModelSlug(
+          db,
+          userId,
+          connection.slug,
+          value.upstreamId,
+          await collectModelSlugs(db, userId, existing.slug),
+        );
+
+  return db.providerModel.update({
+    where: { id: modelId },
+    data: {
+      slug,
+      upstreamId: value.upstreamId,
+      name: value.name,
+      label: value.label,
+      hint: value.hint,
+      description: value.description,
+      iconSvg: value.iconSvg,
+      outputType: value.outputType,
+      contextWindowTokens: value.contextWindowTokens,
+      maxInputTokens: value.maxInputTokens,
+      maxOutputTokens: value.maxOutputTokens,
+      reasoningEfforts: value.reasoningEfforts,
+    },
+  });
+}
+
+export async function deleteConnectionModel(
+  db: ProviderModelsDb,
+  userId: string,
+  connectionId: string,
+  modelId: string,
+): Promise<void> {
+  await requireConnection(db, userId, connectionId);
+  await requireOwnedModel(db, userId, connectionId, modelId);
+  await db.providerModel.delete({ where: { id: modelId } });
 }

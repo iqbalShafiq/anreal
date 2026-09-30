@@ -2,10 +2,15 @@ import { describe, expect, it, vi } from "vitest";
 import {
   ProviderInputError,
   createConnection,
+  createConnectionModel,
   deleteConnection,
+  deleteConnectionModel,
+  discoverConnectionModels,
   listConnections,
+  listConnectionModels,
   toPublicConnection,
   updateConnection,
+  updateConnectionModel,
   validateConnectionInput,
   validateModelInput,
 } from "./service.js";
@@ -176,6 +181,9 @@ describe("validateModelInput", () => {
 
 function makeDb(overrides: Record<string, unknown> = {}) {
   return {
+    chatModel: {
+      findFirst: vi.fn(async () => null),
+    },
     providerConnection: {
       count: vi.fn(async () => 0),
       findMany: vi.fn(async () => []),
@@ -190,7 +198,11 @@ function makeDb(overrides: Record<string, unknown> = {}) {
       })),
       delete: vi.fn(async () => ({})),
     },
-    providerModel: { count: vi.fn(async () => 0), findMany: vi.fn(async () => []) },
+    providerModel: {
+      count: vi.fn(async () => 0),
+      findMany: vi.fn(async () => []),
+      findFirst: vi.fn(async () => null),
+    },
     ...overrides,
   } as never;
 }
@@ -290,5 +302,281 @@ describe("connection CRUD", () => {
     await expect(deleteConnection(db, "u_1", "pc_other")).rejects.toThrow(
       /not found/i,
     );
+  });
+});
+
+vi.mock("@anreal/agent", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@anreal/agent")>();
+  return {
+    ...actual,
+    listProviderModels: vi.fn(async () => ({
+      data: [
+        { id: "openai/gpt-5.6-luna", name: "GPT 5.6 Luna", contextLength: 1_000_000 },
+        { id: "openai/gpt-5-nano", name: "GPT 5 Nano", contextLength: 400_000 },
+      ],
+    })),
+    describeModel: vi.fn(() => ({
+      provider: "openai",
+      modelId: "openai/gpt-5.6-luna",
+      capabilities: { streaming: true, tools: true, imageInput: true },
+      contextLimits: { contextWindow: 1_000_000, maxOutputTokens: 128_000 },
+      reasoningEfforts: ["none", "low", "medium", "high", "xhigh", "max"],
+      defaultReasoningEffort: "medium",
+    })),
+  };
+});
+
+describe("discoverConnectionModels", () => {
+  it("refuses a connection the caller does not own", async () => {
+    const db = makeDb();
+    await expect(
+      discoverConnectionModels(db, "u_1", "pc_other"),
+    ).rejects.toThrow(/not found/i);
+  });
+
+  it("lists through the stored credentials without whose secrets", async () => {
+    const ref = encodeProviderCredentials({ apiKey: "sk-stored" });
+    const db = makeDb({
+      providerConnection: {
+        findFirst: vi.fn(async () => ({
+          id: "pc_1",
+          kind: "compatible",
+          baseUrl: "https://gw.example/v1",
+          api: "chat",
+          credentialsRef: ref,
+        })),
+      },
+    });
+
+    const result = await discoverConnectionModels(db, "u_1", "pc_1");
+
+    expect(result.data).toHaveLength(2);
+    expect(result.data[0]).toMatchObject({ id: "openai/gpt-5.6-luna" });
+  });
+
+  it("maps a listing failure to a readable, redacted message", async () => {
+    const agent = await import("@anreal/agent");
+    vi.mocked(agent.listProviderModels).mockRejectedValueOnce(
+      new Error("401 Unauthorized for key sk-leaked-abcdef123456"),
+    );
+    const ref = encodeProviderCredentials({ apiKey: "sk-stored" });
+    const db = makeDb({
+      providerConnection: {
+        findFirst: vi.fn(async () => ({
+          id: "pc_1",
+          kind: "compatible",
+          baseUrl: "https://gw.example/v1",
+          api: "chat",
+          credentialsRef: ref,
+        })),
+      },
+    });
+
+    await expect(
+      discoverConnectionModels(db, "u_1", "pc_1"),
+    ).rejects.toThrow(/invalid api key/i);
+  });
+});
+
+describe("createConnectionModel", () => {
+  it("derives a slug from the connection slug and the upstream id", async () => {
+    const db = makeDb({
+      providerConnection: {
+        count: vi.fn(async () => 1),
+        findFirst: vi.fn(async () => ({
+          id: "pc_1",
+          userId: "u_1",
+          kind: "compatible",
+          slug: "my-openrouter",
+          baseUrl: "https://gw.example/v1",
+          api: "chat",
+          credentialsRef: encodeProviderCredentials({ apiKey: "sk-stored" }),
+        })),
+      },
+      providerModel: {
+        count: vi.fn(async () => 0),
+        findMany: vi.fn(async () => []),
+        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({
+          id: "pm_1",
+          ...data,
+        })),
+      },
+    });
+
+    await createConnectionModel(db, "u_1", "pc_1", {
+      upstreamId: "openai/GPT-5.6 Luna",
+      name: "GPT 5.6 Luna",
+      reasoningEfforts: ["low", "high"],
+    });
+
+    const call = (
+      db as never as { providerModel: { create: ReturnType<typeof vi.fn> } }
+    ).providerModel.create.mock.calls[0]?.[0] as {
+      data: { slug: string; upstreamId: string };
+    };
+    expect(call.data.slug).toBe("my-openrouter/openai-gpt-5.6-luna");
+    expect(call.data.upstreamId).toBe("openai/GPT-5.6 Luna");
+  });
+
+  it("suffixes when the slug is taken inside the user scope", async () => {
+    const db = makeDb({
+      providerConnection: {
+        count: vi.fn(async () => 1),
+        findFirst: vi.fn(async () => ({
+          id: "pc_1",
+          userId: "u_1",
+          kind: "compatible",
+          slug: "gw",
+          baseUrl: "https://gw.example/v1",
+          api: "chat",
+          credentialsRef: encodeProviderCredentials({ apiKey: "sk-stored" }),
+        })),
+      },
+      providerModel: {
+        count: vi.fn(async () => 1),
+        findMany: vi.fn(async () => [{ slug: "gw/model-x" }]),
+        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({
+          id: "pm_2",
+          ...data,
+        })),
+      },
+    });
+
+    await createConnectionModel(db, "u_1", "pc_1", { upstreamId: "model-x" });
+
+    const call = (
+      db as never as { providerModel: { create: ReturnType<typeof vi.fn> } }
+    ).providerModel.create.mock.calls[0]?.[0] as { data: { slug: string } };
+    expect(call.data.slug).toBe("gw/model-x-2");
+  });
+
+  it("enforces the per-user model cap", async () => {
+    const db = makeDb({
+      providerConnection: {
+        findFirst: vi.fn(async () => ({
+          id: "pc_1",
+          userId: "u_1",
+          kind: "compatible",
+          slug: "gw",
+          baseUrl: "https://gw.example/v1",
+          api: "chat",
+          credentialsRef: encodeProviderCredentials({ apiKey: "sk-stored" }),
+        })),
+      },
+      providerModel: {
+        count: vi.fn(async () => 100),
+        findMany: vi.fn(async () => []),
+      },
+    });
+
+    await expect(
+      createConnectionModel(db, "u_1", "pc_1", { upstreamId: "x" }),
+    ).rejects.toThrow(/at most 100/i);
+  });
+});
+
+describe("updateConnectionModel", () => {
+  function dbWithModel() {
+    return makeDb({
+      providerConnection: {
+        findFirst: vi.fn(async () => ({
+          id: "pc_1",
+          userId: "u_1",
+          kind: "compatible",
+          slug: "gw",
+          baseUrl: "https://gw.example/v1",
+          api: "chat",
+          credentialsRef: encodeProviderCredentials({ apiKey: "sk-stored" }),
+        })),
+      },
+      providerModel: {
+        count: vi.fn(async () => 1),
+        findMany: vi.fn(async () => [{ slug: "gw/model-x" }]),
+        findFirst: vi.fn(async () => ({
+          id: "pm_1",
+          slug: "gw/model-x",
+          upstreamId: "model-x",
+          userId: "u_1",
+          connectionId: "pc_1",
+        })),
+        update: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({
+          id: "pm_1",
+          ...data,
+        })),
+      },
+    });
+  }
+
+  it("re-validates and keeps the stored slug when the upstream id is unchanged", async () => {
+    const db = dbWithModel();
+
+    await updateConnectionModel(db, "u_1", "pc_1", "pm_1", {
+      upstreamId: "model-x",
+      name: "Renamed",
+      reasoningEfforts: ["high"],
+    });
+
+    const call = (
+      db as never as { providerModel: { update: ReturnType<typeof vi.fn> } }
+    ).providerModel.update.mock.calls[0]?.[0] as {
+      data: { slug: string; name: string; reasoningEfforts: string[] };
+    };
+    expect(call.data.slug).toBe("gw/model-x");
+    expect(call.data.name).toBe("Renamed");
+    expect(call.data.reasoningEfforts).toEqual(["high"]);
+  });
+
+  it("404s a model the caller does not own", async () => {
+    const db = makeDb();
+
+    await expect(
+      updateConnectionModel(db, "u_1", "pc_1", "pm_other", { name: "X" }),
+    ).rejects.toThrow(/not found/i);
+  });
+});
+
+describe("deleteConnectionModel", () => {
+  it("deletes a model inside the caller's scope", async () => {
+    const db = makeDb({
+      providerConnection: {
+        findFirst: vi.fn(async () => ({
+          id: "pc_1",
+          userId: "u_1",
+          kind: "compatible",
+          slug: "gw",
+          credentialsRef: encodeProviderCredentials({ apiKey: "sk-stored" }),
+        })),
+      },
+      providerModel: {
+        findFirst: vi.fn(async () => ({ id: "pm_1", slug: "gw/model-x" })),
+        delete: vi.fn(async () => ({})),
+      },
+    });
+
+    await deleteConnectionModel(db, "u_1", "pc_1", "pm_1");
+
+    expect(
+      (
+        db as never as { providerModel: { delete: ReturnType<typeof vi.fn> } }
+      ).providerModel.delete,
+    ).toHaveBeenCalledWith({ where: { id: "pm_1" } });
+  });
+
+  it("404s a model the caller does not own", async () => {
+    const db = makeDb({
+      providerConnection: {
+        findFirst: vi.fn(async () => ({
+          id: "pc_1",
+          userId: "u_1",
+          kind: "compatible",
+          slug: "gw",
+          credentialsRef: encodeProviderCredentials({ apiKey: "sk-stored" }),
+        })),
+      },
+    });
+
+    await expect(
+      deleteConnectionModel(db, "u_1", "pc_1", "pm_other"),
+    ).rejects.toThrow(/not found/i);
   });
 });
