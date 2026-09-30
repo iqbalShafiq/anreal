@@ -10,6 +10,7 @@ const service = vi.hoisted(() => ({
   createConnectionModel: vi.fn(async () => ({ id: "pm_1" })),
   updateConnectionModel: vi.fn(async () => ({ id: "pm_1" })),
   deleteConnectionModel: vi.fn(async () => undefined),
+  setConnectionEnabled: vi.fn(async () => ({ id: "pc_1" })),
   discoverConnectionModels: vi.fn(async () => ({ data: [] })),
 }));
 
@@ -76,5 +77,31 @@ describe("provider routes", () => {
       expect.anything(),
       "u_1",
     );
+  });
+
+  it("toggles a connection through the enabled route", async () => {
+    const res = await app.request("/api/providers/pc_1/enabled", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ isEnabled: false }),
+    });
+    expect(res.status).toBe(200);
+    expect(service.setConnectionEnabled).toHaveBeenCalledWith(
+      expect.anything(),
+      "u_1",
+      "pc_1",
+      false,
+    );
+  });
+
+  it("rejects a malformed enabled body", async () => {
+    service.setConnectionEnabled.mockClear();
+    const res = await app.request("/api/providers/pc_1/enabled", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ isEnabled: "no" }),
+    });
+    expect(res.status).toBe(400);
+    expect(service.setConnectionEnabled).not.toHaveBeenCalled();
   });
 });

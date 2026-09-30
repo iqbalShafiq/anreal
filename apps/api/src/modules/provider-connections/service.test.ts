@@ -9,6 +9,7 @@ import {
   listConnections,
   listConnectionModels,
   prefillConnectionModel,
+  setConnectionEnabled,
   toPublicConnection,
   updateConnection,
   updateConnectionModel,
@@ -303,6 +304,38 @@ describe("connection CRUD", () => {
     await expect(deleteConnection(db, "u_1", "pc_other")).rejects.toThrow(
       /not found/i,
     );
+  });
+});
+
+describe("setConnectionEnabled", () => {
+  it("writes isActive for an owned connection", async () => {
+    const db = makeDb({
+      providerConnection: {
+        findFirst: vi.fn(async () => ({
+          id: "pc_1",
+          userId: "u_1",
+          isActive: true,
+        })),
+        update: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({
+          id: "pc_1",
+          ...data,
+        })),
+      },
+    });
+
+    await setConnectionEnabled(db, "u_1", "pc_1", false);
+
+    expect(
+      (db as never as { providerConnection: { update: ReturnType<typeof vi.fn> } })
+        .providerConnection.update,
+    ).toHaveBeenCalledWith({ where: { id: "pc_1" }, data: { isActive: false } });
+  });
+
+  it("404s a connection owned by another user", async () => {
+    const db = makeDb();
+    await expect(
+      setConnectionEnabled(db, "u_1", "pc_other", false),
+    ).rejects.toThrow(/not found/i);
   });
 });
 

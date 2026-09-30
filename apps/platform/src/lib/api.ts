@@ -2195,11 +2195,6 @@ export type ProviderConnectionInput = {
   /** Write-only. Never returned by any endpoint; omit on update to keep it. */
   apiKey?: string;
   headers?: Record<string, string>;
-  /**
-   * Active flag toggled from the connection list. Only meaningful on update;
-   * create always starts active.
-   */
-  isActive?: boolean;
 };
 
 export type ProviderModelInput = {
@@ -2356,6 +2351,29 @@ export async function deleteProviderConnection(id: string): Promise<void> {
   if (!response.ok) {
     await throwSkillError(response, "Failed to delete provider connection");
   }
+}
+
+/** Flip a connection's active flag; mirrors `setMcpServerEnabled`. */
+export async function setProviderConnectionEnabled(
+  id: string,
+  isEnabled: boolean,
+): Promise<ProviderConnection> {
+  const response = await apiFetch(
+    `${API_BASE}/api/providers/${encodeURIComponent(id)}/enabled`,
+    {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ isEnabled }),
+    },
+  );
+  if (!response.ok) {
+    await throwSkillError(response, "Failed to update provider connection");
+  }
+  const data: unknown = await response.json();
+  if (!isProviderConnection(data)) {
+    throw new Error("Unexpected provider connection response shape");
+  }
+  return data;
 }
 
 export async function discoverProviderModels(

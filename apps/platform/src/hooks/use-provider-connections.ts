@@ -7,6 +7,7 @@ import {
   discoverProviderModels,
   listProviderConnections,
   listProviderModels,
+  setProviderConnectionEnabled,
   updateProviderConnection,
   updateProviderModel,
   type ListedProviderModel,
@@ -94,17 +95,12 @@ export function useProviderConnections(active: boolean) {
   );
 
   const toggle = useCallback(
-    (id: string, isActive: boolean) =>
-      mutate(() => {
-        const current = data?.find((row) => row.id === id);
-        if (!current) throw new Error("Provider connection not found");
-        return updateProviderConnection(id, {
-          kind: current.kind,
-          label: current.label,
-          isActive,
-        });
-      }, "Could not update provider connection"),
-    [data, mutate],
+    (id: string, isEnabled: boolean) =>
+      mutate(
+        () => setProviderConnectionEnabled(id, isEnabled),
+        "Could not update provider connection",
+      ),
+    [mutate],
   );
 
   /** The provider's own model inventory; never persists anything. */

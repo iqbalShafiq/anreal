@@ -526,6 +526,21 @@ export async function deleteConnection(
   if (!row) notFound();
   await db.providerConnection.delete({ where: { id } });
 }
+
+/** Flip a connection's active flag; mirrors `setSkillEnabled`. */
+export async function setConnectionEnabled(
+  db: ProviderConnectionsDb,
+  userId: string,
+  id: string,
+  isEnabled: boolean,
+) {
+  const row = await findOwnedConnection(db, userId, id);
+  if (!row) notFound();
+  return db.providerConnection.update({
+    where: { id },
+    data: { isActive: isEnabled },
+  });
+}
 // --- Model CRUD, discovery, and prefill -------------------------------------
 
 export type ProviderModelsDb = ProviderConnectionsDb & {

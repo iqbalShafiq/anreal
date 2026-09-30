@@ -23,6 +23,7 @@ import {
   listConnectionModels,
   listConnections,
   prefillConnectionModel,
+  setConnectionEnabled,
   updateConnection,
   updateConnectionModel,
   type ProviderIssue,
@@ -153,6 +154,29 @@ export const providerConnectionsRouter = new Hono<{ Variables: AuthVariables }>(
     }
     try {
       return c.json(await createConnection(prisma, c.get("user").id, parsed.data), 201);
+    } catch (error) {
+      const response = providerErrorResponse(error);
+      if (response) return c.json(response.body, response.status);
+      throw error;
+    }
+  })
+  .patch("/:id/enabled", async (c) => {
+    const parsed = z
+      .object({ isEnabled: z.boolean() })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) {
+      return c.json({ error: "Invalid enabled request" }, 400);
+    }
+    try {
+      return c.json(
+        await setConnectionEnabled(
+          prisma,
+          c.get("user").id,
+          c.req.param("id"),
+          parsed.data.isEnabled,
+        ),
+      );
     } catch (error) {
       const response = providerErrorResponse(error);
       if (response) return c.json(response.body, response.status);
