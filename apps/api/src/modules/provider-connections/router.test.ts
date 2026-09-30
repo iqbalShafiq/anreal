@@ -186,6 +186,29 @@ describe("provider routes", () => {
     expect(body.error).toMatch(/invalid api key/i);
   });
 
+  it("turns a unique-constraint violation into a field error", async () => {
+    service.createConnectionModel.mockRejectedValueOnce(
+      Object.assign(
+        new Error(
+          "Unique constraint failed on the fields: (`connectionId`,`upstreamId`)",
+        ),
+        { code: "P2002" },
+      ),
+    );
+    const res = await app.request("/api/providers/pc_1/models", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ upstreamId: "openai/gpt-5.6-luna" }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as {
+      error?: string;
+      issues?: { path: string }[];
+    };
+    expect(body.issues?.[0]?.path).toBe("slug");
+    expect(body.error).toMatch(/already in use/i);
+  });
+
   it("is registered before the :id route", async () => {
     service.testProviderConnection.mockClear();
     const res = await app.request("/api/providers/test", {

@@ -122,6 +122,7 @@ export function useProviderModels(
   const reload = useCallback(async () => {
     if (!connectionId) {
       setData(null);
+      setError(null);
       return;
     }
     try {

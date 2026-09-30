@@ -15,6 +15,9 @@ const cipher = createCredentialsCipher({
   logTag: "providers",
 });
 
+/** Resolve the vault key now so a bad config fails at boot, not on first use. */
+export const resolveCredentialsKey = cipher.resolveKey;
+
 /** Encrypt provider credentials into an opaque storage reference. */
 export function encodeProviderCredentials(value: ProviderCredentials): string {
   const headers = value.headers ?? null;

@@ -125,21 +125,25 @@ function notFound(path = "id") {
 
 /** Map a service failure onto a status plus a field-level body. */
 function providerErrorResponse(error: unknown) {
+  // A Prisma unique violation has no ProviderInputError shape, so it has to be
+  // recognised before the gate below or it degrades to a generic 500.
+  if (isUniqueViolation(error)) {
+    return {
+      status: 400 as const,
+      body: {
+        error: "That slug or model id is already in use",
+        issues: [
+          { path: "slug", message: "That slug or model id is already in use" },
+        ],
+      },
+    };
+  }
   const providerError = asProviderError(error);
   if (!providerError) return null;
   const missing = providerError.issues.some((issue) =>
     /not found/i.test(issue.message),
   );
   if (missing) return { status: 404 as const, body: notFound() };
-  if (isUniqueViolation(error)) {
-    return {
-      status: 400 as const,
-      body: {
-        error: "That slug or model id is already in use",
-        issues: [{ path: "slug", message: "That slug or model id is already in use" }],
-      },
-    };
-  }
   return {
     status: 400 as const,
     body: { error: providerError.issues[0]?.message ?? "Invalid provider configuration", issues: providerError.issues },

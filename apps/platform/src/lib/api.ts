@@ -2259,7 +2259,10 @@ function isProviderConnection(value: unknown): value is ProviderConnection {
     typeof value.id === "string" &&
     typeof value.kind === "string" &&
     typeof value.label === "string" &&
-    typeof value.slug === "string"
+    typeof value.slug === "string" &&
+    typeof value.hasCredentials === "boolean" &&
+    typeof value.isActive === "boolean" &&
+    typeof value.sortOrder === "number"
   );
 }
 

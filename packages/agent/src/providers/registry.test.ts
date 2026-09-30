@@ -85,6 +85,12 @@ describe("effortVocabulary", () => {
       "max",
     ]);
   });
+
+  it("hands out a frozen array so a caller cannot change the server vocabulary", () => {
+    const vocabulary = effortVocabulary();
+    expect(Object.isFrozen(vocabulary)).toBe(true);
+    expect(() => (vocabulary as string[]).push("enormous")).toThrow(TypeError);
+  });
 });
 
 describe("createCompletionModelFor", () => {

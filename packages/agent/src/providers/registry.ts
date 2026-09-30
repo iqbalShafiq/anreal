@@ -112,14 +112,14 @@ export const PROVIDER_KIND_META: Record<ProviderKind, ProviderKindMeta> = {
  * The union of every adapter's declared reasoning vocabulary. Adapters own
  * their values; this module never retypes them as literals.
  */
-const EFFORT_VOCABULARY: readonly string[] = [
+const EFFORT_VOCABULARY: readonly string[] = Object.freeze([
   ...new Set<string>([
     ...OPENAI_REASONING_EFFORTS,
     ...ANTHROPIC_REASONING_EFFORTS,
     ...GEMINI_REASONING_EFFORTS,
     ...GROK_REASONING_EFFORTS,
   ]),
-];
+]);
 
 export function effortVocabulary(): readonly string[] {
   return EFFORT_VOCABULARY;

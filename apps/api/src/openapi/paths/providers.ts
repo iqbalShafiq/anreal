@@ -82,6 +82,14 @@ const modelBodyExample = {
   reasoningEfforts: ["low", "medium", "high"],
 };
 
+const connectionTestBodyExample = {
+  kind: "compatible",
+  baseUrl: "https://openrouter.ai/api/v1",
+  apiKey: "sk-or-v1-...",
+};
+
+const connectionEnabledBodyExample = { isEnabled: false };
+
 const connectionBody = {
   type: "object",
   required: ["kind", "label"],
@@ -145,6 +153,51 @@ const modelBody = {
   },
 };
 
+
+const connectionTestBody = {
+  type: "object",
+  required: ["kind"],
+  properties: {
+    kind: {
+      type: "string",
+      enum: ["openai", "anthropic", "gemini", "grok", "mistral", "compatible"],
+    },
+    baseUrl: {
+      type: ["string", "null"],
+      description:
+        "Ignored when a stored credential is reused via `connectionId`.",
+    },
+    api: {
+      type: ["string", "null"],
+      enum: ["chat", "responses", null],
+      description: "Accepted for editor parity; model listing does not use it.",
+    },
+    apiKey: {
+      type: "string",
+      description:
+        "The key to probe with. Omit or send blank together with `connectionId` to reuse the stored credential.",
+    },
+    headers: {
+      type: ["object", "null"],
+      additionalProperties: { type: "string" },
+      description:
+        "Gateway headers. Ignored when a stored credential is reused, and `authorization` is rejected.",
+    },
+    connectionId: {
+      type: ["string", "null"],
+      description:
+        "Reuse this owned connection's stored credential, kind, base URL, and headers when `apiKey` is blank.",
+    },
+  },
+};
+
+const connectionEnabledBody = {
+  type: "object",
+  required: ["isEnabled"],
+  properties: {
+    isEnabled: { type: "boolean" },
+  },
+};
 
 export const providersPaths = {
   "/api/providers/kinds": {
@@ -247,6 +300,81 @@ export const providersPaths = {
         ),
         "400": invalidConnection,
         "401": unauthorized,
+      },
+    },
+  },
+  "/api/providers/test": {
+    post: {
+      operationId: "testProviderConnection",
+      tags: ["Providers"],
+      summary: "Test a provider connection without saving it",
+      description:
+        "Probes the provider's model-listing endpoint and reports how many models it returned. Send an explicit `apiKey`, or omit it and pass `connectionId` to reuse a stored credential — on that path the stored kind, base URL, and headers are used and the request's values for those fields are ignored.",
+      security: bearerOrCookie,
+      requestBody: {
+        required: true,
+        content: jsonSchema(connectionTestBody, {
+          default: {
+            summary: "Test with an explicit key",
+            value: connectionTestBodyExample,
+          },
+        }),
+      },
+      responses: {
+        "200": jsonResponse(
+          "The provider answered its model list.",
+          {
+            type: "object",
+            required: ["ok", "modelCount"],
+            properties: {
+              ok: { type: "boolean" },
+              modelCount: { type: "integer" },
+            },
+          },
+          {
+            default: {
+              summary: "Reachable",
+              value: { ok: true, modelCount: 42 },
+            },
+          },
+        ),
+        "400": invalidConnection,
+        "401": unauthorized,
+        "404": connectionNotFound,
+      },
+    },
+  },
+  "/api/providers/{id}/enabled": {
+    patch: {
+      operationId: "setProviderConnectionEnabled",
+      tags: ["Providers"],
+      summary: "Enable or disable a provider connection",
+      description:
+        "Inactive connections and their models disappear from the composer catalog without being deleted.",
+      security: bearerOrCookie,
+      requestBody: {
+        required: true,
+        content: jsonSchema(connectionEnabledBody, {
+          default: {
+            summary: "Disable the connection",
+            value: connectionEnabledBodyExample,
+          },
+        }),
+      },
+      responses: {
+        "200": jsonResponse(
+          "Updated.",
+          providerConnectionSchema,
+          {
+            default: {
+              summary: "Disabled connection",
+              value: { ...connectionExample, isActive: false },
+            },
+          },
+        ),
+        "400": invalidConnection,
+        "401": unauthorized,
+        "404": connectionNotFound,
       },
     },
   },
