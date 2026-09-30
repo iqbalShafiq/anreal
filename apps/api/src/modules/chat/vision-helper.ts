@@ -546,8 +546,8 @@ export function sniffImageMediaType(buffer: Buffer): string | null {
 
 /**
  * Resolve the vision model used by view_image: a user's explicit
- * `visionHelper` assignment when set (validated for image input when it was
- * saved), else the VISION_HELPER_MODEL env override when it is an active
+ * `visionHelper` assignment when it resolves to a model that declares image
+ * input, else the VISION_HELPER_MODEL env override when it is an active
  * image-capable model, otherwise the cheapest active vision chat model in the
  * registry.
  */
@@ -564,8 +564,16 @@ export async function resolveVisionHelperModel(
   const visionModelId =
     assignments.find((entry) => entry.role === "visionHelper")?.modelId ?? null;
   if (visionModelId) {
-    const model = await buildRoleCompletionModel(prisma, userId, "visionHelper");
-    if (model) return model;
+    // The builder folds in the env default, and a *dangling* assignment falls
+    // through to it — so verify the built handle accepts images rather than
+    // trusting the assignment's provenance. `capabilities` is the adapter's own
+    // declaration (Anvia-native), so this holds for BYOK and catalog models alike.
+    const assigned = await buildRoleCompletionModel(
+      prisma,
+      userId,
+      "visionHelper",
+    );
+    if (assigned?.capabilities.imageInput) return assigned;
   }
 
   // 2. The env override predates assignments and is NOT validated, so it keeps

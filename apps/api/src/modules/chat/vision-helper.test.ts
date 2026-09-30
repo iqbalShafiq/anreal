@@ -319,7 +319,7 @@ describe("resolveVisionHelperModel", () => {
   });
 
   it("uses the user's assignment and scopes the lookup by userId", async () => {
-    const assigned = { modelId: "openai/gpt-6-luna" };
+    const assigned = { modelId: "openai/gpt-6-luna", capabilities: { imageInput: true } };
     f.listRoleAssignments.mockResolvedValue([
       { role: "visionHelper", modelId: "openai/gpt-6-luna", defaultModelId: null },
     ]);
@@ -332,6 +332,34 @@ describe("resolveVisionHelperModel", () => {
       "u_1",
       "visionHelper",
     );
+  });
+
+  it("ignores a resolved assignment that does not accept images", async () => {
+    // The gap: an assignment exists, so the builder is consulted, but it folds
+    // in a text-only env default after the assignment dangled. The built
+    // handle declares no image input, so it must never reach view_image.
+    vi.stubEnv("VISION_HELPER_MODEL", "text-only/env-model");
+    f.listRoleAssignments.mockResolvedValue([
+      { role: "visionHelper", modelId: "text-only/assigned", defaultModelId: null },
+    ]);
+    f.buildRoleCompletionModel.mockResolvedValue({
+      modelId: "text-only/assigned",
+      capabilities: { imageInput: false },
+    });
+    f.findActiveModel.mockResolvedValue({ inputModalities: ["text"] });
+    f.listModels.mockResolvedValue({
+      models: [
+        { modelId: "vision-cheap", inputModalities: ["text", "image"], prices: { input: 1 } },
+      ],
+      reasoningEfforts: [],
+    });
+
+    await expect(resolveVisionHelperModel("u_1")).resolves.toEqual({
+      modelId: "vision-cheap",
+    });
+    expect(f.createCompletionModel).toHaveBeenCalledWith("vision-cheap");
+    expect(f.createCompletionModel).not.toHaveBeenCalledWith("text-only/assigned");
+    expect(f.createCompletionModel).not.toHaveBeenCalledWith("text-only/env-model");
   });
 
   it("still falls through to the dynamic pick when the assigned model is gone", async () => {
