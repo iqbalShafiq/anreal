@@ -418,7 +418,7 @@ Selain katalog model yang di-seed, tiap user bisa membawa **API key provider sen
 
 **Catatan image (rencana).** Ketika BYOK image generation nanti diimplementasikan (Phase D), jalurnya akan lewat kind `compatible`, yang berbicara `POST /images` ala OpenRouter. Kind `openai` native direncanakan **tidak** ikut menawarkan model image: API images native OpenAI punya parameter berbeda dan tidak punya `input_references`, sedangkan alur `edit_image` aplikasi mengirim reference image dan membutuhkannya. Karena itu `compatible` adalah satu-satunya jalur image yang cocok.
 
-**Pengaturan model per-role belum ada.** Memilih model untuk peran background — memory compaction, profile summarization, site builder, vision helper, scheduled chat — adalah fase berikutnya (Phase C) dan **belum diimplementasikan**. Saat ini lewat katalog gabungan yang bisa dipilih hanyalah model chat/teks; model image tetap berasal dari katalog seed.
+**Model per peran.** Setiap peran background — memory compaction, profile summarization, site builder, vision helper, scheduled chat, dan model chat utama — bisa diarahkan ke model pilihannya sendiri. Detailnya di subsection **Model per peran** di bawah. Lewat katalog gabungan yang bisa dipilih per peran adalah model chat/teks; model image tetap berasal dari katalog seed.
 
 **Menguji connection.** `POST /api/providers/test` memvalidasi credential ke provider **tanpa menyimpan apa pun**; endpoint menerima `connectionId` opsional sehingga field key yang dibiarkan kosong akan memakai credential yang tersimpan. Test yang gagal mengembalikan pesan yang mudah dibaca dan bebas credential.
 
@@ -444,6 +444,38 @@ Semua endpoint **require auth**, dan setiap respons di-scope ke user pemanggil:
 | `POST` | `/api/providers/:id/models/prefill` | Metadata yang dideklarasikan adapter |
 
 UI-nya ada di **Settings → Providers**.
+
+### Model per peran
+
+Setiap **peran background** bisa diarahkan ke model pilihannya sendiri lewat **Settings → Account → Model assignments** — satu picker per peran. Pilihan **Default** (opsi kosong) menghapus assignment dan mengembalikan peran itu ke jalur default-nya.
+
+| Peran | Label di UI | Yang diatur |
+| --- | --- | --- |
+| `chat` | Chat | Model chat utama |
+| `memoryCompaction` | Memory compaction | Summarizer yang memadatkan memory percakapan lama di dalam satu run |
+| `profileSummary` | Profile summary | Summarizer profil user/proyek yang jalan di background |
+| `siteBuilder` | Site builder | Worker static site builder |
+| `visionHelper` | Image understanding | Model yang mendeskripsikan gambar untuk model chat text-only |
+| `scheduledChat` | Scheduled chats | Model yang dipakai run chat terjadwal (cron) |
+
+**Precedence.** Model sebuah peran diresolusi dengan urutan **assignment user → env var yang ada → default yang ada**. User yang belum pernah menyentuh pengaturan ini berjalan byte-identik seperti sebelum fitur ini ada — properti itulah yang dijaga seluruh desainnya.
+
+**Lapisan env var.** Tiga peran masih membaca env var sebagai lapisan tengah: `PROFILE_SUMMARY_MODEL` (profile summary), `SITE_MODEL` (site builder), dan `VISION_HELPER_MODEL` (vision helper). `scheduledChat` tidak punya env var dan jatuh ke default completion model aplikasi (`openai/gpt-6-luna`). `chat` dan `memoryCompaction` tidak punya default sendiri.
+
+**Memory compaction mengikuti model chat** kecuali di-assign eksplisit. Default-nya adalah model chat milik run itu sendiri, bukan model terpisah — karena itu picker-nya menampilkan **"No default model configured"**.
+
+**Assignment yang menggantung turun diam-diam ke default.** Kalau user menghapus connection BYOK atau model yang ditunjuk assignment (atau seed memangkas model katalog), peran itu kembali ke jalur env/default-nya dan server menulis peringatan di log — user tidak diblokir dan tidak ada yang error.
+
+**Vision helper hanya menerima model yang mendeklarasikan image input.** Model text-only ditolak saat assignment disimpan, dengan pesan yang menyebutkannya — bukan gagal belakangan saat ada gambar masuk.
+
+**Tanpa restart.** Assignment diresolusi secara live; untuk `memoryCompaction` bahkan di dalam run yang sedang berjalan, sehingga percakapan aktif bisa memakai compactor model yang baru di tengah percakapan.
+
+Endpoint (semua **require auth**, di-scope ke user pemanggil):
+
+| Method | Path | Keterangan |
+| --- | --- | --- |
+| `GET` | `/api/models/roles` | Satu entri per peran: assignment (`modelId`, `null` bila dikosongkan) + default yang diresolusi (`defaultModelId`) |
+| `PUT` | `/api/models/roles` | Body `{ role, modelId }` — `modelId` adalah id katalog gabungan, atau `null` untuk menghapus assignment |
 
 ## User profiling
 
