@@ -19,10 +19,10 @@ import { vi } from "vitest";
 import type { InteractionRecord, InteractionStore } from "./interaction-store.js";
 
 const recipe = parseChatAgentRecipe({
-  version: 7,
+  version: 8,
   agentId: CHAT_AGENT_ID,
   identity: { sessionId: "session-1", userId: "user-1", projectId: null },
-  model: { id: "openai/gpt-5.6-luna", reasoningEffort: "medium" },
+  model: { id: "openai/gpt-5.6-luna", connectionId: null, reasoningEffort: "medium" },
   memoryPolicy: {
     version: 1,
     savePolicy: "turn",

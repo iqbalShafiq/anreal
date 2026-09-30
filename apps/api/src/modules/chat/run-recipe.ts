@@ -4,7 +4,23 @@ import { imageGenSettingsSchema } from "./image-gen-settings.js";
 import { SKILL_NAME_RE } from "../skills/service.js";
 
 export const CHAT_AGENT_ID = "chat-agent" as const;
-export const CHAT_AGENT_RECIPE_VERSION = 7 as const;
+export const CHAT_AGENT_RECIPE_VERSION = 8 as const;
+
+/**
+ * Raised when a run's frozen recipe references a provider connection that no
+ * longer exists (deleted after the run was queued). Retrying cannot fix it, so
+ * the message tells the user what to do instead of surfacing a generic error.
+ */
+export class ProviderConnectionMissingError extends Error {
+  readonly code = "PROVIDER_CONNECTION_MISSING";
+  constructor(connectionId: string) {
+    super(
+      "The provider connection for this run was removed. Pick another model and send the message again.",
+    );
+    this.name = "ProviderConnectionMissingError";
+    void connectionId;
+  }
+}
 
 /**
  * Recipes cross the BullMQ/Redis boundary. Keep every string bounded and
@@ -162,6 +178,8 @@ export const chatAgentRecipeSchema = z
     model: z
       .object({
         id,
+        /** Set when the model comes from a user connection; never a secret. */
+        connectionId: id.nullable(),
         reasoningEffort: z.enum(REASONING_EFFORT_KEYS).nullable(),
       })
       .strict(),

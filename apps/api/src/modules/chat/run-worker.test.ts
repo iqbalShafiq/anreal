@@ -11,7 +11,7 @@ import {
 } from "@anvia/core/agent/interactions";
 import type { ChatResumableEvent } from "./client-events.js";
 import type { StartRunJob, ResumeRunJob } from "./run-queue.js";
-import { CHAT_AGENT_ID } from "./run-recipe.js";
+import { CHAT_AGENT_ID, CHAT_AGENT_RECIPE_VERSION } from "./run-recipe.js";
 import {
   ActiveRunRegistry,
   createChatRunProcessor,
@@ -23,10 +23,14 @@ const SESSION_ID = "session-1";
 const STREAM_ID = "stream-1";
 
 const recipe = {
-  version: 7 as const,
+  version: CHAT_AGENT_RECIPE_VERSION,
   agentId: CHAT_AGENT_ID,
   identity: { sessionId: SESSION_ID, userId: USER_ID, projectId: null },
-  model: { id: "deepseek/deepseek-v4-flash-0731", reasoningEffort: "max" as const },
+  model: {
+    id: "deepseek/deepseek-v4-flash-0731",
+    connectionId: null,
+    reasoningEffort: "max" as const,
+  },
   memoryPolicy: {
     version: 1 as const,
     savePolicy: "turn" as const,

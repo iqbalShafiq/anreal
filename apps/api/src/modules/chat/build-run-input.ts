@@ -83,6 +83,8 @@ import {
   OpenRouterImageGenerationModel,
   parseSiteBrief,
   compactorProviderOptionsFor,
+  createCompletionModelFor,
+  responsesReasoningSummaryOptions,
   renderProfileContextText,
   WEB_SEARCH_INSTRUCTION,
   WEB_SEARCH_TEXT_ONLY_IMAGE_INSTRUCTION,
@@ -98,6 +100,8 @@ import {
   type ToolWaitProgress,
   type ImageCapabilitySet,
   type ProfileScope,
+  type ProviderKind,
+  type StreamingCompletionModel,
   type ProfileSectionKey,
   type ReasoningEffort,
 } from "@anreal/agent";
@@ -156,9 +160,11 @@ import {
   loadProfileData,
   summarizeProfileForScope,
 } from "../profiling/service.js";
+import { decodeProviderCredentials } from "../provider-connections/credentials.js";
 import {
   CHAT_AGENT_ID,
   CHAT_AGENT_RECIPE_VERSION,
+  ProviderConnectionMissingError,
   attachChatAgentRecipeClaim,
   chatAgentImageGenSettingsSchema,
   createChatAgentRecipe,
@@ -703,6 +709,8 @@ export type SingleUseContextClaimPrisma = {
 };
 
 type RecipeModelResolution = {
+  /** Set when the id resolved to a user connection model. */
+  connectionId?: string | null;
   reasoningEfforts: string[];
   inputModalities: string[];
   contextWindowTokens?: number;
@@ -810,9 +818,102 @@ export type ResolveChatAgentRecipeInput = {
  * These dependencies create live runtime objects only after a validated
  * recipe has crossed the queue boundary; none are serialized in the recipe.
  */
+export type RecipeModelDb = {
+  providerConnection: {
+    findFirst(args: unknown): Promise<unknown | null>;
+  };
+};
+
+interface RecipeConnectionRow {
+  kind: string;
+  baseUrl: string | null;
+  api: string | null;
+  credentialsRef: string;
+  models: { upstreamId: string; reasoningEfforts: string[] }[];
+}
+
+/**
+ * Rebuild the run's completion model. Catalog models keep using the
+ * environment-configured client; a BYOK model resolves its connection here, in
+ * the worker, so no credential ever enters the durable recipe.
+ */
+export async function resolveRecipeCompletionModel(
+  recipe: ChatAgentRecipe,
+  db: RecipeModelDb,
+): Promise<StreamingCompletionModel> {
+  const { id, connectionId } = recipe.model;
+  if (!connectionId) return createCompletionModel(id);
+
+  const row = (await db.providerConnection.findFirst({
+    where: { id: connectionId, userId: recipe.identity.userId },
+    include: {
+      models: {
+        where: { slug: id },
+        select: { upstreamId: true, reasoningEfforts: true },
+      },
+    },
+  })) as RecipeConnectionRow | null;
+
+  const model = row?.models[0];
+  if (!row || !model) throw new ProviderConnectionMissingError(connectionId);
+
+  const credentials = decodeProviderCredentials(row.credentialsRef);
+  const frozen = recipe.staticContext.model;
+  return createCompletionModelFor({
+    kind: row.kind as ProviderKind,
+    // The stored upstream id, not the sanitized slug: the slug lowercases and
+    // rewrites separators, so parsing it back would change the id sent upstream.
+    upstreamId: model.upstreamId,
+    api: row.api as "chat" | "responses" | null,
+    credentials: {
+      apiKey: credentials.apiKey,
+      baseUrl: row.baseUrl,
+      headers: credentials.headers ?? null,
+    },
+    contextLimits: {
+      contextWindow: frozen.contextWindowTokens,
+      ...(frozen.maxInputTokens !== null
+        ? { maxInputTokens: frozen.maxInputTokens }
+        : {}),
+      ...(frozen.maxOutputTokens !== null
+        ? { maxOutputTokens: frozen.maxOutputTokens }
+        : {}),
+    },
+    reasoningEfforts: model.reasoningEfforts,
+  });
+}
+
+/**
+ * Which request shape the run's model speaks. Catalog models use the
+ * environment-configured OpenAI-compatible client; `meta/` ids go through Chat
+ * Completions, everything else through Responses.
+ */
+export async function resolveRecipeProviderShape(
+  recipe: ChatAgentRecipe,
+  db: RecipeModelDb,
+): Promise<{ kind: ProviderKind; api: "chat" | "responses" | null }> {
+  const { id, connectionId } = recipe.model;
+  if (!connectionId) {
+    return {
+      kind: "openai",
+      api: id.startsWith("meta/") ? "chat" : "responses",
+    };
+  }
+  const row = (await db.providerConnection.findFirst({
+    where: { id: connectionId, userId: recipe.identity.userId },
+    select: { kind: true, api: true },
+  })) as { kind: string; api: string | null } | null;
+  if (!row) throw new ProviderConnectionMissingError(connectionId);
+  return {
+    kind: row.kind as ProviderKind,
+    api: row.api as "chat" | "responses" | null,
+  };
+}
+
 export type ChatRunReconstructionRuntime = {
   createAgent?: typeof createAgent;
   createCompletionModel?: typeof createCompletionModel;
+  resolveRecipeCompletionModel?: typeof resolveRecipeCompletionModel;
   createMemoryStore?: (database: PrismaClient) => MemoryStore;
   sessionExists?: (sessionId: string, userId: string) => Promise<boolean>;
   onToolWaitProgress?: (event: ToolWaitProgress) => void | Promise<void>;
@@ -1150,6 +1251,7 @@ export async function resolveChatAgentRecipe(
     },
     model: {
       id: input.model,
+      connectionId: modelInfo.connectionId ?? null,
       reasoningEffort: input.reasoningEffort,
     },
     memoryPolicy,
@@ -1265,8 +1367,23 @@ export async function reconstructChatRunInput(input: {
   }
 
   const makeAgent = runtime?.createAgent ?? createAgent;
-  const makeCompletionModel =
-    runtime?.createCompletionModel ?? createCompletionModel;
+  const makeCompletionModel = (target: ChatAgentRecipe) => {
+    if (runtime?.resolveRecipeCompletionModel) {
+      return runtime.resolveRecipeCompletionModel(target, prisma);
+    }
+    // Legacy seam: focused tests inject a plain model factory.
+    if (runtime?.createCompletionModel) {
+      return Promise.resolve(runtime.createCompletionModel(target.model.id));
+    }
+    return resolveRecipeCompletionModel(target, prisma);
+  };
+  // Reasoning summaries only apply to OpenAI-Responses-shaped models, so the
+  // request option is derived from the run's provider rather than assumed.
+  const providerShape = await resolveRecipeProviderShape(recipe, prisma);
+  const runReasoningOptions = responsesReasoningSummaryOptions(
+    providerShape.kind,
+    providerShape.api,
+  );
   const sessionExists = runtime?.sessionExists ??
     (async (scopeSessionId: string, scopeUserId: string) =>
       Boolean(
@@ -1291,12 +1408,12 @@ export async function reconstructChatRunInput(input: {
     ? guardedMemory
     : createNonVisionMemoryProxy(guardedMemory);
 
-  const compactorModel = makeCompletionModel(model);
+  const compactorModel = await makeCompletionModel(recipe);
   // The compactor has no `controls` seam, so its effort travels as a
-  // provider option. Catalog models are OpenAI-Responses except `meta/` ids.
+  // provider option shaped for the run's provider.
   const compactorProviderOptions = compactorProviderOptionsFor(
-    "openai",
-    model.startsWith("meta/") ? "chat" : "responses",
+    providerShape.kind,
+    providerShape.api,
     (reasoningEffort ?? "medium") as ReasoningEffort,
   );
   const nativeMemoryCompactor = createSummaryMemoryCompactor({
@@ -1796,7 +1913,8 @@ export async function reconstructChatRunInput(input: {
     );
     const researcher = makeAgent({
       agentId: `${recipe.agentId}-deep-researcher`,
-      model: makeCompletionModel(model),
+      model: await makeCompletionModel(recipe),
+      ...(runReasoningOptions ? { providerOptions: runReasoningOptions } : {}),
       reasoningEffort: (reasoningEffort ?? undefined) as
         | ReasoningEffort
         | undefined,
@@ -2193,7 +2311,8 @@ export async function reconstructChatRunInput(input: {
 
   const agent = makeAgent({
     agentId: recipe.agentId,
-    model: makeCompletionModel(model),
+    model: await makeCompletionModel(recipe),
+    ...(runReasoningOptions ? { providerOptions: runReasoningOptions } : {}),
     reasoningEffort: (reasoningEffort ?? undefined) as
       | ReasoningEffort
       | undefined,

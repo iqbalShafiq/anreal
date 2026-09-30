@@ -29,10 +29,10 @@ import { VIEW_IMAGE_TOOL_DEFINITIONS } from "./vision-helper.js";
 
 function recipe(overrides: Record<string, unknown> = {}) {
   const value = {
-    version: 7,
+    version: 8,
     agentId: CHAT_AGENT_ID,
     identity: { sessionId: "session-1", userId: "user-1", projectId: null },
-    model: { id: "openai/gpt-5.6-luna", reasoningEffort: null },
+    model: { id: "openai/gpt-5.6-luna", connectionId: null, reasoningEffort: null },
     memoryPolicy: {
       version: 1,
       savePolicy: "turn",

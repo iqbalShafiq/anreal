@@ -64,6 +64,23 @@ export { CHAT_RUN_QUEUE, type ChatRunJobData } from "./run-queue.js";
 
 const SAFE_ERROR_MESSAGE = "Something went wrong while answering. Send again.";
 const SAFE_CANCEL_MESSAGE = "The answer was stopped.";
+
+/**
+ * Run errors whose message is authored for the user and carries no internal
+ * detail, so it survives the generic safe-error collapse. Everything else keeps
+ * the opaque fallback: provider payloads and stack-shaped errors must never
+ * reach the transcript.
+ */
+const USER_FACING_RUN_ERROR_CODES = new Set([
+  // A provider connection was deleted while this run was queued.
+  "PROVIDER_CONNECTION_MISSING",
+]);
+
+export function isUserFacingRunError(error: unknown): boolean {
+  if (!isRecord(error)) return false;
+  const code = error.code;
+  return typeof code === "string" && USER_FACING_RUN_ERROR_CODES.has(code);
+}
 const STOP_POLL_MS = 150;
 
 export { RUN_OWNER_WAL_KEY, RUN_CREATED_KEY } from "../../lib/resumable-stream-store.js";
@@ -143,11 +160,16 @@ function requireUserPrompt(message: Message): UserMessage {
 
 function safeErrorEvent(error?: unknown): AgentStreamEvent {
   const cancellation = isRecord(error) && error.code === "CHAT_RUN_CANCELLED";
+  const userFacing = !cancellation && isUserFacingRunError(error) && error instanceof Error;
   return {
     type: "error",
     error: {
       code: cancellation ? "CHAT_RUN_CANCELLED" : "CHAT_RUN_FAILED",
-      message: cancellation ? SAFE_CANCEL_MESSAGE : SAFE_ERROR_MESSAGE,
+      message: cancellation
+        ? SAFE_CANCEL_MESSAGE
+        : userFacing
+          ? (error as Error).message
+          : SAFE_ERROR_MESSAGE,
     },
     usage: {
       inputTokens: 0,
@@ -161,7 +183,14 @@ function safeErrorEvent(error?: unknown): AgentStreamEvent {
 
 function safeError(error: unknown): Error {
   const cancellation = isRecord(error) && error.code === "CHAT_RUN_CANCELLED";
-  const result = new Error(cancellation ? SAFE_CANCEL_MESSAGE : SAFE_ERROR_MESSAGE);
+  const userFacing = !cancellation && isUserFacingRunError(error) && error instanceof Error;
+  const result = new Error(
+    cancellation
+      ? SAFE_CANCEL_MESSAGE
+      : userFacing
+        ? (error as Error).message
+        : SAFE_ERROR_MESSAGE,
+  );
   result.name = cancellation ? "ChatRunCancelledError" : "ChatRunError";
   Object.assign(result, {
     code: cancellation ? "CHAT_RUN_CANCELLED" : "CHAT_RUN_FAILED",
