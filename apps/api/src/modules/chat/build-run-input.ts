@@ -111,7 +111,7 @@ import {
   type ToolDefinition,
   type UserContentPart,
 } from "@anvia/core/completion";
-import type { AnyTool, MemoryStore } from "@anvia/core";
+import type { AnyTool, CompletionModel, MemoryStore } from "@anvia/core";
 import { createSummaryMemoryCompactor } from "@anvia/core/memory";
 import type { McpServer } from "@anvia/core/mcp";
 import { resolveActiveDocuments } from "../documents/service.js";
@@ -138,6 +138,11 @@ import {
   resolveNativeMemoryPolicy,
 } from "./memory-policy.js";
 import { findActiveModel } from "../models/service.js";
+import {
+  buildRoleCompletionModel,
+  resolveRoleTarget,
+  type RolesDb,
+} from "../models/roles.js";
 import {
   createPendingVisionImageBuffer,
   injectPendingVisionImages,
@@ -884,6 +889,40 @@ export async function resolveRecipeCompletionModel(
   });
 }
 
+export type ProviderShape = {
+  kind: ProviderKind;
+  api: "chat" | "responses" | null;
+};
+
+/**
+ * Which request shape a resolved target speaks. Catalog targets use the
+ * environment-configured OpenAI-compatible client (`meta/` ids go through Chat
+ * Completions, everything else through Responses); a BYOK target reads its own
+ * connection. Returns null when a BYOK connection has vanished so a caller that
+ * may fall back can, instead of throwing.
+ */
+export async function resolveTargetProviderShape(
+  db: RecipeModelDb,
+  userId: string,
+  target: { modelId: string; connectionId: string | null },
+): Promise<ProviderShape | null> {
+  if (!target.connectionId) {
+    return {
+      kind: "openai",
+      api: target.modelId.startsWith("meta/") ? "chat" : "responses",
+    };
+  }
+  const row = (await db.providerConnection.findFirst({
+    where: { id: target.connectionId, userId },
+    select: { kind: true, api: true },
+  })) as { kind: string; api: string | null } | null;
+  if (!row) return null;
+  return {
+    kind: row.kind as ProviderKind,
+    api: row.api as "chat" | "responses" | null,
+  };
+}
+
 /**
  * Which request shape the run's model speaks. Catalog models use the
  * environment-configured OpenAI-compatible client; `meta/` ids go through Chat
@@ -892,22 +931,84 @@ export async function resolveRecipeCompletionModel(
 export async function resolveRecipeProviderShape(
   recipe: ChatAgentRecipe,
   db: RecipeModelDb,
-): Promise<{ kind: ProviderKind; api: "chat" | "responses" | null }> {
-  const { id, connectionId } = recipe.model;
-  if (!connectionId) {
-    return {
-      kind: "openai",
-      api: id.startsWith("meta/") ? "chat" : "responses",
-    };
-  }
-  const row = (await db.providerConnection.findFirst({
-    where: { id: connectionId, userId: recipe.identity.userId },
-    select: { kind: true, api: true },
-  })) as { kind: string; api: string | null } | null;
-  if (!row) throw new ProviderConnectionMissingError(connectionId);
+): Promise<ProviderShape> {
+  const shape = await resolveTargetProviderShape(db, recipe.identity.userId, {
+    modelId: recipe.model.id,
+    connectionId: recipe.model.connectionId,
+  });
+  if (!shape) throw new ProviderConnectionMissingError(recipe.model.connectionId!);
+  return shape;
+}
+
+/** The model and request shape the memory compactor will run with. */
+export type ChatCompactorResolution = {
+  model: CompletionModel;
+  /** Options shaped for `model`'s own provider; undefined when it has none. */
+  providerOptions: ReturnType<typeof compactorProviderOptionsFor>;
+  /** Whether the user's assignment or the run's chat model won. */
+  source: "assignment" | "chat";
+};
+
+/**
+ * Resolve the memory compactor at reconstruction time (not in the frozen
+ * recipe). A user's live `memoryCompaction` assignment wins; otherwise the
+ * run's chat model is reused exactly as before.
+ *
+ * The compactor has no `controls` seam, so its reasoning effort travels as a
+ * provider option shaped for the compactor's *own* provider — an assigned
+ * compactor on a different provider must not inherit the chat model's shape.
+ *
+ * A dangling assignment (deleted model or connection) degrades to the chat
+ * model rather than throwing: the compactor runs inside the run, so an
+ * exception here would kill it. `db` is read only for the assigned target's
+ * shape.
+ */
+export async function resolveChatCompactorModel(input: {
+  db: RecipeModelDb & RolesDb;
+  userId: string;
+  /** The run's already-built chat model; the fallback and the no-assignment path. */
+  chatModel: CompletionModel;
+  /** The chat model's provider shape, already resolved. */
+  chatShape: ProviderShape;
+  /** The run's reasoning effort. */
+  reasoningEffort: ReasoningEffort | null;
+}): Promise<ChatCompactorResolution> {
+  const effort = (input.reasoningEffort ?? "medium") as ReasoningEffort;
+  const chatFallback = (): ChatCompactorResolution => ({
+    model: input.chatModel,
+    providerOptions: compactorProviderOptionsFor(
+      input.chatShape.kind,
+      input.chatShape.api,
+      effort,
+    ),
+    source: "chat",
+  });
+
+  const target = await resolveRoleTarget(input.db, input.userId, "memoryCompaction");
+  if (!target) return chatFallback();
+
+  const assignedModel = await buildRoleCompletionModel(
+    input.db,
+    input.userId,
+    "memoryCompaction",
+  );
+  if (!assignedModel) return chatFallback();
+
+  const assignedShape = await resolveTargetProviderShape(
+    input.db,
+    input.userId,
+    target,
+  );
+  if (!assignedShape) return chatFallback();
+
   return {
-    kind: row.kind as ProviderKind,
-    api: row.api as "chat" | "responses" | null,
+    model: assignedModel,
+    providerOptions: compactorProviderOptionsFor(
+      assignedShape.kind,
+      assignedShape.api,
+      effort,
+    ),
+    source: "assignment",
   };
 }
 
@@ -1411,20 +1512,19 @@ export async function reconstructChatRunInput(input: {
     ? guardedMemory
     : createNonVisionMemoryProxy(guardedMemory);
 
-  const compactorModel = await makeCompletionModel(recipe);
-  // The compactor has no `controls` seam, so its effort travels as a
-  // provider option shaped for the run's provider.
-  const compactorProviderOptions = compactorProviderOptionsFor(
-    providerShape.kind,
-    providerShape.api,
-    (reasoningEffort ?? "medium") as ReasoningEffort,
-  );
+  const compactor = await resolveChatCompactorModel({
+    db: prisma,
+    userId,
+    chatModel: await makeCompletionModel(recipe),
+    chatShape: providerShape,
+    reasoningEffort,
+  });
   const nativeMemoryCompactor = createSummaryMemoryCompactor({
-    model: compactorModel,
+    model: compactor.model,
     instructions: NATIVE_MEMORY_COMPACTOR_INSTRUCTIONS,
     maxTokens: recipe.memoryPolicy.compactorMaxTokens,
-    ...(compactorProviderOptions
-      ? { providerOptions: compactorProviderOptions }
+    ...(compactor.providerOptions
+      ? { providerOptions: compactor.providerOptions }
       : {}),
     retries: { maxAttempts: 2 },
   });
