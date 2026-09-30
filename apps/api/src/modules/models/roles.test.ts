@@ -1,10 +1,38 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const f = vi.hoisted(() => ({
+  createCompletionModel: vi.fn((modelId: string) => ({
+    modelId,
+    built: "catalog" as const,
+  })),
+  createCompletionModelFor: vi.fn((target: { upstreamId: string }) => ({
+    modelId: target.upstreamId,
+    built: "connection" as const,
+  })),
+  decodeProviderCredentials: vi.fn(() => ({
+    apiKey: "sk-test",
+    headers: null as Record<string, string> | null,
+  })),
+}));
+
+vi.mock("@anreal/agent", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@anreal/agent")>()),
+  createCompletionModel: f.createCompletionModel,
+  createCompletionModelFor: f.createCompletionModelFor,
+}));
+
+vi.mock("../provider-connections/credentials.js", () => ({
+  decodeProviderCredentials: f.decodeProviderCredentials,
+}));
+
 vi.mock("./service.js", () => ({ findActiveModel: vi.fn() }));
 
 import { findActiveModel } from "./service.js";
 import {
+  ROLE_KEYS,
   RoleInputError,
+  buildRoleCompletionModel,
+  listRoleAssignments,
   roleDefaultModelId,
   resolveRoleTarget,
   setRoleAssignment,
@@ -254,5 +282,212 @@ describe("setRoleAssignment", () => {
     await expect(
       setRoleAssignment(makeDb(), USER, "nope" as never, null),
     ).rejects.toBeInstanceOf(RoleInputError);
+  });
+});
+
+function byokDb(overrides: Record<string, unknown> = {}): RolesDb {
+  return makeDb({
+    modelRoleAssignment: {
+      findFirst: vi.fn(async () => ({
+        role: "siteBuilder",
+        catalogModelId: null,
+        providerModelId: "pm_1",
+      })),
+    },
+    providerModel: {
+      findFirst: vi.fn(async () => ({
+        slug: "my-gw/openai-gpt-5.6-luna",
+        connectionId: "pc_1",
+      })),
+    },
+    providerConnection: {
+      findFirst: vi.fn(async () => ({
+        kind: "openai",
+        baseUrl: null,
+        api: null,
+        credentialsRef: "ref_1",
+        models: [
+          {
+            upstreamId: "openai/gpt-5.6-luna",
+            reasoningEfforts: ["low", "high"],
+            contextWindowTokens: null,
+            maxInputTokens: null,
+            maxOutputTokens: null,
+          },
+        ],
+      })),
+    },
+    ...overrides,
+  });
+}
+
+describe("buildRoleCompletionModel", () => {
+  beforeEach(() => {
+    vi.unstubAllEnvs();
+    vi.mocked(findActiveModel).mockReset().mockResolvedValue(null);
+    f.createCompletionModel.mockClear();
+    f.createCompletionModelFor.mockClear();
+    f.decodeProviderCredentials
+      .mockReset()
+      .mockReturnValue({ apiKey: "sk-test", headers: null });
+  });
+
+  it("builds a catalog target through createCompletionModel", async () => {
+    const db = makeDb({
+      modelRoleAssignment: {
+        findFirst: vi.fn(async () => ({
+          role: "siteBuilder",
+          catalogModelId: "openai/gpt-6-luna",
+          providerModelId: null,
+        })),
+      },
+      chatModel: {
+        findFirst: vi.fn(async () => ({ modelId: "openai/gpt-6-luna" })),
+      },
+    });
+
+    await expect(buildRoleCompletionModel(db, USER, "siteBuilder")).resolves.toEqual(
+      { modelId: "openai/gpt-6-luna", built: "catalog" },
+    );
+    expect(f.createCompletionModel).toHaveBeenCalledWith("openai/gpt-6-luna");
+    expect(f.createCompletionModelFor).not.toHaveBeenCalled();
+  });
+
+  it("resolves a BYOK target scoped by userId and passes the stored upstreamId", async () => {
+    const db = byokDb();
+
+    await expect(buildRoleCompletionModel(db, USER, "siteBuilder")).resolves.toEqual(
+      { modelId: "openai/gpt-5.6-luna", built: "connection" },
+    );
+    // The connection and its model row are looked up inside the caller's scope.
+    expect(db.providerConnection.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: "pc_1", userId: USER }),
+      }),
+    );
+    expect(db.providerModel.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ userId: USER }),
+      }),
+    );
+    // The upstream id comes from the stored row — never the lowercased,
+    // separator-rewritten slug.
+    expect(f.createCompletionModelFor).toHaveBeenCalledWith(
+      expect.objectContaining({ upstreamId: "openai/gpt-5.6-luna" }),
+    );
+  });
+
+  it("returns null and warns when the connection is gone", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const db = byokDb({
+      providerConnection: { findFirst: vi.fn(async () => null) },
+    });
+
+    await expect(buildRoleCompletionModel(db, USER, "siteBuilder")).resolves.toBeNull();
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it("returns null and warns when the connection's model row is gone", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const db = byokDb({
+      providerConnection: {
+        findFirst: vi.fn(async () => ({
+          kind: "openai",
+          baseUrl: null,
+          api: null,
+          credentialsRef: "ref_1",
+          models: [],
+        })),
+      },
+    });
+
+    await expect(buildRoleCompletionModel(db, USER, "siteBuilder")).resolves.toBeNull();
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it("returns null and warns when the credentials cannot be decoded", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    f.decodeProviderCredentials.mockImplementation(() => {
+      throw new Error("bad key");
+    });
+
+    await expect(buildRoleCompletionModel(byokDb(), USER, "siteBuilder")).resolves.toBeNull();
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+});
+
+describe("listRoleAssignments", () => {
+  beforeEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("returns one entry per role in ROLE_KEYS order", async () => {
+    const infos = await listRoleAssignments(makeDb(), USER);
+    expect(infos.map((info) => info.role)).toEqual([...ROLE_KEYS]);
+  });
+
+  it("projects a BYOK row's stored slug", async () => {
+    const db = makeDb({
+      modelRoleAssignment: {
+        findMany: vi.fn(async () => [
+          { role: "siteBuilder", catalogModelId: null, providerModelId: "pm_1" },
+        ]),
+      },
+      providerModel: {
+        findFirst: vi.fn(async () => ({ slug: "my-gw/model" })),
+      },
+    });
+
+    const infos = await listRoleAssignments(db, USER);
+    expect(infos.find((info) => info.role === "siteBuilder")?.modelId).toBe(
+      "my-gw/model",
+    );
+    expect(db.providerModel.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ userId: USER }),
+      }),
+    );
+  });
+
+  it("projects a live catalog row", async () => {
+    const db = makeDb({
+      modelRoleAssignment: {
+        findMany: vi.fn(async () => [
+          {
+            role: "siteBuilder",
+            catalogModelId: "openai/gpt-6-luna",
+            providerModelId: null,
+          },
+        ]),
+      },
+      chatModel: {
+        findFirst: vi.fn(async () => ({ modelId: "openai/gpt-6-luna" })),
+      },
+    });
+
+    const infos = await listRoleAssignments(db, USER);
+    expect(infos.find((info) => info.role === "siteBuilder")?.modelId).toBe(
+      "openai/gpt-6-luna",
+    );
+  });
+
+  it("projects a stale catalog row as no assignment", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const db = makeDb({
+      modelRoleAssignment: {
+        findMany: vi.fn(async () => [
+          { role: "chat", catalogModelId: "openai/pruned", providerModelId: null },
+        ]),
+      },
+      chatModel: { findFirst: vi.fn(async () => null) },
+    });
+
+    const infos = await listRoleAssignments(db, USER);
+    expect(infos.find((info) => info.role === "chat")?.modelId).toBeNull();
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
   });
 });

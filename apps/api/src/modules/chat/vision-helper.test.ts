@@ -26,6 +26,9 @@ const f = vi.hoisted(() => ({
   listRoleAssignments: vi.fn(
     async (_db: unknown, _userId: string): Promise<unknown[]> => [],
   ),
+  resolveRoleTarget: vi.fn(
+    async (_db: unknown, _userId: string, _role: string): Promise<unknown> => null,
+  ),
   buildRoleCompletionModel: vi.fn(
     async (_db: unknown, _userId: string, _role: string): Promise<unknown> => null,
   ),
@@ -43,6 +46,7 @@ vi.mock("../models/service.js", () => ({
 
 vi.mock("../models/roles.js", () => ({
   listRoleAssignments: f.listRoleAssignments,
+  resolveRoleTarget: f.resolveRoleTarget,
   buildRoleCompletionModel: f.buildRoleCompletionModel,
 }));
 
@@ -315,6 +319,7 @@ describe("resolveVisionHelperModel", () => {
     f.findActiveModel.mockResolvedValue(null);
     f.listModels.mockResolvedValue({ models: [], reasoningEfforts: [] });
     f.listRoleAssignments.mockResolvedValue([]);
+    f.resolveRoleTarget.mockResolvedValue(null);
     f.buildRoleCompletionModel.mockResolvedValue(null);
   });
 
@@ -323,10 +328,19 @@ describe("resolveVisionHelperModel", () => {
     f.listRoleAssignments.mockResolvedValue([
       { role: "visionHelper", modelId: "openai/gpt-6-luna", defaultModelId: null },
     ]);
+    f.resolveRoleTarget.mockResolvedValue({
+      modelId: "openai/gpt-6-luna",
+      connectionId: null,
+    });
     f.buildRoleCompletionModel.mockResolvedValue(assigned);
 
     await expect(resolveVisionHelperModel("u_1")).resolves.toBe(assigned);
     expect(f.listRoleAssignments).toHaveBeenCalledWith(prisma, "u_1");
+    expect(f.resolveRoleTarget).toHaveBeenCalledWith(
+      prisma,
+      "u_1",
+      "visionHelper",
+    );
     expect(f.buildRoleCompletionModel).toHaveBeenCalledWith(
       prisma,
       "u_1",
@@ -334,17 +348,23 @@ describe("resolveVisionHelperModel", () => {
     );
   });
 
-  it("ignores a resolved assignment that does not accept images", async () => {
-    // The gap: an assignment exists, so the builder is consulted, but it folds
-    // in a text-only env default after the assignment dangled. The built
-    // handle declares no image input, so it must never reach view_image.
+  it("ignores a dangling assignment even when the built handle claims image input", async () => {
+    // The real adapters hardcode `imageInput: true` (only Mistral reports
+    // false), so the handle cannot prove the model accepts images. Here the
+    // resolver folds in a text-only env default because the assignment is
+    // dangling; the built handle still claims imageInput, but it must never
+    // reach view_image — the function must fall through to the dynamic pick.
     vi.stubEnv("VISION_HELPER_MODEL", "text-only/env-model");
     f.listRoleAssignments.mockResolvedValue([
       { role: "visionHelper", modelId: "text-only/assigned", defaultModelId: null },
     ]);
+    f.resolveRoleTarget.mockResolvedValue({
+      modelId: "text-only/env-model",
+      connectionId: null,
+    });
     f.buildRoleCompletionModel.mockResolvedValue({
       modelId: "text-only/assigned",
-      capabilities: { imageInput: false },
+      capabilities: { imageInput: true },
     });
     f.findActiveModel.mockResolvedValue({ inputModalities: ["text"] });
     f.listModels.mockResolvedValue({

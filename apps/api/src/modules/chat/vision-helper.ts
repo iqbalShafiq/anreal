@@ -13,7 +13,7 @@ import {
 } from "../images/service.js";
 import { createStaticToolDefinition } from "@anreal/agent";
 import { findActiveModel, listModels } from "../models/service.js";
-import { buildRoleCompletionModel, listRoleAssignments } from "../models/roles.js";
+import { buildRoleCompletionModel, listRoleAssignments, resolveRoleTarget } from "../models/roles.js";
 import { prisma } from "../../utils/prisma.js";
 
 /** Max bytes we'll download for an external image (8 MiB). */
@@ -546,10 +546,10 @@ export function sniffImageMediaType(buffer: Buffer): string | null {
 
 /**
  * Resolve the vision model used by view_image: a user's explicit
- * `visionHelper` assignment when it resolves to a model that declares image
- * input, else the VISION_HELPER_MODEL env override when it is an active
- * image-capable model, otherwise the cheapest active vision chat model in the
- * registry.
+ * `visionHelper` assignment when the resolver still names it (so it was
+ * validated at save time), else the VISION_HELPER_MODEL env override when it is
+ * an active image-capable model, otherwise the cheapest active vision chat
+ * model in the registry.
  */
 export async function resolveVisionHelperModel(
   userId: string,
@@ -558,22 +558,21 @@ export async function resolveVisionHelperModel(
   // test environments without credentials.
   const { createCompletionModel } = await import("@anreal/agent");
 
-  // 1. An explicit assignment is safe to trust: setRoleAssignment rejects a
-  // visionHelper model that does not declare image input.
+  // 1. Only trust the builder when the assignment itself named the model. The
+  // adapter handles hardcode `imageInput: true` (only Mistral reports false),
+  // so an image-capability check cannot reject a text-only model — and the
+  // builder falls through to the env default when the assignment is dangling.
+  // Verify the resolver still names the assignment instead; that is the sole
+  // proof the built handle came from a model `setRoleAssignment` validated.
   const assignments = await listRoleAssignments(prisma, userId);
-  const visionModelId =
+  const assignedId =
     assignments.find((entry) => entry.role === "visionHelper")?.modelId ?? null;
-  if (visionModelId) {
-    // The builder folds in the env default, and a *dangling* assignment falls
-    // through to it — so verify the built handle accepts images rather than
-    // trusting the assignment's provenance. `capabilities` is the adapter's own
-    // declaration (Anvia-native), so this holds for BYOK and catalog models alike.
-    const assigned = await buildRoleCompletionModel(
-      prisma,
-      userId,
-      "visionHelper",
-    );
-    if (assigned?.capabilities.imageInput) return assigned;
+  if (assignedId) {
+    const target = await resolveRoleTarget(prisma, userId, "visionHelper");
+    if (target?.modelId === assignedId) {
+      const model = await buildRoleCompletionModel(prisma, userId, "visionHelper");
+      if (model) return model;
+    }
   }
 
   // 2. The env override predates assignments and is NOT validated, so it keeps

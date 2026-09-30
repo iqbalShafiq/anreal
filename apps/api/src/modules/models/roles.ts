@@ -100,8 +100,10 @@ function defaultTarget(role: RoleKey): RoleTarget | null {
 
 /**
  * Every assignment the user has ever saved, one row per role, in `ROLE_KEYS`
- * order. A BYOK row's `modelId` is its stored slug; a row whose model row has
- * since vanished projects `modelId: null` rather than throwing.
+ * order. A BYOK row's `modelId` is its stored slug; a row whose model has since
+ * vanished (a pruned catalog row, a deleted connection model, an inactive
+ * provider) projects `modelId: null` rather than throwing or showing a phantom
+ * selection the resolver would silently ignore.
  */
 export async function listRoleAssignments(
   db: RolesDb,
@@ -115,8 +117,24 @@ export async function listRoleAssignments(
   const infos: RoleInfo[] = [];
   for (const role of ROLE_KEYS) {
     const row = byRole.get(role);
-    let modelId = row?.catalogModelId ?? null;
-    if (modelId === null && row?.providerModelId) {
+    let modelId: string | null = null;
+    if (row?.catalogModelId) {
+      const catalog = await db.chatModel.findFirst({
+        where: {
+          modelId: row.catalogModelId,
+          isActive: true,
+          provider: { isActive: true },
+        },
+        select: { modelId: true },
+      });
+      if (catalog) {
+        modelId = row.catalogModelId;
+      } else {
+        console.warn(
+          `[models] role ${role} is assigned to catalog model "${row.catalogModelId}", which no longer exists — projecting no assignment`,
+        );
+      }
+    } else if (row?.providerModelId) {
       const model = (await db.providerModel.findFirst({
         where: { id: row.providerModelId, userId },
         select: { slug: true },
@@ -147,7 +165,11 @@ export async function resolveRoleTarget(
 
   if (assignment?.catalogModelId) {
     const catalog = await db.chatModel.findFirst({
-      where: { modelId: assignment.catalogModelId, isActive: true },
+      where: {
+        modelId: assignment.catalogModelId,
+        isActive: true,
+        provider: { isActive: true },
+      },
     });
     if (catalog) {
       return { modelId: assignment.catalogModelId, connectionId: null };
@@ -237,8 +259,9 @@ export async function setRoleAssignment(
  * connection in place (credentials never enter the store). Mirrors
  * `resolveRecipeCompletionModel`: the upstream model id comes from the stored
  * `upstreamId`, never parsed back out of the lowercased slug. Returns null when
- * the role has no target or the connection/model vanished, so the caller falls
- * back to its previous behaviour.
+ * the role has no target, the connection/model vanished, or its stored
+ * credentials cannot be decoded, so the caller falls back to its previous
+ * behaviour. A role lookup never throws.
  */
 export async function buildRoleCompletionModel(
   db: RolesDb,
@@ -279,30 +302,42 @@ export async function buildRoleCompletionModel(
     return null;
   }
 
-  const credentials = decodeProviderCredentials(row.credentialsRef);
-  const contextLimits: ModelContextLimits | null =
-    model.contextWindowTokens === null
-      ? null
-      : {
-          contextWindow: model.contextWindowTokens,
-          ...(model.maxInputTokens !== null
-            ? { maxInputTokens: model.maxInputTokens }
-            : {}),
-          ...(model.maxOutputTokens !== null
-            ? { maxOutputTokens: model.maxOutputTokens }
-            : {}),
-        };
+  try {
+    const credentials = decodeProviderCredentials(row.credentialsRef);
+    const contextLimits: ModelContextLimits | null =
+      model.contextWindowTokens === null
+        ? null
+        : {
+            contextWindow: model.contextWindowTokens,
+            ...(model.maxInputTokens !== null
+              ? { maxInputTokens: model.maxInputTokens }
+              : {}),
+            ...(model.maxOutputTokens !== null
+              ? { maxOutputTokens: model.maxOutputTokens }
+              : {}),
+          };
 
-  return createCompletionModelFor({
-    kind: row.kind as ProviderKind,
-    upstreamId: model.upstreamId,
-    api: row.api as "chat" | "responses" | null,
-    credentials: {
-      apiKey: credentials.apiKey,
-      baseUrl: row.baseUrl,
-      headers: credentials.headers ?? null,
-    },
-    contextLimits,
-    reasoningEfforts: model.reasoningEfforts,
-  });
+    return createCompletionModelFor({
+      kind: row.kind as ProviderKind,
+      upstreamId: model.upstreamId,
+      api: row.api as "chat" | "responses" | null,
+      credentials: {
+        apiKey: credentials.apiKey,
+        baseUrl: row.baseUrl,
+        headers: credentials.headers ?? null,
+      },
+      contextLimits,
+      reasoningEfforts: model.reasoningEfforts,
+    });
+  } catch (error) {
+    // A corrupt reference — or a rotated/ephemeral PROVIDER_CREDENTIALS_KEY,
+    // which makes every stored ref undecryptable at once — must not fail the
+    // profile job, the site build, or an in-flight run. Match the vanished-row
+    // contract: warn and let the caller fall back.
+    console.warn(
+      `[models] role ${role} could not build its provider connection — falling back`,
+      error instanceof Error ? error.message : error,
+    );
+    return null;
+  }
 }
