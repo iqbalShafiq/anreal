@@ -404,16 +404,6 @@ function isBlankKey(value: unknown): boolean {
   );
 }
 
-/** A plain object with at least one key (used to detect supplied headers). */
-function isNonEmptyRecord(value: unknown): boolean {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    !Array.isArray(value) &&
-    Object.keys(value as Record<string, unknown>).length > 0
-  );
-}
-
 async function findOwnedConnection(
   db: ProviderConnectionsDb,
   userId: string,
@@ -763,10 +753,11 @@ export async function discoverConnectionModels(
 /**
  * Probe a provider without persisting anything, mirroring the MCP
  * `POST /mcp-servers/test` route. A blank api key reuses an owned connection's
- * stored credential (and stored headers when none are supplied), so editing a
- * connection never requires re-entering it. It validates the fields the provider
- * call itself depends on — kind, base URL, headers, and credential — not every
- * save-path rule (api, label, and slug are not checked here).
+ * stored credential together with its stored kind, base URL, and headers, so
+ * editing a connection never requires re-entering it and the stored credential
+ * is only ever sent to the endpoint it was stored for. It validates the fields
+ * the provider call itself depends on — kind, base URL, headers, and credential
+ * — not every save-path rule (api, label, and slug are not checked here).
  */
 export async function testProviderConnection(
   db: ProviderConnectionsDb,
@@ -785,11 +776,11 @@ export async function testProviderConnection(
   if (!isProviderKind(input.kind)) {
     fail("kind", `Provider kind must be one of: ${PROVIDER_KINDS.join(", ")}`);
   }
-  const kind: ProviderKind = input.kind;
-  const meta = PROVIDER_KIND_META[kind];
+  let kind: ProviderKind = input.kind;
 
   let apiKey = typeof input.apiKey === "string" ? input.apiKey.trim() : "";
   let rawHeaders = input.headers;
+  let rawBaseUrlInput = input.baseUrl;
 
   if (apiKey.length === 0) {
     if (!input.connectionId) {
@@ -797,16 +788,22 @@ export async function testProviderConnection(
     }
     const connection = await findOwnedConnection(db, userId, input.connectionId);
     if (!connection) notFound();
+    // The stored credential may only ever be sent to the endpoint it was
+    // stored for, so reuse the whole stored tuple and ignore the request's
+    // kind, base URL, and headers on this path.
+    kind = connectionProviderKind(connection);
     const stored = decodeProviderCredentials(connection.credentialsRef);
     apiKey = stored.apiKey;
-    if (!isNonEmptyRecord(rawHeaders)) rawHeaders = stored.headers ?? null;
+    rawBaseUrlInput = connection.baseUrl;
+    rawHeaders = stored.headers ?? null;
   }
+  const meta = PROVIDER_KIND_META[kind];
 
   const sanitized = sanitizeHeaders(rawHeaders);
   if (!sanitized.ok) fail("headers", sanitized.message);
 
   const rawBaseUrl =
-    typeof input.baseUrl === "string" ? input.baseUrl.trim() : "";
+    typeof rawBaseUrlInput === "string" ? rawBaseUrlInput.trim() : "";
   let baseUrl: string | null = null;
   if (rawBaseUrl.length === 0) {
     if (meta.requiresBaseUrl) {

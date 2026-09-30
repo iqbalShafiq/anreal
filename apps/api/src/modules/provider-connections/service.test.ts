@@ -684,6 +684,47 @@ describe("testProviderConnection", () => {
     });
   });
 
+  it("ignores caller-supplied kind, base url, and headers on the reuse path", async () => {
+    const agent = await import("@anreal/agent");
+    vi.mocked(agent.listProviderModels).mockClear();
+    const db = makeDb({
+      providerConnection: {
+        findFirst: vi.fn(async () => ({
+          id: "pc_1",
+          userId: "u_1",
+          kind: "compatible",
+          baseUrl: "https://gw.example/v1",
+          credentialsRef: encodeProviderCredentials({
+            apiKey: "sk-stored",
+            headers: { "X-Org": "acme" },
+          }),
+        })),
+      },
+    });
+
+    // The exploit shape: a blank key reuses the stored credential, so the
+    // stored credential must only ever be sent to the stored endpoint.
+    await testProviderConnection(db, "u_1", {
+      kind: "openai",
+      baseUrl: "https://attacker.example/v1",
+      apiKey: "",
+      headers: { "X-Evil": "1" },
+      connectionId: "pc_1",
+    });
+
+    const calledWith = vi.mocked(agent.listProviderModels).mock.calls.at(-1)?.[0];
+    expect(calledWith).toEqual({
+      kind: "compatible",
+      credentials: {
+        apiKey: "sk-stored",
+        baseUrl: "https://gw.example/v1",
+        headers: { "X-Org": "acme" },
+      },
+    });
+    expect(JSON.stringify(calledWith)).not.toContain("attacker.example");
+    expect(JSON.stringify(calledWith)).not.toContain("X-Evil");
+  });
+
   it("requires a key when no connection is being reused", async () => {
     const db = makeDb();
     await expect(

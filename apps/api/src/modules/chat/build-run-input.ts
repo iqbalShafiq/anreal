@@ -754,6 +754,7 @@ export type ChatAgentRecipeResolverDependencies = {
   prisma?: Pick<PrismaClient, "chatSession" | "project">;
   findActiveModel?: (
     modelId: string,
+    userId?: string,
   ) => Promise<RecipeModelResolution | null>;
   resolveActiveDocuments?: (input: {
     userId: string;
@@ -985,7 +986,9 @@ export async function resolveChatAgentRecipe(
   const normalizedPrompt = input.promptMessage
     ? parseMessage(input.promptMessage)
     : undefined;
-  const modelInfo = await resolveModel(input.model);
+  // BYOK model ids only resolve inside their owner's scope, so the user id has
+  // to reach the catalog lookup or every connection model is "unknown".
+  const modelInfo = await resolveModel(input.model, input.userId);
   if (!modelInfo) throw new Error(`unknown model: ${input.model}`);
   if (
     input.reasoningEffort !== null &&
