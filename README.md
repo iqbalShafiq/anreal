@@ -402,7 +402,7 @@ Katalog model ada di tabel `chat_model` (diseed oleh `pnpm --filter @anreal/api 
 
 ## BYOK provider connections
 
-Selain katalog model yang di-seed, tiap user bisa membawa **API key provider sendiri** (BYOK). Fitur ini memungkinkan chat dan image generation lewat akun/provider milik user, bukan hanya `OPENAI_*` dari env.
+Selain katalog model yang di-seed, tiap user bisa membawa **API key provider sendiri** (BYOK). Saat ini BYOK mencakup **model chat/teks**: user mendaftarkan provider **connection** beserta model chat di atasnya, dan model-model itu ikut muncul di pemilih model composer. **Image generation lewat BYOK belum tersedia** — itu fase berikutnya; pemilih model image tetap memakai model katalog dari key server bersama (`OPENAI_*`).
 
 **Connection vs model.** Alurnya dua tingkat: user membuat sebuah **connection** (provider kind + base URL opsional + API key + custom headers opsional), lalu mendaftarkan **model** di atasnya (upstream model id, display name, context window, reasoning efforts, icon opsional). Semua connection dan model di-scope ke user pembuatnya — user lain tidak bisa melihat atau memakainya.
 
@@ -416,9 +416,9 @@ Selain katalog model yang di-seed, tiap user bisa membawa **API key provider sen
 
 **Provider kind.** Ada enam: `openai`, `anthropic`, `gemini`, `grok`, `mistral`, dan `compatible` (endpoint apa pun yang OpenAI-compatible — OpenRouter, DeepSeek, Groq, Together, Fireworks, Ollama, vLLM, LM Studio, termasuk shim OpenAI-compat Anthropic/Gemini). Kind `compatible` wajib mengisi base URL. Reasoning effort bersifat adapter-neutral; kosakata per model adalah gabungan `none | minimal | low | medium | high | xhigh | max`.
 
-**Catatan image.** Image generation BYOK hanya bisa dijangkau lewat kind `compatible`, yang berbicara `POST /images` ala OpenRouter. Connection `openai` native sengaja **tidak** menawarkan model image: API images native OpenAI punya parameter berbeda dan tidak punya `input_references`, sehingga alur `edit_image` aplikasi (yang mengirim reference image) tidak bisa berjalan di sana. User yang ingin image generation lewat gateway harus mendaftarkannya sebagai `compatible`.
+**Catatan image (rencana).** Ketika BYOK image generation nanti diimplementasikan (Phase D), jalurnya akan lewat kind `compatible`, yang berbicara `POST /images` ala OpenRouter. Kind `openai` native direncanakan **tidak** ikut menawarkan model image: API images native OpenAI punya parameter berbeda dan tidak punya `input_references`, sedangkan alur `edit_image` aplikasi mengirim reference image dan membutuhkannya. Karena itu `compatible` adalah satu-satunya jalur image yang cocok.
 
-**Pengaturan model per-role belum ada.** Memilih model untuk peran background — memory compaction, profile summarization, site builder, vision helper, scheduled chat — adalah fase berikutnya (Phase C) dan **belum diimplementasikan**. Saat ini hanya model chat/image aktif yang bisa dipilih lewat katalog yang sudah digabung.
+**Pengaturan model per-role belum ada.** Memilih model untuk peran background — memory compaction, profile summarization, site builder, vision helper, scheduled chat — adalah fase berikutnya (Phase C) dan **belum diimplementasikan**. Saat ini lewat katalog gabungan yang bisa dipilih hanyalah model chat/teks; model image tetap berasal dari katalog seed.
 
 **Menguji connection.** `POST /api/providers/test` memvalidasi credential ke provider **tanpa menyimpan apa pun**; endpoint menerima `connectionId` opsional sehingga field key yang dibiarkan kosong akan memakai credential yang tersimpan. Test yang gagal mengembalikan pesan yang mudah dibaca dan bebas credential.
 
