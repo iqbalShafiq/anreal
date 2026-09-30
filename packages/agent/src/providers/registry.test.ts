@@ -6,11 +6,18 @@ const mocks = vi.hoisted(() => {
     modelId: (options as { modelId: string }).modelId,
     options,
   }));
+  type ClientShape = {
+    options?: unknown;
+    completionModel: typeof completionModel;
+    listModels?: unknown;
+  };
   return {
     completionModel,
     // A regular function, not an arrow: the registry constructs these clients
-    // with `new`, and `new` on an arrow-function mock throws.
-    client: vi.fn(function (this: unknown, options: unknown) {
+    // with `new`, and `new` on an arrow-function mock throws. The return type
+    // keeps every member optional except completionModel so per-test
+    // `mockImplementationOnce` values stay assignable.
+    client: vi.fn(function (this: unknown, options: unknown): ClientShape {
       return { options, completionModel };
     }),
   };
@@ -208,5 +215,67 @@ describe("createCompletionModelFor", () => {
     expect(mocks.client).toHaveBeenCalledWith(
       expect.objectContaining({ headers: { "X-Workspace": "acme" } }),
     );
+  });
+});
+
+import {
+  listProviderModels,
+  redactProviderError,
+} from "./registry.js";
+
+describe("listProviderModels", () => {
+  it("lists through the matching adapter client", async () => {
+    mocks.client.mockClear();
+    const listModels = vi.fn(async () => ({
+      data: [{ id: "gpt-5.6-luna", name: "GPT 5.6 Luna", contextLength: 1_000_000 }],
+    }));
+    mocks.client.mockImplementationOnce(function (this: unknown) {
+      return {
+        completionModel: mocks.completionModel,
+        listModels,
+      };
+    });
+
+    const result = await listProviderModels({
+      kind: "compatible",
+      credentials: { apiKey: "sk-test", baseUrl: "https://gw.example/v1" },
+    });
+
+    expect(listModels).toHaveBeenCalledOnce();
+    expect(result.data[0]).toMatchObject({ id: "gpt-5.6-luna", contextLength: 1_000_000 });
+  });
+});
+
+describe("redactProviderError", () => {
+  it("hides api-shaped keys", () => {
+    const message = redactProviderError(
+      new Error("401 Unauthorized for key sk-live-abcdef1234567890"),
+    );
+    expect(message).not.toContain("sk-live-abcdef1234567890");
+    expect(message).toContain("[REDACTED]");
+  });
+
+  it("hides bearer tokens", () => {
+    const message = redactProviderError(
+      new Error("bad header Authorization: Bearer abcdef1234567890"),
+    );
+    expect(message).not.toContain("abcdef1234567890");
+  });
+
+  it("hides the exact connection secret passed in", () => {
+    const message = redactProviderError(
+      new Error("upstream rejected sec-verysekret123"),
+      ["sec-verysekret123"],
+    );
+    expect(message).not.toContain("sec-verysekret123");
+  });
+
+  it("bounds the message length", () => {
+    const message = redactProviderError(new Error("x".repeat(5_000)));
+    expect(message.length).toBeLessThanOrEqual(160);
+  });
+
+  it("handles non-Error values", () => {
+    expect(redactProviderError("plain failure")).toBe("plain failure");
   });
 });

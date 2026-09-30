@@ -270,3 +270,70 @@ export function compactorProviderOptionsFor(
   }
   return undefined;
 }
+
+import type { ModelList } from "@anvia/core/model-listing";
+import { createRedactor } from "@anvia/core/redaction";
+
+export async function listProviderModels(target: {
+  kind: ProviderKind;
+  credentials: ProviderCredentials;
+}): Promise<ModelList> {
+  const { kind, credentials } = target;
+  switch (kind) {
+    case "mistral":
+      return new MistralClient(managedClientOptions(credentials)).listModels();
+    case "gemini":
+      return new GeminiClient({ apiKey: credentials.apiKey }).listModels();
+    case "anthropic":
+      return new AnthropicClient(
+        managedClientOptions(credentials),
+      ).listModels();
+    case "grok":
+      return new GrokClient(managedClientOptions(credentials)).listModels();
+    case "openai":
+    case "compatible":
+    default:
+      return new OpenAIClient(managedClientOptions(credentials)).listModels();
+  }
+}
+
+const REDACTION_PATTERNS = [
+  {
+    name: "api-key",
+    regex: /\b(?:sk|sk-ant|xai|AIza|gsk)[-_A-Za-z0-9]{8,}\b/g,
+  },
+  {
+    name: "bearer",
+    regex: /\bBearer\s+[A-Za-z0-9._~+/-]{8,}=*/gi,
+  },
+];
+
+const ERROR_MESSAGE_MAX = 160;
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Turn any upstream failure into a short, non-sensitive message. Provider
+ * errors are known to echo credentials back, so every path through this
+ * function is redacted before it can reach a log, a stream, or the UI.
+ */
+export function redactProviderError(
+  error: unknown,
+  secrets: readonly string[] = [],
+): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  const bounded = raw.trim().replace(/\s+/g, " ").slice(0, ERROR_MESSAGE_MAX);
+  const extra = secrets
+    .map((secret) => secret.trim())
+    .filter((secret) => secret.length >= 8)
+    .map((secret) => ({
+      name: "connection-secret",
+      regex: new RegExp(escapeRegExp(secret), "g"),
+    }));
+  return createRedactor({
+    patterns: [...REDACTION_PATTERNS, ...extra],
+    replacement: "[REDACTED]",
+  }).redactString(bounded);
+}
