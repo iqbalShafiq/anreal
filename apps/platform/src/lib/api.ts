@@ -1064,6 +1064,10 @@ export type ModelInfo = {
     longPromptOutputMultiplier: number | null;
   };
   reasoningEfforts: string[];
+  /** "catalog" for the seeded registry, "connection" for a user BYOK model. */
+  source: "catalog" | "connection";
+  /** Set only for connection models. */
+  connectionId: string | null;
   /** "text" | "image" — chat model or image generator. */
   outputType: "text" | "image";
   /** Image-gen capability descriptors (from OpenRouter discovery). */
@@ -1107,13 +1111,22 @@ export async function listModels(input?: {
   const catalog: ModelCatalog = {
     // Chat model picker shows text models only — image generators live in
     // the composer's image-gen settings (fetchImageModels).
-    models: (data as ModelCatalog).models.filter(
-      (model): model is ModelInfo =>
-        !!model &&
-        typeof model.modelId === "string" &&
-        typeof model.label === "string" &&
-        model.outputType !== "image",
-    ),
+    models: (data as ModelCatalog).models
+      .filter(
+        (model): model is ModelInfo =>
+          !!model &&
+          typeof model.modelId === "string" &&
+          typeof model.label === "string" &&
+          model.outputType !== "image",
+      )
+      // Rows that predate the source field are treated as catalog entries so
+      // a mixed deploy does not drop models from the picker.
+      .map((model) => ({
+        ...model,
+        source: model.source === "connection" ? "connection" : "catalog",
+        connectionId:
+          typeof model.connectionId === "string" ? model.connectionId : null,
+      })),
     reasoningEfforts: Array.isArray(
       (data as ModelCatalog).reasoningEfforts,
     )
@@ -2109,4 +2122,363 @@ export async function testMcpConnection(input: McpServerInput): Promise<McpTestR
   });
   if (!response.ok) throw new Error("Failed to test MCP connection");
   return (await response.json()) as McpTestResult;
+}
+
+// ─── Provider connections (BYOK) ────────────────────────────────────────────
+
+export type ProviderKindInfo = {
+  kind: string;
+  label: string;
+  credentialPlaceholder: string;
+  supportsBaseUrl: boolean;
+  requiresBaseUrl: boolean;
+  apiVariants: ("chat" | "responses")[];
+  defaultApi: "chat" | "responses" | null;
+  imageStyle: "openrouter-images" | "gemini-native" | "grok-native" | "none";
+};
+
+export type ProviderConnection = {
+  id: string;
+  kind: string;
+  label: string;
+  slug: string;
+  baseUrl: string | null;
+  api: string | null;
+  isActive: boolean;
+  sortOrder: number;
+  hasCredentials: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/** One row of a connection's registered models. Never carries credentials. */
+export type ProviderModelRow = {
+  id: string;
+  slug: string;
+  upstreamId: string;
+  name: string;
+  label: string;
+  hint: string | null;
+  description: string | null;
+  iconSvg: string;
+  outputType: "text" | "image";
+  contextWindowTokens: number | null;
+  maxInputTokens: number | null;
+  maxOutputTokens: number | null;
+  reasoningEfforts: string[];
+  capabilities: Record<string, unknown> | null;
+  imageCapabilities: ImageModelCapabilities | null;
+  isActive: boolean;
+  sortOrder: number;
+  connectionId: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/** One entry of a provider's own model listing (discovery). */
+export type ListedProviderModel = {
+  id: string;
+  name?: string;
+  description?: string;
+  type?: string;
+  createdAt?: string;
+  ownedBy?: string;
+  contextLength?: number;
+};
+
+export type ProviderConnectionInput = {
+  kind: string;
+  label: string;
+  slug?: string;
+  baseUrl?: string | null;
+  api?: string | null;
+  /** Write-only. Never returned by any endpoint; omit on update to keep it. */
+  apiKey?: string;
+  headers?: Record<string, string>;
+  /**
+   * Active flag toggled from the connection list. Only meaningful on update;
+   * create always starts active.
+   */
+  isActive?: boolean;
+};
+
+export type ProviderModelInput = {
+  upstreamId: string;
+  name?: string;
+  label?: string;
+  hint?: string | null;
+  description?: string | null;
+  iconSvg?: string;
+  outputType?: "text" | "image";
+  contextWindowTokens?: number | null;
+  maxInputTokens?: number | null;
+  maxOutputTokens?: number | null;
+  reasoningEfforts?: string[];
+};
+
+/**
+ * The adapter's own declaration for an upstream id, read server-side so the
+ * API key never reaches the browser. `providerReported: false` means the
+ * adapter has no limits entry, so the context window must come from the user.
+ */
+export type ProviderModelPrefill = {
+  name: string;
+  contextWindowTokens: number | null;
+  maxInputTokens: number | null;
+  maxOutputTokens: number | null;
+  reasoningEfforts: string[];
+  defaultReasoningEffort: string | null;
+  capabilities: Record<string, unknown> | null;
+  providerReported: boolean;
+};
+
+function toStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
+}
+
+function numberOrNull(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function nullableString(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+function isProviderKindInfo(value: unknown): value is ProviderKindInfo {
+  return (
+    isRecord(value) &&
+    typeof value.kind === "string" &&
+    typeof value.label === "string" &&
+    typeof value.credentialPlaceholder === "string" &&
+    typeof value.supportsBaseUrl === "boolean" &&
+    typeof value.requiresBaseUrl === "boolean" &&
+    Array.isArray(value.apiVariants)
+  );
+}
+
+function isProviderConnection(value: unknown): value is ProviderConnection {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.kind === "string" &&
+    typeof value.label === "string" &&
+    typeof value.slug === "string"
+  );
+}
+
+function isProviderModelRow(value: unknown): value is ProviderModelRow {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.slug === "string" &&
+    typeof value.upstreamId === "string" &&
+    typeof value.name === "string" &&
+    typeof value.label === "string" &&
+    typeof value.connectionId === "string"
+  );
+}
+
+export async function listProviderKinds(): Promise<{
+  kinds: ProviderKindInfo[];
+  effortVocabulary: string[];
+}> {
+  const response = await apiFetch(`${API_BASE}/api/providers/kinds`);
+  if (!response.ok) await throwSkillError(response, "Failed to load provider kinds");
+  const data: unknown = await response.json();
+  if (!isRecord(data) || !Array.isArray(data.kinds)) {
+    throw new Error("Unexpected provider kinds response shape");
+  }
+  return {
+    kinds: data.kinds.filter(isProviderKindInfo),
+    effortVocabulary: toStringArray(data.effortVocabulary),
+  };
+}
+
+export async function listProviderConnections(): Promise<ProviderConnection[]> {
+  const response = await apiFetch(`${API_BASE}/api/providers`);
+  if (!response.ok) {
+    await throwSkillError(response, "Failed to load provider connections");
+  }
+  const data: unknown = await response.json();
+  if (!Array.isArray(data)) {
+    throw new Error("Unexpected provider connections response shape");
+  }
+  return data.filter(isProviderConnection);
+}
+
+export async function createProviderConnection(
+  input: ProviderConnectionInput,
+): Promise<ProviderConnection> {
+  const response = await apiFetch(`${API_BASE}/api/providers`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) {
+    await throwSkillError(response, "Failed to save provider connection");
+  }
+  const data: unknown = await response.json();
+  if (!isProviderConnection(data)) {
+    throw new Error("Unexpected provider connection response shape");
+  }
+  return data;
+}
+
+export async function updateProviderConnection(
+  id: string,
+  input: ProviderConnectionInput,
+): Promise<ProviderConnection> {
+  const response = await apiFetch(
+    `${API_BASE}/api/providers/${encodeURIComponent(id)}`,
+    {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    },
+  );
+  if (!response.ok) {
+    await throwSkillError(response, "Failed to save provider connection");
+  }
+  const data: unknown = await response.json();
+  if (!isProviderConnection(data)) {
+    throw new Error("Unexpected provider connection response shape");
+  }
+  return data;
+}
+
+export async function deleteProviderConnection(id: string): Promise<void> {
+  const response = await apiFetch(
+    `${API_BASE}/api/providers/${encodeURIComponent(id)}`,
+    { method: "DELETE" },
+  );
+  if (!response.ok) {
+    await throwSkillError(response, "Failed to delete provider connection");
+  }
+}
+
+export async function discoverProviderModels(
+  connectionId: string,
+): Promise<ListedProviderModel[]> {
+  const response = await apiFetch(
+    `${API_BASE}/api/providers/${encodeURIComponent(connectionId)}/models/discover`,
+    { method: "POST" },
+  );
+  if (!response.ok) {
+    await throwSkillError(response, "Failed to load the provider's models");
+  }
+  const data: unknown = await response.json();
+  if (!isRecord(data) || !Array.isArray(data.data)) {
+    throw new Error("Unexpected provider model listing response shape");
+  }
+  return data.data.filter(
+    (item): item is ListedProviderModel =>
+      isRecord(item) && typeof item.id === "string",
+  );
+}
+
+export async function listProviderModels(
+  connectionId: string,
+): Promise<ProviderModelRow[]> {
+  const response = await apiFetch(
+    `${API_BASE}/api/providers/${encodeURIComponent(connectionId)}/models`,
+  );
+  if (!response.ok) {
+    await throwSkillError(response, "Failed to load provider models");
+  }
+  const data: unknown = await response.json();
+  if (!Array.isArray(data)) {
+    throw new Error("Unexpected provider models response shape");
+  }
+  return data.filter(isProviderModelRow);
+}
+
+export async function createProviderModel(
+  connectionId: string,
+  input: ProviderModelInput,
+): Promise<ProviderModelRow> {
+  const response = await apiFetch(
+    `${API_BASE}/api/providers/${encodeURIComponent(connectionId)}/models`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    },
+  );
+  if (!response.ok) {
+    await throwSkillError(response, "Failed to save provider model");
+  }
+  const data: unknown = await response.json();
+  if (!isProviderModelRow(data)) {
+    throw new Error("Unexpected provider model response shape");
+  }
+  return data;
+}
+
+export async function updateProviderModel(
+  connectionId: string,
+  modelId: string,
+  input: ProviderModelInput,
+): Promise<ProviderModelRow> {
+  const response = await apiFetch(
+    `${API_BASE}/api/providers/${encodeURIComponent(connectionId)}/models/${encodeURIComponent(modelId)}`,
+    {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    },
+  );
+  if (!response.ok) {
+    await throwSkillError(response, "Failed to save provider model");
+  }
+  const data: unknown = await response.json();
+  if (!isProviderModelRow(data)) {
+    throw new Error("Unexpected provider model response shape");
+  }
+  return data;
+}
+
+export async function deleteProviderModel(
+  connectionId: string,
+  modelId: string,
+): Promise<void> {
+  const response = await apiFetch(
+    `${API_BASE}/api/providers/${encodeURIComponent(connectionId)}/models/${encodeURIComponent(modelId)}`,
+    { method: "DELETE" },
+  );
+  if (!response.ok) {
+    await throwSkillError(response, "Failed to delete provider model");
+  }
+}
+
+export async function prefillProviderModel(
+  connectionId: string,
+  input: { upstreamId: string; reasoningEfforts?: string[] | null },
+): Promise<ProviderModelPrefill> {
+  const response = await apiFetch(
+    `${API_BASE}/api/providers/${encodeURIComponent(connectionId)}/models/prefill`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    },
+  );
+  if (!response.ok) {
+    await throwSkillError(response, "Failed to read the model's metadata");
+  }
+  const data: unknown = await response.json();
+  if (!isRecord(data) || typeof data.name !== "string") {
+    throw new Error("Unexpected provider prefill response shape");
+  }
+  return {
+    name: data.name,
+    contextWindowTokens: numberOrNull(data.contextWindowTokens),
+    maxInputTokens: numberOrNull(data.maxInputTokens),
+    maxOutputTokens: numberOrNull(data.maxOutputTokens),
+    reasoningEfforts: toStringArray(data.reasoningEfforts),
+    defaultReasoningEffort: nullableString(data.defaultReasoningEffort),
+    capabilities: isRecord(data.capabilities) ? data.capabilities : null,
+    providerReported: data.providerReported === true,
+  };
 }

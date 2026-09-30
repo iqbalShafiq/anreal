@@ -38,6 +38,8 @@ const model = {
   maxOutputTokens: null,
   prices: { input: null, cachedInput: null, output: null, cacheWriteMultiplier: null, longPromptThresholdTokens: null, longPromptInputMultiplier: null, longPromptOutputMultiplier: null },
   reasoningEfforts: ["max"],
+  source: "catalog" as const,
+  connectionId: null,
   outputType: "text" as const,
   imageCapabilities: null,
   inputModalities: ["text"],
