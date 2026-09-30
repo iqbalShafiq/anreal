@@ -18,6 +18,9 @@ const f = vi.hoisted(() => ({
   })),
   agentRun: vi.fn(async () => ({ text: "done", usage: { inputTokens: 2, outputTokens: 2 } })),
   publish: vi.fn(async (_event: unknown) => undefined),
+  buildRoleCompletionModel: vi.fn(
+    async (_db: unknown, _userId: string, _role: string): Promise<unknown> => null,
+  ),
   siteWorker: null as null | {
     handlers: Map<string, (...args: never[]) => unknown>;
   },
@@ -47,6 +50,13 @@ vi.mock("@anreal/agent", async (importOriginal) => ({
   createCompletionModel: (modelId: string) => ({ modelId }),
   parseCompletionModel: (value: unknown) =>
     typeof value === "string" && value.trim() ? value : null,
+}));
+
+// processSiteBuildJob resolves the builder model through the role layer; stub
+// it so these unit tests never touch the database. The role resolution itself
+// is covered in service.test.ts.
+vi.mock("../models/roles.js", () => ({
+  buildRoleCompletionModel: f.buildRoleCompletionModel,
 }));
 
 function fakeSandbox() {
@@ -131,6 +141,27 @@ describe("processSiteBuildJob", () => {
     ) as { appEvent: { previewUrl: string; downloadUrl: string } } | undefined;
     expect(ready?.appEvent.previewUrl).toBe("/api/sites/site-1/v1/preview/index.html");
     expect(ready?.appEvent.downloadUrl).toBe("/api/sites/site-1/v1/download");
+  });
+
+  it("runs the brief parser and builder agent on the user's assigned model", async () => {
+    const assigned = { modelId: "openai/gpt-6-luna" };
+    f.buildRoleCompletionModel.mockResolvedValueOnce(assigned);
+    const sandbox = fakeSandbox();
+    await processSiteBuildJob(JOB, {
+      createSandboxSession: async () => sandbox as never,
+      publish: async () => undefined,
+      readTemplate: async () => ({ "package.json": "{}" }),
+      runBuilderAgent: f.agentRun,
+    });
+
+    expect(f.buildRoleCompletionModel).toHaveBeenCalledWith(
+      expect.anything(),
+      "user-1",
+      "siteBuilder",
+    );
+    expect(f.brief).toHaveBeenCalledWith(
+      expect.objectContaining({ model: assigned }),
+    );
   });
 
   it("uses the enqueued brief without re-parsing", async () => {

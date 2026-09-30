@@ -2243,7 +2243,7 @@ export async function reconstructChatRunInput(input: {
   // Reconstruction follows the frozen tool surface so in-flight recipes that
   // still listed view_image for a vision model keep that tool.
   if (frozenHasViewImage) {
-    const visionModel = await resolveVisionHelperModel();
+    const visionModel = await resolveVisionHelperModel(userId);
     if (!visionModel) {
       throw new Error("frozen view-image capability is unavailable in this worker process");
     }

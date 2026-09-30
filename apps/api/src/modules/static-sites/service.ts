@@ -9,6 +9,8 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { SITE_MODEL_DEFAULT } from "../models/role-defaults.js";
+import { buildRoleCompletionModel } from "../models/roles.js";
+import { prisma } from "../../utils/prisma.js";
 
 // The literal lives in the neutral role-defaults module (which the role
 // resolver also reads) so the two never drift and no import cycle forms.
@@ -80,6 +82,17 @@ export function siteBuildConfig(): SiteBuildConfig {
     model: createCompletionModel(modelId),
     dataDir: siteDataDir(),
   };
+}
+
+/**
+ * The builder model for one user's job: the `siteBuilder` assignment when set,
+ * otherwise exactly the env/default model `siteBuildConfig` has always built.
+ */
+export async function resolveSiteBuildModel(
+  userId: string,
+): Promise<CompletionModel> {
+  const assigned = await buildRoleCompletionModel(prisma, userId, "siteBuilder");
+  return assigned ?? siteBuildConfig().model;
 }
 
 function manifestPath(siteId: string, dirOverride?: string): string {

@@ -8,12 +8,24 @@ const f = vi.hoisted(() => ({
   createCompletionModel: vi.fn((modelId: string) => ({ modelId })),
 }));
 
+const roles = vi.hoisted(() => ({
+  buildRoleCompletionModel: vi.fn(
+    async (_db: unknown, _userId: string, _role: string): Promise<unknown> => null,
+  ),
+}));
+
 vi.mock("@anreal/agent", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@anreal/agent")>()),
   createCompletionModel: f.createCompletionModel,
   parseCompletionModel: (value: unknown) =>
     typeof value === "string" && value.trim() ? value : null,
 }));
+
+vi.mock("../models/roles.js", () => ({
+  buildRoleCompletionModel: roles.buildRoleCompletionModel,
+}));
+
+vi.mock("../../utils/prisma.js", () => ({ prisma: { __tag: "prisma" } }));
 
 vi.mock("./queue.js", () => ({
   enqueueSiteBuild: (...args: unknown[]) =>
@@ -29,11 +41,14 @@ import {
   enqueueSiteBuildFromTool,
   readActiveSiteTitle,
   readSiteManifest,
+  resolveSiteBuildModel,
   siteBuildConfig,
   siteBuildEnabled,
   writeSiteManifest,
   type SiteManifest,
 } from "./service.js";
+import { buildRoleCompletionModel } from "../models/roles.js";
+import { prisma } from "../../utils/prisma.js";
 
 const MANIFEST: SiteManifest = {
   siteId: "site-1",
@@ -90,6 +105,39 @@ describe("siteBuildConfig", () => {
     vi.stubEnv("SITE_MODEL", "openai/gpt-6-luna");
     expect(siteBuildEnabled()).toBe(false);
     expect(siteBuildConfig().modelId).toBe("openai/gpt-6-luna");
+  });
+});
+
+describe("resolveSiteBuildModel", () => {
+  it("uses the user's assignment and scopes the lookup by userId", async () => {
+    const assigned = { modelId: "openai/gpt-6-luna" } as never;
+    vi.mocked(buildRoleCompletionModel).mockResolvedValueOnce(assigned);
+
+    await expect(resolveSiteBuildModel("user-1")).resolves.toBe(assigned);
+    expect(buildRoleCompletionModel).toHaveBeenCalledWith(
+      prisma,
+      "user-1",
+      "siteBuilder",
+    );
+  });
+
+  it("falls back to DEFAULT_SITE_MODEL when SITE_MODEL is unset", async () => {
+    vi.mocked(buildRoleCompletionModel).mockResolvedValueOnce(null);
+
+    await expect(resolveSiteBuildModel("user-1")).resolves.toEqual({
+      modelId: DEFAULT_SITE_MODEL,
+    });
+    expect(f.createCompletionModel).toHaveBeenCalledWith(DEFAULT_SITE_MODEL);
+  });
+
+  it("falls back to the SITE_MODEL env var when set and no assignment exists", async () => {
+    vi.stubEnv("SITE_MODEL", "openai/gpt-6-luna");
+    vi.mocked(buildRoleCompletionModel).mockResolvedValueOnce(null);
+
+    await expect(resolveSiteBuildModel("user-1")).resolves.toEqual({
+      modelId: "openai/gpt-6-luna",
+    });
+    expect(f.createCompletionModel).toHaveBeenCalledWith("openai/gpt-6-luna");
   });
 });
 

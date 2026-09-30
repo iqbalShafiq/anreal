@@ -19,6 +19,7 @@ import {
   SITE_BUILD_TIMEOUT_MS,
   assertSafeSiteId,
   readSiteManifest,
+  resolveSiteBuildModel,
   siteBuildConfig,
   siteDataDir,
   writeSiteManifest,
@@ -166,8 +167,11 @@ export async function processSiteBuildJob(
   job: { data: SiteBuildJobData },
   deps: SiteBuildDeps = {},
 ): Promise<void> {
-  const config = siteBuildConfig();
   const { siteId, sessionId, userId, prompt, version } = job.data;
+  const config = {
+    ...siteBuildConfig(),
+    model: await resolveSiteBuildModel(userId),
+  };
   assertSafeSiteId(siteId);
   const startedAt = Date.now();
   const baseDir = join(siteDataDir(), siteId, `v${version}`);

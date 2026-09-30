@@ -13,6 +13,8 @@ import {
 } from "../images/service.js";
 import { createStaticToolDefinition } from "@anreal/agent";
 import { findActiveModel, listModels } from "../models/service.js";
+import { buildRoleCompletionModel, listRoleAssignments } from "../models/roles.js";
+import { prisma } from "../../utils/prisma.js";
 
 /** Max bytes we'll download for an external image (8 MiB). */
 export const VIEW_IMAGE_MAX_BYTES = 8 * 1024 * 1024;
@@ -543,21 +545,42 @@ export function sniffImageMediaType(buffer: Buffer): string | null {
 }
 
 /**
- * Resolve the vision model used by view_image: VISION_HELPER_MODEL env
- * override when it is an active image-capable model, otherwise the cheapest
- * active vision chat model in the registry.
+ * Resolve the vision model used by view_image: a user's explicit
+ * `visionHelper` assignment when set (validated for image input when it was
+ * saved), else the VISION_HELPER_MODEL env override when it is an active
+ * image-capable model, otherwise the cheapest active vision chat model in the
+ * registry.
  */
-export async function resolveVisionHelperModel(): Promise<CompletionModel | null> {
+export async function resolveVisionHelperModel(
+  userId: string,
+): Promise<CompletionModel | null> {
   // Lazy import: constructing the OpenAI client at module load fails in
   // test environments without credentials.
   const { createCompletionModel } = await import("@anreal/agent");
+
+  // 1. An explicit assignment is safe to trust: setRoleAssignment rejects a
+  // visionHelper model that does not declare image input.
+  const assignments = await listRoleAssignments(prisma, userId);
+  const visionModelId =
+    assignments.find((entry) => entry.role === "visionHelper")?.modelId ?? null;
+  if (visionModelId) {
+    const model = await buildRoleCompletionModel(prisma, userId, "visionHelper");
+    if (model) return model;
+  }
+
+  // 2. The env override predates assignments and is NOT validated, so it keeps
+  // today's image-capability guard. Returning resolveRoleTarget's result
+  // before this guard would let a text-only VISION_HELPER_MODEL receive an
+  // image.
   const envModelId = process.env.VISION_HELPER_MODEL;
   if (envModelId) {
-    const info = await findActiveModel(envModelId);
+    const info = await findActiveModel(envModelId, userId);
     if (info?.inputModalities.includes("image")) {
       return createCompletionModel(envModelId);
     }
   }
+
+  // 3. Existing "cheapest vision model from the catalog" fallback, unchanged.
   const { models } = await listModels({ outputType: "text" });
   const vision = models
     .filter((model) => model.inputModalities.includes("image"))
