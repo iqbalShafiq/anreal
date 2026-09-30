@@ -13,9 +13,9 @@
  * - deleting the source session removes its links but forked sessions live on.
  */
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import { resolveApiOrigin } from "./api-origin";
 
-const API_ORIGIN =
-  process.env.E2E_API_ORIGIN?.replace(/\/+$/, "") || "http://localhost:4312";
+const API_ORIGIN = resolveApiOrigin();
 
 async function createDraft(request: APIRequestContext): Promise<string> {
   const response = await request.post(`${API_ORIGIN}/api/chat/sessions/draft`, {
@@ -258,7 +258,9 @@ test.describe("public share links", () => {
     expect(firstToken.length).toBeGreaterThanOrEqual(21);
     // Close keeps the link visible on reopen: the dialog always shows the
     // newest active link inline.
-    await page.getByRole("button", { name: /^close$/i }).click();
+    // Two controls answer to "Close" inside the dialog (an aria-label icon
+    // button and a footer button); either dismisses it, so take the first.
+    await page.getByRole("button", { name: /^close$/i }).first().click();
     const reopenButton = page
       .getByRole("button", { name: /share chat|sharing on/i })
       .first();
@@ -273,7 +275,7 @@ test.describe("public share links", () => {
       reopened.getByRole("button", { name: /copy link/i }),
     ).toBeVisible({ timeout: 30_000 });
     // Topbar badge reflects the active state.
-    await page.getByRole("button", { name: /^close$/i }).click();
+    await page.getByRole("button", { name: /^close$/i }).first().click();
     await expect(
       page.getByRole("button", { name: /sharing on/i }).first(),
     ).toBeVisible({ timeout: 30_000 });
@@ -302,7 +304,7 @@ test.describe("public share links", () => {
     await expect(dialog.getByText(/link copied|new link copied/i)).toBeVisible({
       timeout: 30_000,
     });
-    await page.getByRole("button", { name: /^close$/i }).click();
+    await page.getByRole("button", { name: /^close$/i }).first().click();
 
     // New chat activity after minting makes the link stale.
     const editor = page.locator("[data-anvia-composer-editor]");
@@ -408,7 +410,7 @@ test.describe("public share links", () => {
       .innerText()
       .then((text) => text.trim().split("/").pop() ?? "");
     expect(firstToken.length).toBeGreaterThanOrEqual(21);
-    await page.getByRole("button", { name: /^close$/i }).click();
+    await page.getByRole("button", { name: /^close$/i }).first().click();
 
     const editor = page.locator("[data-anvia-composer-editor]");
     await editor.click();

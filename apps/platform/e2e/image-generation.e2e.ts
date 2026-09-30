@@ -11,9 +11,10 @@
  * the stub's recorded requests, never search success.
  */
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import { resolveApiOrigin } from "./api-origin";
 
 const STUB_ORIGIN = "http://127.0.0.1:18765";
-const API_ORIGIN = "http://localhost:3001";
+const API_ORIGIN = resolveApiOrigin();
 
 const rail = (page: Page) => page.locator('aside[aria-label="Session documents"]');
 const approvalRegion = (page: Page, toolName = "generating image") =>
@@ -29,7 +30,7 @@ async function openFreshChat(page: Page): Promise<void> {
   // and composer state never leak between tests.
   await page.goto(`/chat/${encodeURIComponent(sessionId)}`);
   await expect(
-    page.getByText("Ask anything about your documents"),
+    page.getByRole("heading", { name: /trying to understand/i }),
   ).toBeVisible({ timeout: 30_000 });
   await expect(page.locator("[data-anvia-composer-editor]")).toBeVisible();
 }
@@ -317,7 +318,13 @@ test("background removed sends transparent png params and the gallery lists the 
   expect(body.background).toBe("transparent");
   expect(body.output_format).toBe("png");
 
-  await page.getByRole("button", { name: /^Images \d+$/ }).click();
+  // The sidebar label is "Images <n> images" once the count loads; match both
+  // the bare and counted forms so the click does not race the count fetch.
+  await page
+    .locator("aside")
+    .first()
+    .getByRole("button", { name: /^Images(\s+\d+ images?)?$/ })
+    .click();
   const gallery = page.getByRole("dialog", { name: "Images" });
   await expect(gallery).toBeVisible();
   await expect(

@@ -8,9 +8,9 @@
  * - Login redirects back to the requested deep link after sign-in.
  */
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import { resolveApiOrigin } from "./api-origin";
 
-const API_ORIGIN =
-  process.env.E2E_API_ORIGIN?.replace(/\/+$/, "") || "http://localhost:4312";
+const API_ORIGIN = resolveApiOrigin();
 
 async function createDraft(
   request: APIRequestContext,
@@ -31,6 +31,37 @@ async function createDraft(
  * Driving the exchange through the UI reuses the app's request shape and
  * the stubbed model already selected by the stack (no LLM key needed).
  */
+/**
+ * A seeded chat only becomes a *distinct* row once it owns memory: the draft
+ * endpoint (`getOrCreateEmptyChatSession`) reuses one empty session per scope,
+ * and a rename does not break that reuse. Waiting for the composer to go idle
+ * is not proof of persistence, so poll the transcript instead and fail loudly
+ * if it never lands — otherwise the next draft silently returns this session.
+ */
+async function waitForSessionMemory(
+  request: APIRequestContext,
+  sessionId: string,
+  timeoutMs = 60_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  let lastCount = 0;
+  while (Date.now() < deadline) {
+    const response = await request.get(
+      `${API_ORIGIN}/api/chat?sessionId=${encodeURIComponent(sessionId)}`,
+    );
+    if (response.ok()) {
+      const messages = (await response.json()) as unknown;
+      lastCount = Array.isArray(messages) ? messages.length : 0;
+      if (lastCount > 0) return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  throw new Error(
+    `seeded chat ${sessionId} never stored a message (last count ${lastCount}); ` +
+      "the draft endpoint will keep reusing it",
+  );
+}
+
 async function createSeededChat(
   page: Page,
   title: string,
@@ -60,6 +91,7 @@ async function createSeededChat(
   // The stub answers every prompt; wait for the run to settle so the
   // session owns memory before the next draft is allocated.
   await expect(send).toBeVisible({ timeout: 120_000 });
+  await waitForSessionMemory(page.request, sessionId);
   return sessionId;
 }
 

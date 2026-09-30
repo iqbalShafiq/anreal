@@ -17,11 +17,12 @@
  */
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 import { setModel } from "./helpers";
+import { resolveApiOrigin } from "./api-origin";
 
 const TEXT_ONLY_MODEL = "deepseek/deepseek-v4-flash-0731";
 
 const STUB_ORIGIN = "http://127.0.0.1:18765";
-const API_ORIGIN = "http://localhost:3001";
+const API_ORIGIN = resolveApiOrigin();
 
 async function openFreshChat(page: Page): Promise<void> {
   const draft = await page.request.post(`${API_ORIGIN}/api/chat/sessions/draft`, {
@@ -30,7 +31,7 @@ async function openFreshChat(page: Page): Promise<void> {
   expect(draft.ok()).toBe(true);
   const { sessionId } = (await draft.json()) as { sessionId: string };
   await page.goto(`/chat/${encodeURIComponent(sessionId)}`);
-  await expect(page.getByText("Ask anything about your documents")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("heading", { name: /trying to understand/i })).toBeVisible({ timeout: 30_000 });
   await expect(page.locator("[data-anvia-composer-editor]")).toBeVisible();
   // hands-on: snapshot composer after open (playwright_browser_snapshot equivalent)
   await expect(page.locator("[data-anvia-composer-editor]")).toBeVisible();

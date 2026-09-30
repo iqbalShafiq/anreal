@@ -8,9 +8,9 @@
  *   pnpm exec -- playwright test --config playwright.share-fork.real-llm.config.ts --headed
  */
 import { expect, test, type Page } from "@playwright/test";
+import { resolveApiOrigin } from "./api-origin";
 
-const API_ORIGIN =
-  process.env.E2E_API_ORIGIN?.replace(/\/+$/, "") || "http://localhost:4312";
+const API_ORIGIN = resolveApiOrigin();
 const FORK_MODEL = "meta/muse-spark-1.3-contributor";
 const FORK_EFFORT = "minimal";
 
