@@ -7,6 +7,7 @@ import {
   effortDiff,
   effortWarning,
   modelDraftFromPrefill,
+  modelOutputType,
   slugPreview,
 } from "./provider-model-draft";
 
@@ -136,6 +137,18 @@ describe("modelDraftFromPrefill", () => {
     expect(draft.contextWindowTokens).toBe("");
     expect(draft.providerReported).toBe(false);
     expect(draft.reasoningEfforts).toEqual([]);
+  });
+});
+
+describe("modelOutputType", () => {
+  it("registers new models as text", () => {
+    expect(modelOutputType(null)).toBe("text");
+    expect(modelOutputType(undefined)).toBe("text");
+    expect(modelOutputType("text")).toBe("text");
+  });
+
+  it("preserves an existing image model", () => {
+    expect(modelOutputType("image")).toBe("image");
   });
 });
 

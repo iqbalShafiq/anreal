@@ -163,6 +163,17 @@ export function modelDraftFromPrefill(prefill: ProviderModelPrefill): ModelDraft
 }
 
 /**
+ * The output type the model editor submits. Until BYOK image generation is
+ * wired (Phase D) a new model is always text; an existing row keeps whatever it
+ * carries, so editing never silently rewrites an image model to text.
+ */
+export function modelOutputType(
+  existing: "text" | "image" | null | undefined,
+): "text" | "image" {
+  return existing === "image" ? "image" : "text";
+}
+
+/**
  * A one-line warning when the user's reasoning set diverges from the adapter's
  * declared set, or `null` when they agree or the adapter declares nothing.
  */

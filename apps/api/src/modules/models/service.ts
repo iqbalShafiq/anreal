@@ -245,7 +245,12 @@ export async function listModels(input?: {
   return {
     models: [
       ...catalogRows.map(toModelInfo),
-      ...connectionRows.map(toConnectionModelInfo),
+      // Connection image models are hidden until image generation resolves a
+      // connection's credential at run time (Phase D): the global catalog is
+      // the only source of image models today.
+      ...connectionRows
+        .filter((row) => row.outputType !== "image")
+        .map(toConnectionModelInfo),
     ],
     reasoningEfforts: reasoningEfforts.map((row) => ({
       key: row.key,

@@ -198,6 +198,35 @@ describe("listModels merging", () => {
       }),
     );
   });
+
+  it("hides connection image models but keeps catalog image models", async () => {
+    vi.mocked(prisma.chatModel.findMany).mockResolvedValue([
+      makeModelRow({ modelId: "openai/gpt-image-1", outputType: "image" }),
+    ] as never);
+    vi.mocked(prisma.providerModel.findMany).mockResolvedValue([
+      makeProviderModelRow({
+        slug: "openrouter/gpt-image-1",
+        outputType: "image",
+      }),
+    ] as never);
+
+    const result = await listMerged({ outputType: "image", userId: "u_1" });
+
+    expect(result.models.map((model) => model.modelId)).toEqual([
+      "openai/gpt-image-1",
+    ]);
+  });
+
+  it("hides connection image models even without an outputType filter", async () => {
+    vi.mocked(prisma.providerModel.findMany).mockResolvedValue([
+      makeProviderModelRow({ slug: "gw/mixed", outputType: "image" }),
+      makeProviderModelRow({ slug: "gw/text", outputType: "text" }),
+    ] as never);
+
+    const result = await listMerged({ userId: "u_1" });
+
+    expect(result.models.map((model) => model.modelId)).toEqual(["gw/text"]);
+  });
 });
 
 describe("findActiveModel scoping", () => {

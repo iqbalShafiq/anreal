@@ -56,13 +56,6 @@ function kindLabel(kinds: ProviderKindInfo[], kind: string): string {
   return kinds.find((info) => info.kind === kind)?.label ?? kind;
 }
 
-function kindImageStyle(
-  kinds: ProviderKindInfo[],
-  kind: string,
-): ProviderKindInfo["imageStyle"] {
-  return kinds.find((info) => info.kind === kind)?.imageStyle ?? "none";
-}
-
 /**
  * The Providers settings section: a list of BYOK connections with an inline
  * editor, and (once a connection is saved) its registered models. Lives inside
@@ -573,7 +566,6 @@ function ProviderConnectionEditor({
       {!isNew && initial ? (
         <ConnectionModels
           connection={initial}
-          kinds={kinds}
           effortVocabulary={effortVocabulary}
         />
       ) : null}
@@ -597,11 +589,9 @@ function ProviderConnectionEditor({
 
 function ConnectionModels({
   connection,
-  kinds,
   effortVocabulary,
 }: {
   connection: ProviderConnection;
-  kinds: ProviderKindInfo[];
   effortVocabulary: string[];
 }) {
   const models = useProviderModels(connection.id, true);
@@ -639,7 +629,6 @@ function ConnectionModels({
           key={editingModelId ?? "new"}
           connectionId={connection.id}
           connectionSlug={connection.slug}
-          imageStyle={kindImageStyle(kinds, connection.kind)}
           effortVocabulary={effortVocabulary}
           initial={
             editingModelId

@@ -2,16 +2,15 @@ import { useEffect, useState } from "react";
 import { Button } from "#/components/ui/button";
 import { FormTextAreaField, FormTextField } from "#/components/ui/form-field";
 import { Select } from "#/components/ui/select";
-import { Switch } from "#/components/ui/switch";
 import {
   effortWarning,
   modelDraftFromPrefill,
+  modelOutputType,
   slugPreview,
 } from "#/lib/provider-model-draft";
 import {
   prefillProviderModel,
   type ListedProviderModel,
-  type ProviderKindInfo,
   type ProviderModelInput,
   type ProviderModelRow,
 } from "#/lib/api";
@@ -39,7 +38,6 @@ function parseLimit(value: string): number | null | "invalid" {
 export function ProviderModelEditor({
   connectionId,
   connectionSlug,
-  imageStyle,
   effortVocabulary,
   initial,
   saving,
@@ -49,7 +47,6 @@ export function ProviderModelEditor({
 }: {
   connectionId: string;
   connectionSlug: string;
-  imageStyle: ProviderKindInfo["imageStyle"];
   effortVocabulary: string[];
   initial: ProviderModelRow | null;
   saving: boolean;
@@ -81,9 +78,6 @@ export function ProviderModelEditor({
   );
   const [providerReported, setProviderReported] = useState(true);
   const [iconSvg, setIconSvg] = useState(initial?.iconSvg ?? "");
-  const [outputType, setOutputType] = useState<"text" | "image">(
-    initial?.outputType ?? "text",
-  );
   const [discovered, setDiscovered] = useState<ListedProviderModel[] | null>(
     null,
   );
@@ -93,7 +87,10 @@ export function ProviderModelEditor({
   const [prefilling, setPrefilling] = useState(false);
   const [errors, setErrors] = useState<FieldErrors>({});
 
-  const supportsImages = imageStyle !== "none";
+  // Text is the only registerable output type until BYOK image generation ships
+  // (Phase D); an existing image row keeps its value so editing cannot corrupt
+  // it.
+  const outputType = modelOutputType(initial?.outputType ?? null);
   const busy = saving || prefilling;
   const wantsReasoning = outputType === "text";
 
@@ -325,32 +322,6 @@ export function ProviderModelEditor({
           so conversations can be sized correctly.
         </p>
       ) : null}
-
-      {supportsImages ? (
-        <div className="flex items-center justify-between gap-3 rounded-lg border border-white/[0.06] px-3 py-2">
-          <div className="min-w-0">
-            <p className="text-xs font-medium text-text">Image model</p>
-            <p className="text-[11px] text-text-faint">
-              Registers the model as an image generator instead of a chat model.
-            </p>
-          </div>
-          <Switch
-            checked={outputType === "image"}
-            onToggle={() =>
-              setOutputType((current) =>
-                current === "image" ? "text" : "image",
-              )
-            }
-            label="Image model"
-            disabled={busy}
-          />
-        </div>
-      ) : (
-        <p className="text-[11px] text-text-faint">
-          Image models are unavailable for this provider kind — only
-          OpenAI-compatible gateways expose the app's image endpoint.
-        </p>
-      )}
 
       {wantsReasoning ? (
         <fieldset className="flex flex-col gap-2 rounded-xl border border-white/[0.06] p-3">
