@@ -505,12 +505,19 @@ export async function updateConnection(
 
   // An omitted or blank key means "keep the stored credential" � the browser
   // never receives the key back, so it cannot resend it.
-  const apiKey = isBlankKey(input.apiKey)
-    ? decodeProviderCredentials(row.credentialsRef).apiKey
-    : input.apiKey;
+  const stored = decodeProviderCredentials(row.credentialsRef);
+  const apiKey = isBlankKey(input.apiKey) ? stored.apiKey : input.apiKey;
+  // Headers are secret too, so an omitted map means "keep" — only an explicit
+  // map (including {}) replaces or clears them.
+  const headers =
+    input.headers === undefined ? (stored.headers ?? null) : input.headers;
 
   const slugs = await collectConnectionSlugs(db, userId, row.slug);
-  const value = validateConnectionInput({ ...input, apiKey }, slugs, 0);
+  const value = validateConnectionInput(
+    { ...input, apiKey, headers },
+    slugs,
+    0,
+  );
 
   const updated = (await db.providerConnection.update({
     where: { id },
@@ -757,8 +764,9 @@ export async function discoverConnectionModels(
  * Probe a provider without persisting anything, mirroring the MCP
  * `POST /mcp-servers/test` route. A blank api key reuses an owned connection's
  * stored credential (and stored headers when none are supplied), so editing a
- * connection never requires re-entering it. Everything save would reject is
- * validated here first, so the test cannot accept what saving would refuse.
+ * connection never requires re-entering it. It validates the fields the provider
+ * call itself depends on — kind, base URL, headers, and credential — not every
+ * save-path rule (api, label, and slug are not checked here).
  */
 export async function testProviderConnection(
   db: ProviderConnectionsDb,

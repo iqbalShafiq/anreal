@@ -103,14 +103,7 @@ export function useProviderConnections(active: boolean) {
     [mutate],
   );
 
-  /** The provider's own model inventory; never persists anything. */
-  const discover = useCallback(
-    (connectionId: string): Promise<ListedProviderModel[]> =>
-      discoverProviderModels(connectionId),
-    [],
-  );
-
-  return { data, loading, error, saving, reload, save, remove, toggle, discover };
+  return { data, loading, error, saving, reload, save, remove, toggle };
 }
 
 /**

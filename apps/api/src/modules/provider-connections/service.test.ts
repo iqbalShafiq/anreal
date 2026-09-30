@@ -210,6 +210,42 @@ function makeDb(overrides: Record<string, unknown> = {}) {
   } as never;
 }
 
+function makeConnectionDb(credentialsRef: string) {
+  return makeDb({
+    providerConnection: {
+      count: vi.fn(async () => 1),
+      findFirst: vi.fn(async () => ({
+        id: "pc_1",
+        userId: "u_1",
+        kind: "compatible",
+        label: "GW",
+        slug: "gw",
+        baseUrl: "https://gw.example/v1",
+        api: "chat",
+        credentialsRef,
+        isActive: true,
+        sortOrder: 0,
+      })),
+      findMany: vi.fn(async () => []),
+      update: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({
+        id: "pc_1",
+        ...data,
+      })),
+    },
+  });
+}
+
+/** The credential envelope a put through `updateConnection` would persist. */
+function updatedCredentialsRef(db: unknown): string {
+  const update = (
+    db as { providerConnection: { update: ReturnType<typeof vi.fn> } }
+  ).providerConnection.update;
+  const call = update.mock.calls[0]?.[0] as {
+    data: { credentialsRef: string };
+  };
+  return call.data.credentialsRef;
+}
+
 describe("connection CRUD", () => {
   it("never returns the credential reference", () => {
     const row = {
@@ -317,6 +353,65 @@ describe("connection CRUD", () => {
     expect(decodeProviderCredentials(call.data.credentialsRef).apiKey).toBe(
       "sk-original",
     );
+  });
+
+  it("preserves the stored headers when the update omits them", async () => {
+    const db = makeConnectionDb(
+      encodeProviderCredentials({
+        apiKey: "sk-original",
+        headers: { "X-Org": "acme" },
+      }),
+    );
+
+    await updateConnection(db, "u_1", "pc_1", {
+      kind: "compatible",
+      label: "Renamed",
+      baseUrl: "https://gw.example/v1",
+    });
+
+    expect(
+      decodeProviderCredentials(updatedCredentialsRef(db)).headers,
+    ).toEqual({ "X-Org": "acme" });
+  });
+
+  it("clears the stored headers when the update sends an explicit empty map", async () => {
+    const db = makeConnectionDb(
+      encodeProviderCredentials({
+        apiKey: "sk-original",
+        headers: { "X-Org": "acme" },
+      }),
+    );
+
+    await updateConnection(db, "u_1", "pc_1", {
+      kind: "compatible",
+      label: "Renamed",
+      baseUrl: "https://gw.example/v1",
+      headers: {},
+    });
+
+    expect(
+      decodeProviderCredentials(updatedCredentialsRef(db)).headers,
+    ).toBeNull();
+  });
+
+  it("replaces the stored headers when the update sends a new map", async () => {
+    const db = makeConnectionDb(
+      encodeProviderCredentials({
+        apiKey: "sk-original",
+        headers: { "X-Org": "acme" },
+      }),
+    );
+
+    await updateConnection(db, "u_1", "pc_1", {
+      kind: "compatible",
+      label: "Renamed",
+      baseUrl: "https://gw.example/v1",
+      headers: { "X-New": "v" },
+    });
+
+    const headers = decodeProviderCredentials(updatedCredentialsRef(db)).headers;
+    expect(headers).toEqual({ "X-New": "v" });
+    expect(headers).not.toHaveProperty("X-Org");
   });
 
   it("returns a public shape without the credential envelope on update", async () => {
