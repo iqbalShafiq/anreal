@@ -12,17 +12,28 @@ export const DEFAULT_IMAGE_GEN_SETTINGS: ImageGenSettings = {
 };
 
 /**
+ * The raw stored model id, or null when the user has never chosen one (or
+ * storage is unavailable). Kept separate from `readSelectedModel` so callers
+ * can tell an explicit choice apart from the catalog fallback.
+ */
+export function readStoredSelectedModel(): string | null {
+  try {
+    const stored = localStorage.getItem(SELECTED_MODEL_KEY);
+    return stored !== null && stored.length > 0 ? stored : null;
+  } catch {
+    // ignore storage access errors
+    return null;
+  }
+}
+
+/**
  * Stored model id if it exists in the catalog, else the first active model,
  * else the default.
  */
 export function readSelectedModel(models: ModelInfo[]): string {
-  try {
-    const stored = localStorage.getItem(SELECTED_MODEL_KEY);
-    if (stored !== null && stored.length > 0 && isKnownModel(models, stored)) {
-      return stored;
-    }
-  } catch {
-    // ignore storage access errors
+  const stored = readStoredSelectedModel();
+  if (stored !== null && isKnownModel(models, stored)) {
+    return stored;
   }
   return models[0]?.modelId ?? DEFAULT_COMPLETION_MODEL;
 }

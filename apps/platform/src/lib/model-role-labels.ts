@@ -1,4 +1,5 @@
 import type { SelectOption } from "#/components/ui/select-list";
+import { DEFAULT_COMPLETION_MODEL } from "#/lib/chat/models";
 
 /**
  * Every background role that can carry its own model assignment. The order is
@@ -69,4 +70,24 @@ export function roleModelOptions(
     },
     ...offered.map((model) => ({ value: model.modelId, label: model.name })),
   ];
+}
+
+/**
+ * The initial chat model for a session, mirroring spec §5.5's precedence:
+ * a stored preference (when the catalog still has it) wins, then the user's
+ * `chat` role assignment, then the first active model, then the app default.
+ * An id the catalog does not contain is ignored rather than selected, so a
+ * stale localStorage value or a dangling assignment cannot strand the chat.
+ */
+export function resolveInitialModel(input: {
+  storedModelId: string | null;
+  chatAssignmentModelId: string | null;
+  models: readonly { modelId: string }[];
+}): string {
+  const { storedModelId, chatAssignmentModelId, models } = input;
+  const inCatalog = (id: string | null): id is string =>
+    id !== null && models.some((model) => model.modelId === id);
+  if (inCatalog(storedModelId)) return storedModelId;
+  if (inCatalog(chatAssignmentModelId)) return chatAssignmentModelId;
+  return models[0]?.modelId ?? DEFAULT_COMPLETION_MODEL;
 }

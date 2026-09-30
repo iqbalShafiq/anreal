@@ -156,7 +156,9 @@ import {
   readImageGenerationEnabled,
   readSelectedModel,
   readSelectedReasoningEffort,
+  readStoredSelectedModel,
 } from "#/lib/chat-preferences";
+import { resolveInitialModel } from "#/lib/model-role-labels";
 import { useUserSkills } from "#/hooks/use-user-skills";
 import { useUserMcpServers } from "#/hooks/use-user-mcp-servers";
 import { SkillsModal } from "#/components/skills/skills-modal";
@@ -358,6 +360,7 @@ export function ChatSession({
   onDeferredComposerSubmit,
   initialComposerDraft = null,
   initialFeatureFlags = null,
+  chatAssignmentModelId = null,
   onSiteBuildEvent,
 }: {
   sessionId: string;
@@ -403,6 +406,12 @@ export function ChatSession({
   initialComposerDraft?: InitialComposerDraft | string | null;
   /** Feature toggles pre-selected before the first send (share fork handoff). */
   initialFeatureFlags?: InitialFeatureFlags | null;
+  /**
+   * The user's `chat` role assignment, resolved asynchronously. Applied only
+   * when the user has never picked a model (no stored preference), so it can
+   * never overwrite an explicit choice.
+   */
+  chatAssignmentModelId?: string | null;
   onSiteBuildEvent?: (
     event:
       | { name: "siteBuildProgress"; data: ChatDataMap["siteBuildProgress"] }
@@ -1438,17 +1447,24 @@ export function ChatSession({
   }, [sessionId]);
 
   // Reconcile the selected model once the catalog arrives:
-  // stored preference > first active model > default. Always apply the
-  // storage-aware read — at mount the catalog is still empty (loading), so
-  // without this the stored preference would never be restored.
+  // stored preference > chat role assignment > first active model > default.
+  // Always apply the storage-aware read — at mount the catalog is still empty
+  // (loading), so without this the stored preference would never be restored.
+  // The assignment loads asynchronously too, so this recomputes when it
+  // arrives; a stored preference always wins, and an explicit choice is never
+  // overwritten. Read per render (not memoized) so a model the user just picked
+  // — persisted synchronously by handleModelChange — is reflected immediately.
+  const resolvedInitialModel = resolveInitialModel({
+    storedModelId: readStoredSelectedModel(),
+    chatAssignmentModelId: chatAssignmentModelId ?? null,
+    models,
+  });
   useEffect(() => {
     if (modelsStatus !== "success") return;
-    const next = readSelectedModel(models);
-    if (next !== selectedModelRef.current) {
-      setSelectedModel(next);
-      persistSelectedModel(next);
+    if (resolvedInitialModel !== selectedModelRef.current) {
+      setSelectedModel(resolvedInitialModel);
     }
-  }, [models, modelsStatus]);
+  }, [modelsStatus, resolvedInitialModel]);
 
   const activeModel = useMemo(
     () => modelById(models, selectedModel),
@@ -1463,7 +1479,7 @@ export function ChatSession({
     // On reload React applies the stored model asynchronously; do not map the
     // stored effort through the temporary default model in the intervening
     // render or a pending interaction will resume with mismatched metadata.
-    if (activeModel.modelId !== readSelectedModel(models)) return;
+    if (activeModel.modelId !== resolvedInitialModel) return;
     const base = reasoningInitializedRef.current
       ? selectedReasoningEffortRef.current
       : readSelectedReasoningEffort(activeModel.reasoningEfforts);
@@ -1483,7 +1499,7 @@ export function ChatSession({
         ? current
         : { modelId: activeModel.modelId, reasoningEffort: next },
     );
-  }, [activeModel, models, reasoningEfforts]);
+  }, [activeModel, resolvedInitialModel, reasoningEfforts]);
 
   const resumePolicyReady =
     modelsStatus === "success" &&
