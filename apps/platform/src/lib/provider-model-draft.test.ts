@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  canSaveConnection,
+  connectionSlugError,
+  deriveConnectionSlug,
   draftFromListedModel,
   effortDiff,
+  effortWarning,
+  modelDraftFromPrefill,
   slugPreview,
 } from "./provider-model-draft";
 
@@ -64,5 +69,85 @@ describe("draftFromListedModel", () => {
     expect(draft.name).toBe("gw/model-x");
     expect(draft.contextWindowTokens).toBeNull();
     expect(draft.reasoningEfforts).toEqual([]);
+  });
+});
+
+describe("connection slug helpers", () => {
+  it("derives the server slug from a label", () => {
+    expect(deriveConnectionSlug("My OpenRouter Gateway")).toBe(
+      "my-openrouter-gateway",
+    );
+    expect(deriveConnectionSlug("!!!")).toBe("provider");
+  });
+
+  it("rejects slugs the server would refuse", () => {
+    expect(connectionSlugError("my-openrouter")).toBeNull();
+    expect(connectionSlugError("")).toBeNull();
+    expect(connectionSlugError("My-OpenRouter")).toMatch(/lowercase/i);
+    expect(connectionSlugError("my--gateway")).toMatch(/lowercase/i);
+  });
+});
+
+describe("canSaveConnection", () => {
+  it("gates a new connection on a passing test", () => {
+    expect(canSaveConnection({ isNew: true, testPassed: false })).toBe(false);
+    expect(canSaveConnection({ isNew: true, testPassed: true })).toBe(true);
+  });
+
+  it("lets an existing connection save without a test", () => {
+    expect(canSaveConnection({ isNew: false, testPassed: false })).toBe(true);
+  });
+});
+
+describe("modelDraftFromPrefill", () => {
+  it("maps provider-reported limits into form strings", () => {
+    expect(
+      modelDraftFromPrefill({
+        name: "GPT 5.6 Luna",
+        contextWindowTokens: 1_000_000,
+        maxInputTokens: 800_000,
+        maxOutputTokens: 64_000,
+        reasoningEfforts: ["low", "high"],
+        defaultReasoningEffort: "medium",
+        capabilities: null,
+        providerReported: true,
+      }),
+    ).toEqual({
+      name: "GPT 5.6 Luna",
+      contextWindowTokens: "1000000",
+      maxInputTokens: "800000",
+      maxOutputTokens: "64000",
+      reasoningEfforts: ["low", "high", "medium"],
+      providerReported: true,
+    });
+  });
+
+  it("leaves limits empty and flags an unreported adapter entry", () => {
+    const draft = modelDraftFromPrefill({
+      name: "gateway/model-x",
+      contextWindowTokens: null,
+      maxInputTokens: null,
+      maxOutputTokens: null,
+      reasoningEfforts: [],
+      defaultReasoningEffort: null,
+      capabilities: null,
+      providerReported: false,
+    });
+    expect(draft.contextWindowTokens).toBe("");
+    expect(draft.providerReported).toBe(false);
+    expect(draft.reasoningEfforts).toEqual([]);
+  });
+});
+
+describe("effortWarning", () => {
+  it("returns null when the sets agree or the adapter is unknown", () => {
+    expect(effortWarning(["low"], ["low"])).toBeNull();
+    expect(effortWarning(["low"], [])).toBeNull();
+  });
+
+  it("names both divergences", () => {
+    const warning = effortWarning(["low", "max"], ["low", "high"]);
+    expect(warning).toContain("does not accept max");
+    expect(warning).toContain("also declares high");
   });
 });

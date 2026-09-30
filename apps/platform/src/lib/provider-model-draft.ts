@@ -6,9 +6,15 @@
  * stays unit-testable in the node environment.
  */
 
-import type { ListedProviderModel } from "#/lib/api";
+import type {
+  ListedProviderModel,
+  ProviderModelPrefill,
+} from "#/lib/api";
 
 const SLUG_MAX = 96;
+
+/** The lowercase-hyphen rule the server enforces for connection slugs. */
+export const CONNECTION_SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 /**
  * Lowercase, keep `[a-z0-9._-]`, collapse everything else into single hyphens.
@@ -82,4 +88,97 @@ export function draftFromListedModel(input: {
     contextWindowTokens: input.listed.contextLength ?? null,
     reasoningEfforts,
   };
+}
+
+/** Whether a slug matches the server's connection-slug rule. */
+export function isValidConnectionSlug(slug: string): boolean {
+  return CONNECTION_SLUG_RE.test(slug);
+}
+
+/**
+ * The slug the server would derive from a label, mirroring
+ * `deriveConnectionSlug` in `apps/api/src/lib/provider-slug.ts`. Used to
+ * pre-fill the slug field until the user edits it.
+ */
+export function deriveConnectionSlug(label: string): string {
+  return sanitizeSlugPart(label, "provider");
+}
+
+/**
+ * Client-side slug check so a typo fails in the form, not mid-save. The server
+ * stays authoritative for reserved namespaces; this only enforces the shape.
+ */
+export function connectionSlugError(slug: string): string | null {
+  if (slug.length === 0) return null;
+  return isValidConnectionSlug(slug)
+    ? null
+    : "Slug must be lowercase letters, numbers, and hyphens, e.g. my-openrouter";
+}
+
+/**
+ * A new connection may only be saved after a successful Test. Save-time
+ * provider validation is not implemented server-side, so the UI carries the
+ * gate; an existing connection saves freely.
+ */
+export function canSaveConnection(input: {
+  isNew: boolean;
+  testPassed: boolean;
+}): boolean {
+  return input.isNew ? input.testPassed : true;
+}
+
+/** Editable model-form state; numbers live as text so inputs stay controlled. */
+export type ModelDraft = {
+  name: string;
+  contextWindowTokens: string;
+  maxInputTokens: string;
+  maxOutputTokens: string;
+  reasoningEfforts: string[];
+  providerReported: boolean;
+};
+
+function numberField(value: number | null): string {
+  return value === null ? "" : String(value);
+}
+
+/**
+ * Seed the model editor from the server's prefill. A non-null adapter default
+ * is added when the declaration does not already include it, and every limit
+ * becomes a form string so the inputs stay controlled.
+ */
+export function modelDraftFromPrefill(prefill: ProviderModelPrefill): ModelDraft {
+  const reasoningEfforts = [...prefill.reasoningEfforts];
+  const fallback = prefill.defaultReasoningEffort;
+  if (fallback && !reasoningEfforts.includes(fallback)) {
+    reasoningEfforts.push(fallback);
+  }
+  return {
+    name: prefill.name,
+    contextWindowTokens: numberField(prefill.contextWindowTokens),
+    maxInputTokens: numberField(prefill.maxInputTokens),
+    maxOutputTokens: numberField(prefill.maxOutputTokens),
+    reasoningEfforts,
+    providerReported: prefill.providerReported,
+  };
+}
+
+/**
+ * A one-line warning when the user's reasoning set diverges from the adapter's
+ * declared set, or `null` when they agree or the adapter declares nothing.
+ */
+export function effortWarning(
+  selected: string[],
+  adapterEfforts: string[],
+): string | null {
+  if (adapterEfforts.length === 0) return null;
+  const { unsupported, missing } = effortDiff(selected, adapterEfforts);
+  if (unsupported.length === 0 && missing.length === 0) return null;
+  const parts: string[] = [];
+  if (unsupported.length > 0) {
+    parts.push(`the adapter does not accept ${unsupported.join(", ")}`);
+  }
+  if (missing.length > 0) {
+    parts.push(`the adapter also declares ${missing.join(", ")}`);
+  }
+  return `Custom reasoning set: ${parts.join("; ")}.`;
 }

@@ -46,6 +46,17 @@ function ModelDetail({ model }: { model: ModelInfo }) {
           : null}
       </div>
       <dl className="flex flex-col gap-0.5">
+        {model.source === "connection" ? (
+          <div className="flex items-center justify-between gap-3">
+            <dt className="text-[10px] text-text-faint">Source</dt>
+            <dd
+              className="min-w-0 truncate text-[10px] font-medium text-text/90"
+              title={`Custom · ${model.provider.name}`}
+            >
+              Custom · {model.provider.name}
+            </dd>
+          </div>
+        ) : null}
         <div className="flex items-center justify-between gap-3">
           <dt className="text-[10px] text-text-faint">Context</dt>
           <dd className="text-[10px] font-medium text-text/90">

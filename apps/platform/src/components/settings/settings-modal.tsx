@@ -9,6 +9,7 @@ import {
 import {
   Activity,
   HardDrive,
+  KeyRound,
   Sparkles,
   UserRound,
   X,
@@ -17,6 +18,7 @@ import {
 import { InsetScrollbar } from "#/components/chat/inset-scrollbar";
 import { ReasoningEffortIcon } from "#/components/composer/model-reasoning-switcher";
 import { PersonalizationSection } from "#/components/settings/personalization-section";
+import { ProvidersSection } from "#/components/settings/providers-section";
 import { useProfilePersonalization } from "#/hooks/use-profile";
 import {
   getUserUsageSummary,
@@ -32,7 +34,7 @@ import {
   type ReasoningEffort,
 } from "#/lib/chat/models";
 
-type SettingsSection = "account" | "usage" | "personalization";
+type SettingsSection = "account" | "usage" | "personalization" | "providers";
 
 export type SettingsModalProps = {
   open: boolean;
@@ -213,6 +215,12 @@ export function SettingsModal({
             label="Personalization"
             onClick={() => setSection("personalization")}
           />
+          <SettingsNavButton
+            active={section === "providers"}
+            icon={<KeyRound className="size-4" strokeWidth={1.75} />}
+            label="Providers"
+            onClick={() => setSection("providers")}
+          />
         </nav>
 
         {/* Same scroll treatment as chat room: hide native bar + InsetScrollbar */}
@@ -278,6 +286,8 @@ export function SettingsModal({
                   </>
                 ) : null}
               </div>
+            ) : section === "providers" ? (
+              <ProvidersSection active={section === "providers"} />
             ) : (
               <PersonalizationSection
                 data={profiles.data}
