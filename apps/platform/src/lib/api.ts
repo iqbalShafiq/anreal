@@ -1,5 +1,6 @@
 import type { ContextSnippetSourceRole } from "#/lib/chat/context-snippet-text";
 import type { StageInteractionInput } from "#/lib/chat/interaction-response";
+import { MODEL_ROLE_KEYS, type ModelRoleKey } from "#/lib/model-role-labels";
 
 const DEFAULT_API_PORT = 3001;
 
@@ -1135,6 +1136,53 @@ export async function listModels(input?: {
   };
   modelsCache = catalog;
   return catalog;
+}
+
+/** One role's saved model assignment plus the model it falls back to. */
+export type ModelRoleInfo = {
+  role: ModelRoleKey;
+  /** The merged catalog id assigned to the role, or null for the default. */
+  modelId: string | null;
+  /** The model the role falls back to; null when it has no default. */
+  defaultModelId: string | null;
+};
+
+function isModelRoleInfo(value: unknown): value is ModelRoleInfo {
+  return (
+    isRecord(value) &&
+    typeof value.role === "string" &&
+    (MODEL_ROLE_KEYS as readonly string[]).includes(value.role) &&
+    (value.modelId === null || typeof value.modelId === "string") &&
+    (value.defaultModelId === null ||
+      typeof value.defaultModelId === "string")
+  );
+}
+
+export async function listModelRoles(): Promise<ModelRoleInfo[]> {
+  const response = await apiFetch(`${API_BASE}/api/models/roles`);
+  if (!response.ok) await throwSkillError(response, "Failed to load model roles");
+  const data: unknown = await response.json();
+  if (!isRecord(data) || !Array.isArray(data.roles)) {
+    throw new Error("Unexpected model roles response shape");
+  }
+  return data.roles.filter(isModelRoleInfo);
+}
+
+export async function setModelRole(
+  role: ModelRoleKey,
+  modelId: string | null,
+): Promise<ModelRoleInfo> {
+  const response = await apiFetch(`${API_BASE}/api/models/roles`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ role, modelId }),
+  });
+  if (!response.ok) await throwSkillError(response, "Failed to save model role");
+  const data: unknown = await response.json();
+  if (!isModelRoleInfo(data)) {
+    throw new Error("Unexpected model role response shape");
+  }
+  return data;
 }
 
 export type ContextUsageInfo = {

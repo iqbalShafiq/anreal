@@ -18,6 +18,7 @@ import {
 import { InsetScrollbar } from "#/components/chat/inset-scrollbar";
 import { ReasoningEffortIcon } from "#/components/composer/model-reasoning-switcher";
 import { PersonalizationSection } from "#/components/settings/personalization-section";
+import { ModelRolesSection } from "#/components/settings/model-roles-section";
 import { ProvidersSection } from "#/components/settings/providers-section";
 import { useProfilePersonalization } from "#/hooks/use-profile";
 import {
@@ -252,6 +253,8 @@ export function SettingsModal({
                     <dd className="text-text">{user.email}</dd>
                   </div>
                 </dl>
+
+                <ModelRolesSection active={open} />
               </div>
             ) : section === "usage" ? (
               <div className="flex flex-col gap-6 animate-fade-in">
