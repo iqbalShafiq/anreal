@@ -2,7 +2,7 @@ import { createSummaryMemoryCompactor } from "@anvia/core/memory";
 import type { Message } from "@anvia/core";
 import {
   createCompletionModel,
-  providerOptionsForReasoning,
+  compactorProviderOptionsFor,
 } from "@anreal/agent";
 import { describe, expect, it } from "vitest";
 
@@ -33,7 +33,9 @@ describe.runIf(runRealLlm)("native memory compaction with the real acceptance mo
       const compactor = createSummaryMemoryCompactor({
         model: createCompletionModel(REAL_MODEL),
         maxTokens: 384,
-        providerOptions: providerOptionsForReasoning("max"),
+        // The compactor has no `controls` seam; this model runs through the
+        // env-configured OpenAI-compatible endpoint on the Responses API.
+        providerOptions: compactorProviderOptionsFor("openai", "responses", "max"),
         retries: { maxAttempts: 2 },
       });
 

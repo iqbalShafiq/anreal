@@ -6,10 +6,10 @@ import {
   type EvalMetric,
 } from "@anvia/core/evals";
 import type { CompletionModel } from "@anvia/core/completion";
+import { REASONING_EFFORT_CONTROL_ID } from "@anvia/core/completion";
 import {
   createCompletionModel,
   parseReasoningEffort,
-  providerOptionsForReasoning,
   type ReasoningEffort,
 } from "../../providers/openai.js";
 import { createBehaviorTarget } from "../behavior-target.js";
@@ -28,15 +28,17 @@ function judgeModelWithReasoning(
   model: CompletionModel,
   effort: ReasoningEffort,
 ): CompletionModel {
+  const control = model.controls?.[REASONING_EFFORT_CONTROL_ID];
+  if (!control || control.options.length === 0) return model;
   return {
     ...model,
     completion(request, options) {
       return model.completion(
         {
           ...request,
-          providerOptions: {
-            ...(request.providerOptions ?? {}),
-            ...providerOptionsForReasoning(effort),
+          controls: {
+            ...(request.controls ?? {}),
+            [REASONING_EFFORT_CONTROL_ID]: effort,
           },
         },
         options,

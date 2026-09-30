@@ -82,7 +82,7 @@ import {
   normalizePageImages,
   OpenRouterImageGenerationModel,
   parseSiteBrief,
-  providerOptionsForReasoning,
+  compactorProviderOptionsFor,
   renderProfileContextText,
   WEB_SEARCH_INSTRUCTION,
   WEB_SEARCH_TEXT_ONLY_IMAGE_INSTRUCTION,
@@ -1292,13 +1292,20 @@ export async function reconstructChatRunInput(input: {
     : createNonVisionMemoryProxy(guardedMemory);
 
   const compactorModel = makeCompletionModel(model);
+  // The compactor has no `controls` seam, so its effort travels as a
+  // provider option. Catalog models are OpenAI-Responses except `meta/` ids.
+  const compactorProviderOptions = compactorProviderOptionsFor(
+    "openai",
+    model.startsWith("meta/") ? "chat" : "responses",
+    (reasoningEffort ?? "medium") as ReasoningEffort,
+  );
   const nativeMemoryCompactor = createSummaryMemoryCompactor({
     model: compactorModel,
     instructions: NATIVE_MEMORY_COMPACTOR_INSTRUCTIONS,
     maxTokens: recipe.memoryPolicy.compactorMaxTokens,
-    providerOptions: providerOptionsForReasoning(
-      (reasoningEffort ?? "medium") as ReasoningEffort,
-    ),
+    ...(compactorProviderOptions
+      ? { providerOptions: compactorProviderOptions }
+      : {}),
     retries: { maxAttempts: 2 },
   });
   const nativeMemoryOptions = {

@@ -14,17 +14,21 @@ const mocks = vi.hoisted(() => {
   };
 });
 
-vi.mock("@anvia/openai", () => ({
-  OpenAIClient: class {
-    constructor(options: unknown) {
-      mocks.clientConstructor(options);
-    }
+vi.mock("@anvia/openai", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@anvia/openai")>();
+  return {
+    ...actual,
+    OpenAIClient: class {
+      constructor(options: unknown) {
+        mocks.clientConstructor(options);
+      }
 
-    completionModel(options: unknown) {
-      return mocks.completionModel(options);
-    }
-  },
-}));
+      completionModel(options: unknown) {
+        return mocks.completionModel(options);
+      }
+    },
+  };
+});
 
 import * as openaiProvider from "./openai.js";
 
@@ -57,13 +61,12 @@ describe("OpenAI provider", () => {
     expect(model).toBe(mocks.streamingModel);
   });
 
-  it("maps reasoning effort to strict provider options", () => {
-    expect(openaiProvider.providerOptionsForReasoning("high")).toEqual({
-      reasoning: { effort: "high", summary: "auto" },
-    });
-    expect(openaiProvider.metaMuseReasoningEffort("xhigh")).toEqual({
-      reasoning_effort: "xhigh",
-    });
+  it("exposes the union reasoning vocabulary including none", () => {
+    expect(openaiProvider.REASONING_EFFORTS).toContain("none");
+    expect(openaiProvider.REASONING_EFFORTS).toContain("max");
+    expect(openaiProvider.isReasoningEffort("none")).toBe(true);
+    expect(openaiProvider.isReasoningEffort("enormous")).toBe(false);
+    expect(openaiProvider.parseReasoningEffort("nope")).toBeNull();
   });
 
   it("routes Meta Muse models through Chat Completions", () => {

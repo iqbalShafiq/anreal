@@ -271,6 +271,25 @@ export function compactorProviderOptionsFor(
   return undefined;
 }
 
+/**
+ * OpenAI-Responses-shaped models only return reasoning summaries when the
+ * request asks for them. The field has no normalized Anvia option, so it is a
+ * provider option — and every other adapter rejects it, which is why the kind
+ * and api are required here rather than guessed.
+ */
+export function responsesReasoningSummaryOptions(
+  kind: ProviderKind,
+  api: "chat" | "responses" | null | undefined,
+): JsonObject | undefined {
+  if (kind !== "openai" && kind !== "compatible" && kind !== "grok") {
+    return undefined;
+  }
+  const effectiveApi = api ?? PROVIDER_KIND_META[kind].defaultApi ?? null;
+  return effectiveApi === "responses"
+    ? { reasoning: { summary: "auto" } }
+    : undefined;
+}
+
 import type { ModelList } from "@anvia/core/model-listing";
 import { createRedactor } from "@anvia/core/redaction";
 
