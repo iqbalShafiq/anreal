@@ -112,3 +112,131 @@ describe("listModels", () => {
     });
   });
 });
+
+import { findActiveModel, listModels as listMerged } from "./service.js";
+
+vi.mock("../../utils/prisma.js", () => ({
+  prisma: {
+    chatModel: { findMany: vi.fn(), findFirst: vi.fn() },
+    reasoningEffort: { findMany: vi.fn() },
+    providerModel: { findMany: vi.fn(), findFirst: vi.fn() },
+  },
+}));
+
+function makeProviderModelRow(overrides: Record<string, unknown> = {}) {
+  return {
+    slug: "openrouter/openai-gpt-5.6-luna",
+    name: "GPT 5.6 Luna",
+    label: "GPT 5.6",
+    hint: null,
+    description: null,
+    iconSvg: "",
+    outputType: "text",
+    contextWindowTokens: 1_000_000,
+    maxInputTokens: null,
+    maxOutputTokens: 128_000,
+    reasoningEfforts: ["low", "high"],
+    capabilities: null,
+    imageCapabilities: null,
+    sortOrder: 0,
+    id: "pm_1",
+    connectionId: "pc_1",
+    connection: { slug: "openrouter", label: "My OpenRouter" },
+    ...overrides,
+  };
+}
+
+describe("listModels merging", () => {
+  beforeEach(() => {
+    vi.mocked(prisma.chatModel.findMany).mockReset().mockResolvedValue([]);
+    vi.mocked(prisma.reasoningEffort.findMany).mockReset().mockResolvedValue([]);
+    vi.mocked(prisma.providerModel.findMany).mockReset().mockResolvedValue([]);
+  });
+
+  it("does not query user models when no userId is given", async () => {
+    await listMerged();
+    expect(prisma.providerModel.findMany).not.toHaveBeenCalled();
+  });
+
+  it("tags catalog rows with source catalog and a null connectionId", async () => {
+    vi.mocked(prisma.chatModel.findMany).mockResolvedValue([
+      makeModelRow(),
+    ] as never);
+
+    const result = await listMerged({ userId: "u_1" });
+
+    expect(result.models[0]).toMatchObject({
+      source: "catalog",
+      connectionId: null,
+    });
+  });
+
+  it("tags user rows with source connection and scopes the query by userId", async () => {
+    vi.mocked(prisma.providerModel.findMany).mockResolvedValue([
+      makeProviderModelRow(),
+    ] as never);
+
+    const result = await listMerged({ userId: "u_1" });
+
+    expect(prisma.providerModel.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ userId: "u_1", isActive: true }),
+      }),
+    );
+    expect(result.models[0]).toMatchObject({
+      modelId: "openrouter/openai-gpt-5.6-luna",
+      source: "connection",
+      connectionId: "pc_1",
+      provider: { slug: "openrouter", name: "My OpenRouter" },
+      reasoningEfforts: ["low", "high"],
+    });
+  });
+
+  it("applies the outputType filter to both scopes", async () => {
+    await listMerged({ outputType: "image", userId: "u_1" });
+    expect(prisma.chatModel.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ outputType: "image" }),
+      }),
+    );
+    expect(prisma.providerModel.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ outputType: "image" }),
+      }),
+    );
+  });
+});
+
+describe("findActiveModel scoping", () => {
+  beforeEach(() => {
+    vi.mocked(prisma.chatModel.findFirst).mockReset().mockResolvedValue(null);
+    vi.mocked(prisma.providerModel.findFirst).mockReset().mockResolvedValue(null);
+  });
+
+  it("prefers the global catalog for an unqualified id", async () => {
+    vi.mocked(prisma.chatModel.findFirst).mockResolvedValue(makeModelRow() as never);
+
+    const result = await findActiveModel("openai/gpt-5.6-luna", "u_1");
+
+    expect(result?.source).toBe("catalog");
+  });
+
+  it("finds a user model only inside the caller's scope", async () => {
+    vi.mocked(prisma.providerModel.findFirst).mockResolvedValue(
+      makeProviderModelRow() as never,
+    );
+
+    const result = await findActiveModel("openrouter/openai-gpt-5.6-luna", "u_1");
+
+    expect(prisma.providerModel.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ userId: "u_1" }),
+      }),
+    );
+    expect(result?.source).toBe("connection");
+  });
+
+  it("returns null when no scope owns the id", async () => {
+    expect(await findActiveModel("nobody/owns-this", "u_1")).toBeNull();
+  });
+});

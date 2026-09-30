@@ -6,7 +6,13 @@ vi.mock("./service.js", () => ({
 }));
 
 vi.mock("../auth/middleware.js", () => ({
-  requireUser: async (_c: unknown, next: () => Promise<void>) => next(),
+  requireUser: async (
+    c: { set: (key: string, value: unknown) => void },
+    next: () => Promise<void>,
+  ) => {
+    c.set("user", { id: "u_1" });
+    await next();
+  },
 }));
 
 import { modelsRouter } from "./router.js";
@@ -27,20 +33,27 @@ describe("GET /api/models", () => {
 
     expect(res.status).toBe(200);
     expect(listModels).toHaveBeenCalledTimes(1);
+    expect(listModels).toHaveBeenCalledWith({ userId: "u_1" });
   });
 
   it("passes outputType=image to the service", async () => {
     const res = await app.request("/api/models?outputType=image");
 
     expect(res.status).toBe(200);
-    expect(listModels).toHaveBeenCalledWith({ outputType: "image" });
+    expect(listModels).toHaveBeenCalledWith({
+      outputType: "image",
+      userId: "u_1",
+    });
   });
 
   it("passes outputType=text to the service", async () => {
     const res = await app.request("/api/models?outputType=text");
 
     expect(res.status).toBe(200);
-    expect(listModels).toHaveBeenCalledWith({ outputType: "text" });
+    expect(listModels).toHaveBeenCalledWith({
+      outputType: "text",
+      userId: "u_1",
+    });
   });
 
   it("rejects an invalid outputType with 400", async () => {

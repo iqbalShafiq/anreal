@@ -5,6 +5,7 @@ import { listModels } from "./service.js";
 export const modelsRouter = new Hono<{ Variables: AuthVariables }>()
   .use("*", requireUser)
   .get("/", async (c) => {
+    const user = c.get("user");
     const outputType = c.req.query("outputType");
     if (
       outputType !== undefined &&
@@ -13,5 +14,10 @@ export const modelsRouter = new Hono<{ Variables: AuthVariables }>()
     ) {
       return c.json({ error: "outputType must be 'text' or 'image'" }, 400);
     }
-    return c.json(await listModels(outputType ? { outputType } : undefined));
+    return c.json(
+      await listModels({
+        ...(outputType ? { outputType } : {}),
+        userId: user.id,
+      }),
+    );
   });
