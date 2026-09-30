@@ -8,8 +8,11 @@ import type { CompletionModel } from "@anvia/core";
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { SITE_MODEL_DEFAULT } from "../models/role-defaults.js";
 
-export const DEFAULT_SITE_MODEL: CompletionModelId = "meta/muse-spark-1.3-contributor";
+// The literal lives in the neutral role-defaults module (which the role
+// resolver also reads) so the two never drift and no import cycle forms.
+export const DEFAULT_SITE_MODEL: CompletionModelId = SITE_MODEL_DEFAULT;
 // Budget per agent stream: real high-effort builder runs measured >5min
 // (v2 attempt aborted at ~307s on 2026-09-22), so allow 10min.
 export const SITE_BUILD_TIMEOUT_MS = 600_000;
