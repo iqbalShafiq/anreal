@@ -123,6 +123,7 @@ Factory agent yang dipakai API:
    | `CONTEXT7_URL` | Endpoint MCP context7 (default `https://mcp.context7.com/mcp`) |
    | `DATABASE_URL` | Koneksi Postgres (default cocok dengan Docker Compose) |
    | `BETTER_AUTH_SECRET` | Secret cookie session (wajib; `openssl rand -base64 32`) |
+   | `PROVIDER_CREDENTIALS_KEY` | Enkripsi API key provider milik user saat disimpan (AES-256-GCM, 32 bytes as 64 hex chars; `openssl rand -hex 32`). Wajib di production; dev/test fallback ke ephemeral key sehingga credential tidak bertahan setelah restart. **Terpisah** dari `MCP_CREDENTIALS_KEY` — keduanya tidak bisa saling menggantikan |
    | `BETTER_AUTH_URL` | Base URL API auth (default `http://localhost:3001`) |
    | `PLATFORM_ORIGIN` | Origin frontend web untuk CORS + trustedOrigins (default `http://localhost:3000`) |
    | `TRUSTED_ORIGINS` | Origin tambahan (comma-separated) yang boleh memanggil API dari browser / webview — Expo web, preview, custom scheme mobile, dll. Native HTTP client biasanya tidak mengirim `Origin` |
@@ -397,7 +398,52 @@ Katalog model ada di tabel `chat_model` (diseed oleh `pnpm --filter @anreal/api 
 | `imageCapabilities` | JSONB — `quality`, `background`, `n` (min/max), `aspectRatios`/`resolutions` sesuai model |
 | harga, `iconSvg`, dll. | Metadata katalog untuk UI pemilih model |
 
-`GET /api/models` menyajikan katalog ke UI; seed melakukan **upsert** per model (created/updated dihitung, tidak ada duplikat).
+`GET /api/models` menyajikan katalog ke UI; seed melakukan **upsert** per model (created/updated dihitung, tidak ada duplikat). Response endpoint ini kini **digabung** dengan model milik connection BYOK pemanggil: setiap baris membawa `source` (`"catalog"` atau `"connection"`) dan `connectionId` (terisi hanya untuk baris `connection`).
+
+## BYOK provider connections
+
+Selain katalog model yang di-seed, tiap user bisa membawa **API key provider sendiri** (BYOK). Fitur ini memungkinkan chat dan image generation lewat akun/provider milik user, bukan hanya `OPENAI_*` dari env.
+
+**Connection vs model.** Alurnya dua tingkat: user membuat sebuah **connection** (provider kind + base URL opsional + API key + custom headers opsional), lalu mendaftarkan **model** di atasnya (upstream model id, display name, context window, reasoning efforts, icon opsional). Semua connection dan model di-scope ke user pembuatnya — user lain tidak bisa melihat atau memakainya.
+
+**Enkripsi.** API key provider dienkripsi saat disimpan (at rest) memakai AES-256-GCM dengan `PROVIDER_CREDENTIALS_KEY`. Key ini **wajib di production**; di dev/test, jika kosong, app memakai ephemeral key dengan peringatan sekali di console, sehingga credential yang tersimpan **tidak bertahan setelah restart**. Key ini **terpisah** dari `MCP_CREDENTIALS_KEY` — keduanya tidak bisa saling menggantikan.
+
+**API key bersifat write-only.** Tidak ada endpoint yang pernah mengembalikan API key, nilai custom header, atau `credentialsRef`. Sebagai gantinya, sebuah connection melaporkan `hasCredentials: true`. Credential hanya didekripsi di proses API/worker, saat run berjalan, dan tidak pernah masuk ke run recipe yang durable — recipe hanya menyimpan `connectionId`.
+
+**Slug model.** Model id diturunkan sebagai `<connection-slug>/<upstream-id tersanitasi>`, dengan suffix `-2`, `-3`, … sampai unik untuk user itu dan tidak bertabrakan dengan katalog global. Connection slug sendiri tidak boleh memakai namespace yang sudah dimiliki katalog seed (`openai`, `deepseek`, `google`, `xai`, `meta`).
+
+**Batas.** Maks **10 connection** per user, **100 model** per user, dan **16 custom header** per connection (nama header ≤128 char, value ≤2048 char). Header bernama `authorization` ditolak — field API key adalah satu-satunya cara autentikasi. Base URL wajib memakai `https`, kecuali `localhost`/`127.0.0.1`.
+
+**Provider kind.** Ada enam: `openai`, `anthropic`, `gemini`, `grok`, `mistral`, dan `compatible` (endpoint apa pun yang OpenAI-compatible — OpenRouter, DeepSeek, Groq, Together, Fireworks, Ollama, vLLM, LM Studio, termasuk shim OpenAI-compat Anthropic/Gemini). Kind `compatible` wajib mengisi base URL. Reasoning effort bersifat adapter-neutral; kosakata per model adalah gabungan `none | minimal | low | medium | high | xhigh | max`.
+
+**Catatan image.** Image generation BYOK hanya bisa dijangkau lewat kind `compatible`, yang berbicara `POST /images` ala OpenRouter. Connection `openai` native sengaja **tidak** menawarkan model image: API images native OpenAI punya parameter berbeda dan tidak punya `input_references`, sehingga alur `edit_image` aplikasi (yang mengirim reference image) tidak bisa berjalan di sana. User yang ingin image generation lewat gateway harus mendaftarkannya sebagai `compatible`.
+
+**Pengaturan model per-role belum ada.** Memilih model untuk peran background — memory compaction, profile summarization, site builder, vision helper, scheduled chat — adalah fase berikutnya (Phase C) dan **belum diimplementasikan**. Saat ini hanya model chat/image aktif yang bisa dipilih lewat katalog yang sudah digabung.
+
+**Menguji connection.** `POST /api/providers/test` memvalidasi credential ke provider **tanpa menyimpan apa pun**; endpoint menerima `connectionId` opsional sehingga field key yang dibiarkan kosong akan memakai credential yang tersimpan. Test yang gagal mengembalikan pesan yang mudah dibaca dan bebas credential.
+
+### API providers
+
+Semua endpoint **require auth**, dan setiap respons di-scope ke user pemanggil:
+
+| Method | Path | Keterangan |
+| --- | --- | --- |
+| `GET` | `/api/providers/kinds` | Daftar provider kind + kosakata reasoning effort |
+| `GET` | `/api/providers` | Daftar connection user (tanpa secret) |
+| `POST` | `/api/providers` | Tambah connection |
+| `GET` | `/api/providers/:id` | Detail satu connection |
+| `PATCH` | `/api/providers/:id` | Ubah connection; kalau `apiKey` dihilangkan, key tersimpan tetap dipakai |
+| `DELETE` | `/api/providers/:id` | Hapus connection (cascade ke model-modelnya) |
+| `PATCH` | `/api/providers/:id/enabled` | Enable/disable connection |
+| `POST` | `/api/providers/test` | Validasi credential, tanpa persist |
+| `GET` | `/api/providers/:id/models` | Daftar model di connection |
+| `POST` | `/api/providers/:id/models` | Daftarkan model (auto-slug) |
+| `PATCH` | `/api/providers/:id/models/:modelId` | Ubah model |
+| `DELETE` | `/api/providers/:id/models/:modelId` | Hapus model |
+| `POST` | `/api/providers/:id/models/discover` | Inventory model dari provider |
+| `POST` | `/api/providers/:id/models/prefill` | Metadata yang dideklarasikan adapter |
+
+UI-nya ada di **Settings → Providers**.
 
 ## User profiling
 
