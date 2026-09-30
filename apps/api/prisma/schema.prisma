@@ -23,6 +23,10 @@ model User {
   sessions      Session[]
   accounts      Account[]
 
+  providerConnections  ProviderConnection[]
+  providerModels       ProviderModel[]
+  modelRoleAssignments ModelRoleAssignment[]
+
   @@unique([email])
   @@map("user")
 }
@@ -583,4 +587,87 @@ model UserMcpServer {
   @@unique([userId, name])
   @@index([userId, updatedAt])
   @@map("user_mcp_server")
+}
+
+
+// --- BYOK provider connections (per-user; the seeded catalog is untouched) ---
+
+model ProviderConnection {
+  id             String          @id @default(cuid())
+  userId         String
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// "openai" | "anthropic" | "gemini" | "grok" | "mistral" | "compatible"
+  kind           String
+  label          String
+  /// Kebab slug unique per user; prefixes every model id on this connection.
+  slug           String
+  baseUrl        String?
+  /// "chat" | "responses" | null (adapter default)
+  api            String?
+  /// AES-256-GCM envelope of { apiKey, headers? }. Server-only; never returned.
+  credentialsRef String
+  isActive       Boolean         @default(true)
+  sortOrder      Int             @default(0)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  models         ProviderModel[]
+
+  @@unique([userId, slug])
+  @@index([userId])
+  @@map("provider_connection")
+}
+
+model ProviderModel {
+  id                  String             @id @default(cuid())
+  userId              String
+  user                User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  connectionId        String
+  connection          ProviderConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  /// Application model id: "<connection.slug>/<sanitized upstream id>".
+  slug                String
+  /// Raw id sent to the provider.
+  upstreamId          String
+  name                String
+  label               String
+  hint                String?
+  description         String?
+  iconSvg             String             @default("")
+  /// "text" | "image"
+  outputType          String             @default("text")
+  contextWindowTokens Int?
+  maxInputTokens      Int?
+  maxOutputTokens     Int?
+  /// Reasoning efforts this model accepts. Empty = no reasoning control.
+  reasoningEfforts    String[]
+  /// Snapshot of the adapter's CompletionModelCapabilities at save time.
+  capabilities        Json?
+  /// Image descriptor (aspectRatios/quality/background/n) � application-owned.
+  imageCapabilities   Json?
+  isActive            Boolean            @default(true)
+  sortOrder           Int                @default(0)
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+  roleAssignments     ModelRoleAssignment[]
+
+  @@unique([userId, slug])
+  @@unique([connectionId, upstreamId])
+  @@index([userId])
+  @@map("provider_model")
+}
+
+model ModelRoleAssignment {
+  id              String         @id @default(cuid())
+  userId          String
+  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// "chat" | "memoryCompaction" | "profileSummary" | "siteBuilder" | "visionHelper" | "scheduledChat"
+  role            String
+  /// Global catalog model id. Deliberately not a FK: the seed prunes chat_model rows.
+  catalogModelId  String?
+  providerModelId String?
+  providerModel   ProviderModel? @relation(fields: [providerModelId], references: [id], onDelete: Cascade)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@unique([userId, role])
+  @@map("model_role_assignment")
 }
