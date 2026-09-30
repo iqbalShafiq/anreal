@@ -3,14 +3,14 @@ import { Hono } from "hono";
 
 const service = vi.hoisted(() => ({
   listConnections: vi.fn(async () => []),
-  createConnection: vi.fn(async () => ({ id: "pc_1" })),
-  updateConnection: vi.fn(async () => ({ id: "pc_1" })),
+  createConnection: vi.fn(async () => ({ id: "pc_1", hasCredentials: true })),
+  updateConnection: vi.fn(async () => ({ id: "pc_1", hasCredentials: true })),
   deleteConnection: vi.fn(async () => undefined),
   listConnectionModels: vi.fn(async () => []),
   createConnectionModel: vi.fn(async () => ({ id: "pm_1" })),
   updateConnectionModel: vi.fn(async () => ({ id: "pm_1" })),
   deleteConnectionModel: vi.fn(async () => undefined),
-  setConnectionEnabled: vi.fn(async () => ({ id: "pc_1" })),
+  setConnectionEnabled: vi.fn(async () => ({ id: "pc_1", hasCredentials: true })),
   discoverConnectionModels: vi.fn(async () => ({ data: [] })),
 }));
 
@@ -103,5 +103,41 @@ describe("provider routes", () => {
     });
     expect(res.status).toBe(400);
     expect(service.setConnectionEnabled).not.toHaveBeenCalled();
+  });
+
+  it("does not expose the credential envelope on create", async () => {
+    const res = await app.request("/api/providers", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ kind: "openai", label: "X", apiKey: "sk-abcdefgh" }),
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.hasCredentials).toBe(true);
+    expect(body).not.toHaveProperty("credentialsRef");
+  });
+
+  it("does not expose the credential envelope on update", async () => {
+    const res = await app.request("/api/providers/pc_1", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ kind: "openai", label: "X", apiKey: "sk-abcdefgh" }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.hasCredentials).toBe(true);
+    expect(body).not.toHaveProperty("credentialsRef");
+  });
+
+  it("does not expose the credential envelope on enabled", async () => {
+    const res = await app.request("/api/providers/pc_1/enabled", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ isEnabled: true }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.hasCredentials).toBe(true);
+    expect(body).not.toHaveProperty("credentialsRef");
   });
 });

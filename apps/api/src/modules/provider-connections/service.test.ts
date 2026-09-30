@@ -258,6 +258,25 @@ describe("connection CRUD", () => {
     );
   });
 
+  it("returns a public shape without the credential envelope on create", async () => {
+    const db = makeDb();
+    const result = await createConnection(db, "u_1", {
+      kind: "compatible",
+      label: "GW",
+      baseUrl: "https://gw.example/v1",
+      apiKey: "sk-distinctive-create-marker",
+    });
+    const call = (
+      db as never as { providerConnection: { create: ReturnType<typeof vi.fn> } }
+    ).providerConnection.create.mock.calls[0]?.[0] as {
+      data: { credentialsRef: string };
+    };
+    expect(call.data.credentialsRef).not.toContain("sk-distinctive-create-marker");
+    expect(result).toMatchObject({ hasCredentials: true });
+    expect(result).not.toHaveProperty("credentialsRef");
+    expect(JSON.stringify(result)).not.toContain(call.data.credentialsRef);
+  });
+
   it("preserves the stored key when the update omits it", async () => {
     const existingRef = encodeProviderCredentials({ apiKey: "sk-original" });
     const db = makeDb({
@@ -299,6 +318,47 @@ describe("connection CRUD", () => {
     );
   });
 
+  it("returns a public shape without the credential envelope on update", async () => {
+    const existingRef = encodeProviderCredentials({ apiKey: "sk-original" });
+    const db = makeDb({
+      providerConnection: {
+        count: vi.fn(async () => 1),
+        findFirst: vi.fn(async () => ({
+          id: "pc_1",
+          userId: "u_1",
+          kind: "compatible",
+          label: "GW",
+          slug: "gw",
+          baseUrl: "https://gw.example/v1",
+          api: "chat",
+          credentialsRef: existingRef,
+          isActive: true,
+          sortOrder: 0,
+        })),
+        findMany: vi.fn(async () => []),
+        update: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({
+          id: "pc_1",
+          ...data,
+        })),
+      },
+    });
+
+    const result = await updateConnection(db, "u_1", "pc_1", {
+      kind: "compatible",
+      label: "Renamed",
+      baseUrl: "https://gw.example/v1",
+    });
+
+    const call = (
+      db as never as { providerConnection: { update: ReturnType<typeof vi.fn> } }
+    ).providerConnection.update.mock.calls[0]?.[0] as {
+      data: { credentialsRef: string };
+    };
+    expect(result).toMatchObject({ hasCredentials: true });
+    expect(result).not.toHaveProperty("credentialsRef");
+    expect(JSON.stringify(result)).not.toContain(call.data.credentialsRef);
+  });
+
   it("404s a connection owned by another user", async () => {
     const db = makeDb();
     await expect(deleteConnection(db, "u_1", "pc_other")).rejects.toThrow(
@@ -336,6 +396,44 @@ describe("setConnectionEnabled", () => {
     await expect(
       setConnectionEnabled(db, "u_1", "pc_other", false),
     ).rejects.toThrow(/not found/i);
+  });
+
+  it("returns a public shape without the credential envelope", async () => {
+    const envelope = encodeProviderCredentials({ apiKey: "sk-original" });
+    const db = makeDb({
+      providerConnection: {
+        findFirst: vi.fn(async () => ({
+          id: "pc_1",
+          userId: "u_1",
+          kind: "compatible",
+          label: "GW",
+          slug: "gw",
+          baseUrl: "https://gw.example/v1",
+          api: "chat",
+          credentialsRef: envelope,
+          isActive: true,
+          sortOrder: 0,
+        })),
+        update: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({
+          id: "pc_1",
+          kind: "compatible",
+          label: "GW",
+          slug: "gw",
+          baseUrl: "https://gw.example/v1",
+          api: "chat",
+          credentialsRef: envelope,
+          isActive: true,
+          sortOrder: 0,
+          ...data,
+        })),
+      },
+    });
+
+    const result = await setConnectionEnabled(db, "u_1", "pc_1", false);
+
+    expect(result).toMatchObject({ hasCredentials: true, isActive: false });
+    expect(result).not.toHaveProperty("credentialsRef");
+    expect(JSON.stringify(result)).not.toContain(envelope);
   });
 });
 

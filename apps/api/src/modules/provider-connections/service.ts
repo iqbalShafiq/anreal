@@ -467,7 +467,7 @@ export async function createConnection(
     collectConnectionSlugs(db, userId),
   ]);
   const value = validateConnectionInput(input, slugs, count);
-  return db.providerConnection.create({
+  const created = (await db.providerConnection.create({
     data: {
       userId,
       kind: value.kind,
@@ -480,7 +480,8 @@ export async function createConnection(
         headers: value.headers,
       }),
     },
-  });
+  })) as Omit<ConnectionRow, "userId">;
+  return toPublicConnection(created);
 }
 
 export async function updateConnection(
@@ -501,7 +502,7 @@ export async function updateConnection(
   const slugs = await collectConnectionSlugs(db, userId, row.slug);
   const value = validateConnectionInput({ ...input, apiKey }, slugs, 0);
 
-  return db.providerConnection.update({
+  const updated = (await db.providerConnection.update({
     where: { id },
     data: {
       kind: value.kind,
@@ -514,7 +515,8 @@ export async function updateConnection(
         headers: value.headers,
       }),
     },
-  });
+  })) as Omit<ConnectionRow, "userId">;
+  return toPublicConnection(updated);
 }
 
 export async function deleteConnection(
@@ -536,10 +538,11 @@ export async function setConnectionEnabled(
 ) {
   const row = await findOwnedConnection(db, userId, id);
   if (!row) notFound();
-  return db.providerConnection.update({
+  const updated = (await db.providerConnection.update({
     where: { id },
     data: { isActive: isEnabled },
-  });
+  })) as Omit<ConnectionRow, "userId">;
+  return toPublicConnection(updated);
 }
 // --- Model CRUD, discovery, and prefill -------------------------------------
 
