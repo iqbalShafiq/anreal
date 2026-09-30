@@ -832,6 +832,35 @@ export const modelInfoSchema = {  type: "object",
   },
 } as const;
 
+/** One role's current model assignment plus the model it falls back to. */
+export const modelRoleInfoSchema = {
+  type: "object",
+  required: ["role", "modelId", "defaultModelId"],
+  properties: {
+    role: {
+      type: "string",
+      enum: [
+        "chat",
+        "memoryCompaction",
+        "profileSummary",
+        "siteBuilder",
+        "visionHelper",
+        "scheduledChat",
+      ],
+    },
+    modelId: {
+      type: ["string", "null"],
+      description:
+        "The merged catalog model id assigned to this role, or null when no assignment is stored and the default applies.",
+    },
+    defaultModelId: {
+      type: ["string", "null"],
+      description:
+        "The model the role falls back to when nothing is assigned. Null for roles with no default of their own (`chat`, `memoryCompaction`).",
+    },
+  },
+} as const;
+
 export const exampleUser = {
   id: USER_ID_EXAMPLE,
   email: "ada@example.com",
@@ -923,6 +952,7 @@ export const openApiComponents = {
     StorageUsage: storageUsageSchema,
     Profile: profileDtoSchema,
     ModelInfo: modelInfoSchema,
+    ModelRoleInfo: modelRoleInfoSchema,
     ProviderConnection: providerConnectionSchema,
     ProviderKind: providerKindSchema,
     ProviderModel: providerModelSchema,
