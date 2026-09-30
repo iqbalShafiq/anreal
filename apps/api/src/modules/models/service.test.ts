@@ -6,6 +6,7 @@ vi.mock("../../utils/prisma.js", () => ({
   prisma: {
     chatModel: { findMany: vi.fn(), findFirst: vi.fn() },
     reasoningEffort: { findMany: vi.fn() },
+    providerModel: { findMany: vi.fn(), findFirst: vi.fn() },
   },
 }));
 
@@ -114,14 +115,6 @@ describe("listModels", () => {
 });
 
 import { findActiveModel, listModels as listMerged } from "./service.js";
-
-vi.mock("../../utils/prisma.js", () => ({
-  prisma: {
-    chatModel: { findMany: vi.fn(), findFirst: vi.fn() },
-    reasoningEffort: { findMany: vi.fn() },
-    providerModel: { findMany: vi.fn(), findFirst: vi.fn() },
-  },
-}));
 
 function makeProviderModelRow(overrides: Record<string, unknown> = {}) {
   return {
