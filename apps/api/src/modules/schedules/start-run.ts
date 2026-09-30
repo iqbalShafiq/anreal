@@ -34,7 +34,7 @@ export async function startScheduledChatRun(input: {
   const store = getStreamStore();
   let recipe;
   let promptMessage: Message;
-  let scheduledModelId: string = DEFAULT_COMPLETION_MODEL;
+  let scheduledModelId: string;
   try {
     // Deleted session ends the schedule — never auto-create a new one.
     try {

@@ -460,9 +460,11 @@ Setiap **peran background** bisa diarahkan ke model pilihannya sendiri lewat **S
 
 **Precedence.** Model sebuah peran diresolusi dengan urutan **assignment user → env var yang ada → default yang ada**. User yang belum pernah menyentuh pengaturan ini berjalan byte-identik seperti sebelum fitur ini ada — properti itulah yang dijaga seluruh desainnya.
 
+**Khusus `chat`, pilihan eksplisit di browser menang lebih dulu:** urutannya **model tersimpan di browser → assignment `chat` → model pertama di katalog → default aplikasi**. Jadi assignment hanya mengisi saat user belum pernah memilih model, dan tidak pernah menimpa pilihan yang sudah dibuat.
+
 **Lapisan env var.** Tiga peran masih membaca env var sebagai lapisan tengah: `PROFILE_SUMMARY_MODEL` (profile summary), `SITE_MODEL` (site builder), dan `VISION_HELPER_MODEL` (vision helper). `scheduledChat` tidak punya env var dan jatuh ke default completion model aplikasi (`openai/gpt-6-luna`). `chat` dan `memoryCompaction` tidak punya default sendiri.
 
-**Memory compaction mengikuti model chat** kecuali di-assign eksplisit. Default-nya adalah model chat milik run itu sendiri, bukan model terpisah — karena itu picker-nya menampilkan **"No default model configured"**.
+**Memory compaction mengikuti model chat** kecuali di-assign eksplisit. Default-nya adalah model chat milik run itu sendiri, bukan model terpisah — karena itu picker-nya menampilkan **"Using the chat model"**. **Vision helper** tanpa `VISION_HELPER_MODEL` memilih otomatis model gambar termurah ("Using the cheapest available image model").
 
 **Assignment yang menggantung turun diam-diam ke default.** Kalau user menghapus connection BYOK atau model yang ditunjuk assignment (atau seed memangkas model katalog), peran itu kembali ke jalur env/default-nya dan server menulis peringatan di log — user tidak diblokir dan tidak ada yang error.
 

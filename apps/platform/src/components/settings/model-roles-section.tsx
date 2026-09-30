@@ -15,6 +15,20 @@ import type { ModelInfo, ModelRoleInfo } from "#/lib/api";
 
 /** The line under the picker: which model the role runs on by default. */
 function defaultHint(info: ModelRoleInfo, models: ModelInfo[]): string {
+  // `memoryCompaction` has no model of its own: it follows the chat model the
+  // compacted run is using. `visionHelper` with no env var auto-picks the
+  // cheapest image-capable model. Both report a null defaultModelId, so the
+  // generic "no default configured" copy would be wrong for them.
+  if (info.role === "memoryCompaction") {
+    return info.modelId === null
+      ? "Using the chat model."
+      : "Falls back to the chat model.";
+  }
+  if (info.role === "visionHelper" && info.defaultModelId === null) {
+    return info.modelId === null
+      ? "Using the cheapest available image model."
+      : "Falls back to the cheapest available image model.";
+  }
   if (info.defaultModelId === null) return "No default model configured.";
   const name =
     models.find((model) => model.modelId === info.defaultModelId)?.name ??

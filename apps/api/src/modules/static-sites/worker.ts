@@ -21,6 +21,7 @@ import {
   readSiteManifest,
   resolveSiteBuildModel,
   siteBuildConfig,
+  siteBuildModelId,
   siteDataDir,
   writeSiteManifest,
   writeSitesIndex,
@@ -168,10 +169,10 @@ export async function processSiteBuildJob(
   deps: SiteBuildDeps = {},
 ): Promise<void> {
   const { siteId, sessionId, userId, prompt, version } = job.data;
-  const config = {
-    ...siteBuildConfig(),
-    model: await resolveSiteBuildModel(userId),
-  };
+  // Only the resolved model and the env/default id are used; constructing the
+  // whole config here would build a second completion model that is discarded.
+  const model = await resolveSiteBuildModel(userId);
+  const modelId = siteBuildModelId();
   assertSafeSiteId(siteId);
   const startedAt = Date.now();
   const baseDir = join(siteDataDir(), siteId, `v${version}`);
@@ -210,8 +211,8 @@ export async function processSiteBuildJob(
     await progress("planning", "Drafting the site brief.");
 
     const brief = job.data.brief ?? (await parseSiteBrief({
-      model: config.model,
-      modelId: config.modelId,
+      model,
+      modelId,
       prompt,
       abortSignal: AbortSignal.timeout(SITE_BUILD_TIMEOUT_MS),
     })).brief;
@@ -229,7 +230,7 @@ export async function processSiteBuildJob(
     }
     const runAgent: BuilderAgentRunner = deps.runBuilderAgent ??
       (async ({ prompt: agentPrompt, tools: agentTools }) => {
-        const agent = createSiteBuilderAgent({ model: config.model, tools: agentTools as never[] });
+        const agent = createSiteBuilderAgent({ model, tools: agentTools as never[] });
         const stream = agent.stream({
           prompt: agentPrompt,
           session: { sessionId, userId },

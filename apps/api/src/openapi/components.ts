@@ -856,7 +856,7 @@ export const modelRoleInfoSchema = {
     defaultModelId: {
       type: ["string", "null"],
       description:
-        "The model the role falls back to when nothing is assigned. Null for roles with no default of their own (`chat`, `memoryCompaction`).",
+        "The model the role falls back to when nothing is assigned. Null for roles with no default of their own (`chat`, `memoryCompaction`), and for `visionHelper` when `VISION_HELPER_MODEL` is unset.",
     },
   },
 } as const;

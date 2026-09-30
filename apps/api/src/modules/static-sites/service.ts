@@ -71,9 +71,18 @@ export function siteBuildEnabled(): boolean {
   return process.env.SITE_ENABLED !== "false";
 }
 
+/**
+ * The env-or-constant builder model id, resolved without constructing a
+ * completion model so callers that only need the id (the worker's brief
+ * parser) never build a throwaway handle.
+ */
+export function siteBuildModelId(): CompletionModelId {
+  return parseCompletionModel(process.env.SITE_MODEL) ?? DEFAULT_SITE_MODEL;
+}
+
 export function siteBuildConfig(): SiteBuildConfig {
   const concurrency = Number(process.env.SITE_CONCURRENCY ?? "2");
-  const modelId = parseCompletionModel(process.env.SITE_MODEL) ?? DEFAULT_SITE_MODEL;
+  const modelId = siteBuildModelId();
   return {
     enabled: siteBuildEnabled(),
     concurrency:

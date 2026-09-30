@@ -53,7 +53,7 @@ const rolesExample = {
     {
       role: "profileSummary",
       modelId: "openai/gpt-5.6-luna",
-      defaultModelId: "openai/gpt-5.6-luna",
+      defaultModelId: "openai/gpt-6-luna",
     },
     {
       role: "siteBuilder",
@@ -64,7 +64,7 @@ const rolesExample = {
     {
       role: "scheduledChat",
       modelId: null,
-      defaultModelId: "openai/gpt-5.6-luna",
+      defaultModelId: "openai/gpt-6-luna",
     },
   ],
 };
@@ -217,10 +217,42 @@ export const modelsPaths = {
         "200": jsonResponse("The saved assignment.", modelRoleInfoSchema, {
           default: { summary: "Assigned", value: roleInfoExample },
         }),
-        "400": badRequest({
-          error: "Unknown model: nobody/else",
-          code: "ROLE_INVALID",
-        }),
+        "400": jsonResponse(
+          "The request is malformed, or the model is not assignable to the role.",
+          {
+            type: "object",
+            required: ["error"],
+            properties: {
+              error: { type: "string" },
+              issues: {
+                type: "array",
+                items: {
+                  type: "object",
+                  required: ["path", "message"],
+                  properties: {
+                    path: { type: "string" },
+                    message: { type: "string" },
+                  },
+                },
+              },
+            },
+          },
+          {
+            roleError: {
+              summary: "Unknown or non-assignable model",
+              value: {
+                error: "Unknown model: nobody/else",
+                issues: [
+                  { path: "modelId", message: "Unknown model: nobody/else" },
+                ],
+              },
+            },
+            malformedBody: {
+              summary: "Malformed body",
+              value: { error: "Invalid role assignment" },
+            },
+          },
+        ),
         "401": unauthorized,
       },
     },
