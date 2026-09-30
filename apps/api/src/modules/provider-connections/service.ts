@@ -503,7 +503,7 @@ export async function updateConnection(
   const row = await findOwnedConnection(db, userId, id);
   if (!row) notFound();
 
-  // An omitted or blank key means "keep the stored credential" � the browser
+  // An omitted or blank key means "keep the stored credential" — the browser
   // never receives the key back, so it cannot resend it.
   const stored = decodeProviderCredentials(row.credentialsRef);
   const apiKey = isBlankKey(input.apiKey) ? stored.apiKey : input.apiKey;

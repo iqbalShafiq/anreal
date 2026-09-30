@@ -641,7 +641,7 @@ model ProviderModel {
   reasoningEfforts    String[]
   /// Snapshot of the adapter's CompletionModelCapabilities at save time.
   capabilities        Json?
-  /// Image descriptor (aspectRatios/quality/background/n) � application-owned.
+  /// Image descriptor (aspectRatios/quality/background/n) — application-owned.
   imageCapabilities   Json?
   isActive            Boolean            @default(true)
   sortOrder           Int                @default(0)
