@@ -230,12 +230,13 @@ const MODELS = [
 ];
 
 const EFFORTS = [
-  { key: "minimal", label: "Minimal", description: "Shortest reasoning pass, fastest response.", sortOrder: 0 },
-  { key: "low", label: "Low", description: "Minimal reasoning tokens, fastest response.", sortOrder: 1 },
-  { key: "medium", label: "Medium", description: "Balanced reasoning depth and latency.", sortOrder: 2 },
-  { key: "high", label: "High", description: "Deep reasoning for complex tasks.", sortOrder: 3 },
-  { key: "xhigh", label: "Extra High", description: "Deeper reasoning beyond high (Meta xhigh).", sortOrder: 4 },
-  { key: "max", label: "Max", description: "Maximum reasoning depth, highest latency.", sortOrder: 5 },
+  { key: "none", label: "None", description: "No reasoning pass; fastest responses.", sortOrder: 0 },
+  { key: "minimal", label: "Minimal", description: "Shortest reasoning pass, fastest response.", sortOrder: 1 },
+  { key: "low", label: "Low", description: "Minimal reasoning tokens, fastest response.", sortOrder: 2 },
+  { key: "medium", label: "Medium", description: "Balanced reasoning depth and latency.", sortOrder: 3 },
+  { key: "high", label: "High", description: "Deep reasoning for complex tasks.", sortOrder: 4 },
+  { key: "xhigh", label: "Extra High", description: "Deeper reasoning beyond high (Meta xhigh).", sortOrder: 5 },
+  { key: "max", label: "Max", description: "Maximum reasoning depth, highest latency.", sortOrder: 6 },
 ];
 
 /** Canonical, prisma-ready shape of a ChatModel row used for diff + upsert. */

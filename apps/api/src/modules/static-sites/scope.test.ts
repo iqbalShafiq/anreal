@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@anreal/agent", () => ({
+vi.mock("@anreal/agent", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@anreal/agent")>()),
   createCompletionModel: (modelId: string) => ({ modelId }),
   parseCompletionModel: (value: unknown) =>
     typeof value === "string" && value.trim() ? value : null,

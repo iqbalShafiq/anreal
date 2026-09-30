@@ -1,4 +1,5 @@
 import z from "zod";
+import { REASONING_EFFORT_KEYS } from "@anreal/agent";
 import { imageGenSettingsSchema } from "./image-gen-settings.js";
 import { SKILL_NAME_RE } from "../skills/service.js";
 
@@ -161,7 +162,7 @@ export const chatAgentRecipeSchema = z
     model: z
       .object({
         id,
-        reasoningEffort: z.enum(["minimal", "low", "medium", "high", "xhigh", "max"]).nullable(),
+        reasoningEffort: z.enum(REASONING_EFFORT_KEYS).nullable(),
       })
       .strict(),
     memoryPolicy: memoryPolicySchema,

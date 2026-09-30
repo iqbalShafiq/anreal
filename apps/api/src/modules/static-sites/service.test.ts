@@ -8,7 +8,8 @@ const f = vi.hoisted(() => ({
   createCompletionModel: vi.fn((modelId: string) => ({ modelId })),
 }));
 
-vi.mock("@anreal/agent", () => ({
+vi.mock("@anreal/agent", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@anreal/agent")>()),
   createCompletionModel: f.createCompletionModel,
   parseCompletionModel: (value: unknown) =>
     typeof value === "string" && value.trim() ? value : null,

@@ -39,7 +39,8 @@ vi.mock("bullmq", () => ({
   },
 }));
 
-vi.mock("@anreal/agent", () => ({
+vi.mock("@anreal/agent", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@anreal/agent")>()),
   parseSiteBrief: f.brief,
   createSiteBuilderAgent: vi.fn(() => ({})),
   buildSiteBuilderPrompt: (brief: { siteName: string }) => `brief:${brief.siteName}`,

@@ -10,6 +10,11 @@ export const DEFAULT_COMPLETION_PROVIDER = "openai";
 
 /** The union of every adapter's declared reasoning vocabulary. */
 export const REASONING_EFFORTS = effortVocabulary();
+/**
+ * The same values as a non-empty tuple, so zod's `z.enum` accepts them without
+ * retyping any value. Never empty: every adapter declares at least one effort.
+ */
+export const REASONING_EFFORT_KEYS = REASONING_EFFORTS as [string, ...string[]];
 export type ReasoningEffort = string;
 export const DEFAULT_REASONING_EFFORT: ReasoningEffort = "medium";
 

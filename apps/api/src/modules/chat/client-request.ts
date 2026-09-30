@@ -7,6 +7,7 @@ import type {
   AgentInteractionResponse,
 } from "@anvia/core/agent/interactions";
 import type { Message } from "@anvia/core/completion";
+import { REASONING_EFFORT_KEYS } from "@anreal/agent";
 import z from "zod";
 import { chatAgentImageGenSettingsSchema } from "./run-recipe.js";
 
@@ -36,7 +37,7 @@ export const ChatRequestMetadataSchema = z
       .max(MAX_CHAT_DOCUMENTS)
       .refine((ids) => new Set(ids).size === ids.length, "document ids must be unique"),
     modelId: boundedIdentifier,
-    reasoningEffort: z.enum(["minimal", "low", "medium", "high", "xhigh", "max"]).nullable(),
+    reasoningEffort: z.enum(REASONING_EFFORT_KEYS).nullable(),
     webSearchEnabled: z.boolean(),
     imageGenerationEnabled: z.boolean(),
     deepResearchEnabled: z.boolean(),

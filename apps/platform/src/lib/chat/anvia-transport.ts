@@ -13,7 +13,27 @@ import {
   type ChatStreamMetadata,
 } from "./client-data";
 
-export type ChatReasoningEffort = "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+/**
+ * Client-side mirror of the server's effort vocabulary. Kept as a literal on
+ * purpose: importing the agent package here would bundle provider SDKs into
+ * the browser. The server re-validates every request, and the per-model set
+ * in /api/models is the real authority.
+ */
+const CHAT_REASONING_EFFORTS = [
+  "none",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+] as const;
+
+export type ChatReasoningEffort = (typeof CHAT_REASONING_EFFORTS)[number];
+
+function isChatReasoningEffort(value: string): value is ChatReasoningEffort {
+  return (CHAT_REASONING_EFFORTS as readonly string[]).includes(value);
+}
 
 export type ChatRequestMetadata = {
   sessionId: string;
@@ -35,9 +55,7 @@ export function requireChatReasoningEffort(
   value: string | null,
 ): ChatReasoningEffort | null {
   if (value === null) return null;
-  if (value === "minimal" || value === "low" || value === "medium" || value === "high" || value === "xhigh" || value === "max") {
-    return value;
-  }
+  if (isChatReasoningEffort(value)) return value;
   throw new Error("Chat reasoning effort is invalid.");
 }
 
