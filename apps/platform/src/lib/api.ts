@@ -1092,6 +1092,32 @@ export type ModelCatalog = {
 
 let modelsCache: ModelCatalog | null = null;
 
+/**
+ * Listeners told to refetch when a provider write changes the merged catalog.
+ * Held here, at the API-client seam, because there are two independent entry
+ * points into the add-model form and a hook can forget to invalidate.
+ */
+const modelsCacheListeners = new Set<() => void>();
+
+/**
+ * Drop the cached catalog and notify subscribers so they refetch. Call this
+ * only after a catalog-changing write has succeeded — a rejected write must
+ * leave the cache as it was.
+ */
+export function invalidateModelsCache(): void {
+  modelsCache = null;
+  // Snapshot before iterating: a listener may unsubscribe during notification.
+  for (const listener of [...modelsCacheListeners]) listener();
+}
+
+/** Subscribe to catalog invalidation; returns an unsubscribe function. */
+export function subscribeModelsCache(listener: () => void): () => void {
+  modelsCacheListeners.add(listener);
+  return () => {
+    modelsCacheListeners.delete(listener);
+  };
+}
+
 export async function listModels(input?: {
   force?: boolean;
 }): Promise<ModelCatalog> {
@@ -2369,6 +2395,7 @@ export async function createProviderConnection(
   if (!isProviderConnection(data)) {
     throw new Error("Unexpected provider connection response shape");
   }
+  invalidateModelsCache();
   return data;
 }
 
@@ -2391,6 +2418,7 @@ export async function updateProviderConnection(
   if (!isProviderConnection(data)) {
     throw new Error("Unexpected provider connection response shape");
   }
+  invalidateModelsCache();
   return data;
 }
 
@@ -2402,6 +2430,7 @@ export async function deleteProviderConnection(id: string): Promise<void> {
   if (!response.ok) {
     await throwSkillError(response, "Failed to delete provider connection");
   }
+  invalidateModelsCache();
 }
 
 /** Flip a connection's active flag; mirrors `setMcpServerEnabled`. */
@@ -2424,6 +2453,7 @@ export async function setProviderConnectionEnabled(
   if (!isProviderConnection(data)) {
     throw new Error("Unexpected provider connection response shape");
   }
+  invalidateModelsCache();
   return data;
 }
 
@@ -2482,6 +2512,7 @@ export async function createProviderModel(
   if (!isProviderModelRow(data)) {
     throw new Error("Unexpected provider model response shape");
   }
+  invalidateModelsCache();
   return data;
 }
 
@@ -2505,6 +2536,7 @@ export async function updateProviderModel(
   if (!isProviderModelRow(data)) {
     throw new Error("Unexpected provider model response shape");
   }
+  invalidateModelsCache();
   return data;
 }
 
@@ -2519,6 +2551,7 @@ export async function deleteProviderModel(
   if (!response.ok) {
     await throwSkillError(response, "Failed to delete provider model");
   }
+  invalidateModelsCache();
 }
 
 export async function prefillProviderModel(

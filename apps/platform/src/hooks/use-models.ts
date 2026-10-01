@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   listModels,
+  subscribeModelsCache,
   type ModelInfo,
   type ReasoningEffortInfo,
 } from "#/lib/api";
@@ -24,9 +25,9 @@ export function useModels(): {
     error: null,
   });
 
-  const load = useCallback(() => {
+  const load = useCallback((force = false) => {
     setState((current) => ({ ...current, status: "loading", error: null }));
-    listModels()
+    listModels(force ? { force: true } : undefined)
       .then((data) =>
         setState({
           status: "success",
@@ -48,6 +49,11 @@ export function useModels(): {
   useEffect(() => {
     load();
   }, [load]);
+
+  // A provider write invalidates the catalog; refetch so the composer and the
+  // role pickers see a newly added model without a reload. `load` already
+  // tolerates a setState after unmount, so no abort machinery is added.
+  useEffect(() => subscribeModelsCache(() => load(true)), [load]);
 
   return { ...state, retry: load };
 }
