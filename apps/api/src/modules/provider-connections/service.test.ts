@@ -615,6 +615,12 @@ function makeDb(overrides: Record<string, unknown> = {}) {
       findMany: vi.fn(async () => []),
       findFirst: vi.fn(async () => null),
     },
+    // Global catalog namespaces, read by `createConnection` so a connection
+    // cannot shadow a seeded provider kind. The default of no rows keeps the
+    // constant as the floor for every other test.
+    modelProvider: {
+      findMany: vi.fn(async () => []),
+    },
     ...overrides,
   } as never;
 }
@@ -734,6 +740,104 @@ describe("connection CRUD", () => {
     ).toHaveBeenCalledWith(
       expect.objectContaining({ where: { userId: "u_1" } }),
     );
+  });
+
+  it("refuses a slug owned by an active catalog provider", async () => {
+    // `anthropic` is a supported kind that is not seeded as a model provider,
+    // so it is absent from RESERVED_CONNECTION_SLUGS — the constant. The
+    // catalog owns the namespace from the database, and that must be enough.
+    const db = makeDb({
+      modelProvider: {
+        findMany: vi.fn(async () => [{ slug: "anthropic" }]),
+      },
+    });
+
+    await expect(
+      createConnection(db, "u_1", {
+        kind: "compatible",
+        label: "Anthropic",
+        slug: "anthropic",
+        baseUrl: "https://gw.example/v1",
+        apiKey: "sk-live-secret",
+      }),
+    ).rejects.toThrow('"anthropic" is a reserved namespace; choose another slug');
+  });
+
+  it("keeps the constant as the floor when the catalog read returns nothing", async () => {
+    const db = makeDb();
+
+    await expect(
+      createConnection(db, "u_1", {
+        kind: "compatible",
+        label: "OpenAI",
+        slug: "openai",
+        baseUrl: "https://gw.example/v1",
+        apiKey: "sk-live-secret",
+      }),
+    ).rejects.toThrow('"openai" is a reserved namespace; choose another slug');
+  });
+
+  it("degrades to the constant when the catalog read fails", async () => {
+    const db = makeDb({
+      modelProvider: {
+        findMany: vi.fn(async () => {
+          throw new Error("db down");
+        }),
+      },
+    });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await expect(
+      createConnection(db, "u_1", {
+        kind: "compatible",
+        label: "OpenAI",
+        slug: "openai",
+        baseUrl: "https://gw.example/v1",
+        apiKey: "sk-live-secret",
+      }),
+    ).rejects.toThrow('"openai" is a reserved namespace; choose another slug');
+    expect(warn).toHaveBeenCalled();
+
+    warn.mockRestore();
+  });
+
+  it("accepts a slug that names neither a catalog provider nor the constant", async () => {
+    const db = makeDb({
+      modelProvider: {
+        findMany: vi.fn(async () => [{ slug: "anthropic" }]),
+      },
+    });
+
+    const created = await createConnection(db, "u_1", {
+      kind: "compatible",
+      label: "Local Gateway",
+      slug: "local-gateway",
+      baseUrl: "https://gw.example/v1",
+      apiKey: "sk-live-secret",
+    });
+    expect(created.slug).toBe("local-gateway");
+  });
+
+  it("scopes the catalog read to active provider rows and selects only the slug", async () => {
+    const db = makeDb();
+
+    await createConnection(db, "u_1", {
+      kind: "compatible",
+      label: "GW",
+      baseUrl: "https://gw.example/v1",
+      apiKey: "sk-live-secret",
+    });
+
+    expect(
+      (
+        db as never as {
+          modelProvider: { findMany: ReturnType<typeof vi.fn> };
+        }
+      ).modelProvider.findMany,
+    ).toHaveBeenCalledWith({
+      where: { isActive: true },
+      select: { slug: true },
+    });
   });
 
   it("encrypts the api key on create", async () => {

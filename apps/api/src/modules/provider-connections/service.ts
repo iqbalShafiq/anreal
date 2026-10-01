@@ -28,6 +28,7 @@ import {
   isReservedConnectionSlug,
   PROVIDER_MODEL_SLUG_RE,
   MAX_SLUG_ATTEMPTS,
+  RESERVED_CONNECTION_SLUGS,
   SLUG_MAX,
   suffixSlug,
 } from "../../lib/provider-slug.js";
@@ -104,6 +105,12 @@ export function validateConnectionInput(
   input: ProviderConnectionInput,
   existingSlugs: readonly string[],
   connectionCount: number,
+  /**
+   * The namespaces the global catalog owns: the constant **unioned** with the
+   * active `model_provider` slugs. Defaults to the constant so a caller that
+   * cannot read the catalog (or the pure client-side preview) keeps the floor.
+   */
+  reservedSlugs: ReadonlySet<string> = new Set(RESERVED_CONNECTION_SLUGS),
 ): ValidatedConnectionInput {
   if (connectionCount >= MAX_CONNECTIONS_PER_USER) {
     fail(
@@ -181,7 +188,7 @@ export function validateConnectionInput(
     fail("slug", `Slug must be at most ${SLUG_MAX} characters`);
   }
   const baseSlug = provided ?? deriveConnectionSlug(label);
-  if (isReservedConnectionSlug(baseSlug)) {
+  if (reservedSlugs.has(baseSlug) || isReservedConnectionSlug(baseSlug)) {
     fail(
       "slug",
       `"${baseSlug}" is a reserved namespace; choose another slug`,
@@ -626,6 +633,14 @@ export type ProviderConnectionsDb = {
     }): Promise<unknown>;
     delete(args: { where: { id: string } }): Promise<unknown>;
   };
+  /**
+   * The seeded global catalog's providers. A connection slug may not shadow
+   * one, so the create/update path reads this table for the namespaces the
+   * constant cannot know about.
+   */
+  modelProvider: {
+    findMany(args: unknown): Promise<unknown[]>;
+  };
 };
 
 type ConnectionRow = {
@@ -681,7 +696,34 @@ async function collectConnectionSlugs(
     .filter((slug) => slug !== exclude);
 }
 
-/** Never expose the credential reference or the API key. */
+/**
+ * The namespaces the global catalog owns, read from the active
+ * `model_provider` rows. Best-effort: a read failure warns and returns the
+ * constant alone, so a saved slug is still refused on the floor rather than
+ * failing the request. The check is a **union** of this set and the constant,
+ * never a replacement.
+ */
+async function collectReservedConnectionSlugs(
+  db: ProviderConnectionsDb,
+): Promise<ReadonlySet<string>> {
+  const reserved = new Set(RESERVED_CONNECTION_SLUGS);
+  try {
+    const rows = (await db.modelProvider.findMany({
+      where: { isActive: true },
+      select: { slug: true },
+    })) as { slug?: unknown }[];
+    for (const row of rows) {
+      if (typeof row.slug === "string") reserved.add(row.slug);
+    }
+  } catch (error) {
+    console.warn(
+      "[providers] catalog provider-slug lookup failed; reserving the built-in namespaces only",
+      { error },
+    );
+  }
+  return reserved;
+}
+
 export function toPublicConnection(row: Omit<ConnectionRow, "userId">) {
   return {
     id: row.id,
@@ -715,11 +757,12 @@ export async function createConnection(
   userId: string,
   input: ProviderConnectionInput,
 ) {
-  const [count, slugs] = await Promise.all([
+  const [count, slugs, reservedSlugs] = await Promise.all([
     db.providerConnection.count({ where: { userId } }),
     collectConnectionSlugs(db, userId),
+    collectReservedConnectionSlugs(db),
   ]);
-  const value = validateConnectionInput(input, slugs, count);
+  const value = validateConnectionInput(input, slugs, count, reservedSlugs);
   const created = (await db.providerConnection.create({
     data: {
       userId,
@@ -760,6 +803,7 @@ export async function updateConnection(
     { ...input, apiKey, headers },
     slugs,
     0,
+    await collectReservedConnectionSlugs(db),
   );
 
   const updated = (await db.providerConnection.update({

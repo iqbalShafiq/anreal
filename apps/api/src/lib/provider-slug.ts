@@ -6,9 +6,12 @@ export const PROVIDER_MODEL_SLUG_RE =
   /^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*$/;
 
 /**
- * Namespaces owned by the seeded global catalog. A user connection may not
- * reuse them, otherwise its model ids would be indistinguishable from
- * registry ids and would collide with them.
+ * The **fallback** set of namespaces owned by the seeded global catalog, used
+ * when the catalog's `model_provider` table cannot be read and by the pure
+ * client-side slug helper (which must stay dependency-free, so it cannot read
+ * the database). At runtime the service treats a slug as reserved if it is in
+ * the catalog **or** in this constant, so a namespace reserved today stays
+ * reserved even if the catalog read returns nothing.
  */
 export const RESERVED_CONNECTION_SLUGS: readonly string[] = [
   "openai",
@@ -46,6 +49,11 @@ export function deriveModelSlug(
   return `${prefix}/${trimmedModel.length > 0 ? trimmedModel : "custom"}`;
 }
 
+/**
+ * True when `slug` is in the fallback constant. The service checks the union of
+ * this set and the catalog's active provider slugs; this helper alone is the
+ * floor, not the whole guard.
+ */
 export function isReservedConnectionSlug(slug: string): boolean {
   return RESERVED_CONNECTION_SLUGS.includes(slug);
 }
