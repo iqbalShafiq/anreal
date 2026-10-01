@@ -29,7 +29,6 @@ vi.mock("./service.js", () => ({ findActiveModel: vi.fn() }));
 
 import { findActiveModel } from "./service.js";
 import {
-  ROLE_KEYS,
   RoleInputError,
   buildRoleCompletionModel,
   listRoleAssignments,
@@ -77,7 +76,6 @@ describe("role defaults", () => {
   it("reports no default for a role that has none beyond the chat model", () => {
     expect(roleDefaultModelId("memoryCompaction")).toBeNull();
     expect(roleDefaultModelId("visionHelper")).toBeNull();
-    expect(roleDefaultModelId("chat")).toBeNull();
   });
 });
 
@@ -170,7 +168,7 @@ describe("resolveRoleTarget", () => {
     const db = makeDb({
       modelRoleAssignment: {
         findFirst: vi.fn(async () => ({
-          role: "chat",
+          role: "memoryCompaction",
           catalogModelId: "openai/pruned-model",
           providerModelId: null,
         })),
@@ -178,7 +176,7 @@ describe("resolveRoleTarget", () => {
       chatModel: { findFirst: vi.fn(async () => null) },
     });
 
-    expect(await resolveRoleTarget(db, USER, "chat")).toBeNull();
+    expect(await resolveRoleTarget(db, USER, "memoryCompaction")).toBeNull();
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
   });
@@ -281,6 +279,19 @@ describe("setRoleAssignment", () => {
   it("rejects an unknown role key", async () => {
     await expect(
       setRoleAssignment(makeDb(), USER, "nope" as never, null),
+    ).rejects.toBeInstanceOf(RoleInputError);
+  });
+
+  it("rejects the removed chat role even with a valid model", async () => {
+    vi.mocked(findActiveModel).mockResolvedValue({
+      modelId: "openai/gpt-6-luna",
+      connectionId: null,
+      source: "catalog",
+      inputModalities: ["text"],
+    } as never);
+
+    await expect(
+      setRoleAssignment(makeDb(), USER, "chat" as never, "openai/gpt-6-luna"),
     ).rejects.toBeInstanceOf(RoleInputError);
   });
 });
@@ -426,7 +437,34 @@ describe("listRoleAssignments", () => {
 
   it("returns one entry per role in ROLE_KEYS order", async () => {
     const infos = await listRoleAssignments(makeDb(), USER);
-    expect(infos.map((info) => info.role)).toEqual([...ROLE_KEYS]);
+    expect(infos.map((info) => info.role)).toEqual([
+      "memoryCompaction",
+      "profileSummary",
+      "siteBuilder",
+      "visionHelper",
+      "scheduledChat",
+    ]);
+  });
+
+  it("ignores a lingering chat row and never resolves it", async () => {
+    const db = makeDb({
+      modelRoleAssignment: {
+        findMany: vi.fn(async () => [
+          { role: "chat", catalogModelId: "openai/pruned", providerModelId: null },
+        ]),
+      },
+    });
+
+    const infos = await listRoleAssignments(db, USER);
+    expect(infos.map((info) => info.role)).toEqual([
+      "memoryCompaction",
+      "profileSummary",
+      "siteBuilder",
+      "visionHelper",
+      "scheduledChat",
+    ]);
+    expect(db.chatModel.findFirst).not.toHaveBeenCalled();
+    expect(db.providerModel.findFirst).not.toHaveBeenCalled();
   });
 
   it("projects a BYOK row's stored slug", async () => {
@@ -479,14 +517,14 @@ describe("listRoleAssignments", () => {
     const db = makeDb({
       modelRoleAssignment: {
         findMany: vi.fn(async () => [
-          { role: "chat", catalogModelId: "openai/pruned", providerModelId: null },
+          { role: "siteBuilder", catalogModelId: "openai/pruned", providerModelId: null },
         ]),
       },
       chatModel: { findFirst: vi.fn(async () => null) },
     });
 
     const infos = await listRoleAssignments(db, USER);
-    expect(infos.find((info) => info.role === "chat")?.modelId).toBeNull();
+    expect(infos.find((info) => info.role === "siteBuilder")?.modelId).toBeNull();
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
   });

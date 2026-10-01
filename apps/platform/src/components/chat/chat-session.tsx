@@ -360,7 +360,6 @@ export function ChatSession({
   onDeferredComposerSubmit,
   initialComposerDraft = null,
   initialFeatureFlags = null,
-  chatAssignmentModelId = null,
   onSiteBuildEvent,
 }: {
   sessionId: string;
@@ -406,12 +405,6 @@ export function ChatSession({
   initialComposerDraft?: InitialComposerDraft | string | null;
   /** Feature toggles pre-selected before the first send (share fork handoff). */
   initialFeatureFlags?: InitialFeatureFlags | null;
-  /**
-   * The user's `chat` role assignment, resolved asynchronously. Applied only
-   * when the user has never picked a model (no stored preference), so it can
-   * never overwrite an explicit choice.
-   */
-  chatAssignmentModelId?: string | null;
   onSiteBuildEvent?: (
     event:
       | { name: "siteBuildProgress"; data: ChatDataMap["siteBuildProgress"] }
@@ -1447,16 +1440,16 @@ export function ChatSession({
   }, [sessionId]);
 
   // Reconcile the selected model once the catalog arrives:
-  // stored preference > chat role assignment > first active model > default.
+  // stored preference > first active model > default.
   // Always apply the storage-aware read — at mount the catalog is still empty
   // (loading), so without this the stored preference would never be restored.
-  // The assignment loads asynchronously too, so this recomputes when it
-  // arrives; a stored preference always wins, and an explicit choice is never
-  // overwritten. Read per render (not memoized) so a model the user just picked
-  // — persisted synchronously by handleModelChange — is reflected immediately.
+  // A fallback is never persisted: a stored value must mean "the user chose
+  // this", never "the app wrote this". Read per render (not memoized) so a
+  // model the user just picked — persisted synchronously by
+  // handleModelChange — is reflected immediately; the effect then only acts
+  // when the recomputed value actually differs, so it cannot loop.
   const resolvedInitialModel = resolveInitialModel({
     storedModelId: readStoredSelectedModel(),
-    chatAssignmentModelId: chatAssignmentModelId ?? null,
     models,
   });
   useEffect(() => {

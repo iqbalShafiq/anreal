@@ -5,7 +5,6 @@ import { AnrealMark } from "#/components/layout/anreal-brand";
 import { SessionNotFound } from "#/components/workspace/workspace-not-found";
 import { useWorkspaceSessionsContext } from "#/components/workspace/workspace-sessions-context";
 import { useModels } from "#/hooks/use-models";
-import { useModelRoles } from "#/hooks/use-model-roles";
 import { settleStoppedRunTools } from "#/lib/chat/finalize-interrupted-tools";
 import { peekPendingApprovalToolNames } from "#/lib/chat/interaction-resume-storage";
 import { reconcileWaitedTools } from "#/lib/chat/reconcile-waited-tools";
@@ -132,7 +131,6 @@ export function ChatRouteView(input: {
   onCanonicalSession: (sessionId: string, projectId: string | null) => void;
 }): React.JSX.Element {
   const modelsState = useModels();
-  const rolesState = useModelRoles(true);
   const sessionsContext = useWorkspaceSessionsContext();
   const route = useChatRouteData(input);
   // One-shot share-fork handoff: consumed once on mount so refresh/back
@@ -279,9 +277,6 @@ export function ChatRouteView(input: {
         onAuthFailure={input.onAuthFailure}
         onImageContextActions={sessionsContext.onImageContextActions}
         onReloadMessages={(messages) => route.setMessages(messages)}
-        chatAssignmentModelId={
-          rolesState.data?.find((entry) => entry.role === "chat")?.modelId ?? null
-        }
         onSiteBuildEvent={(event) => {
           setSiteBuild((prev) => applySiteBuildEvent(prev, event));
           setSiteVersions((prev) => applySiteVersionEvent(prev, event));

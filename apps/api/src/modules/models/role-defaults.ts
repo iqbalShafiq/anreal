@@ -9,7 +9,6 @@ import {
  * the order callers and the settings UI present them in.
  */
 export const ROLE_KEYS = [
-  "chat",
   "memoryCompaction",
   "profileSummary",
   "siteBuilder",
@@ -49,7 +48,7 @@ export function roleEnvModelId(role: RoleKey): string | null {
 /**
  * Today's default resolution for a role, byte-identical to the call sites the
  * role resolver replaces: env var first, then the existing constant default.
- * `null` means the role has no default of its own (`chat`, `memoryCompaction`),
+ * `null` means the role has no default of its own (`memoryCompaction`),
  * so a caller supplies its own fallback (e.g. compaction uses the chat model).
  */
 export function roleDefaultModelId(role: RoleKey): string | null {

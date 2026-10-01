@@ -8,7 +8,6 @@ import { DEFAULT_COMPLETION_MODEL } from "#/lib/chat/models";
  * unit-tested in node.
  */
 export const MODEL_ROLE_KEYS = [
-  "chat",
   "memoryCompaction",
   "profileSummary",
   "siteBuilder",
@@ -19,7 +18,6 @@ export const MODEL_ROLE_KEYS = [
 export type ModelRoleKey = (typeof MODEL_ROLE_KEYS)[number];
 
 const ROLE_LABELS: Record<ModelRoleKey, string> = {
-  chat: "Chat",
   memoryCompaction: "Memory compaction",
   profileSummary: "Profile summary",
   siteBuilder: "Site builder",
@@ -74,20 +72,19 @@ export function roleModelOptions(
 
 /**
  * The initial chat model for a session, mirroring spec §5.5's precedence:
- * a stored preference (when the catalog still has it) wins, then the user's
- * `chat` role assignment, then the first active model, then the app default.
+ * a stored preference (when the catalog still has it) wins, then the first
+ * active model, then the app default. The chat has no account-level role
+ * assignment: its model is whatever the user last picked in the composer.
  * An id the catalog does not contain is ignored rather than selected, so a
- * stale localStorage value or a dangling assignment cannot strand the chat.
+ * stale localStorage value cannot strand the chat.
  */
 export function resolveInitialModel(input: {
   storedModelId: string | null;
-  chatAssignmentModelId: string | null;
   models: readonly { modelId: string }[];
 }): string {
-  const { storedModelId, chatAssignmentModelId, models } = input;
+  const { storedModelId, models } = input;
   const inCatalog = (id: string | null): id is string =>
     id !== null && models.some((model) => model.modelId === id);
   if (inCatalog(storedModelId)) return storedModelId;
-  if (inCatalog(chatAssignmentModelId)) return chatAssignmentModelId;
   return models[0]?.modelId ?? DEFAULT_COMPLETION_MODEL;
 }

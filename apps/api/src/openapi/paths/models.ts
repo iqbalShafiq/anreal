@@ -8,7 +8,6 @@ import {
 } from "../helpers.js";
 
 const ROLE_ENUM = [
-  "chat",
   "memoryCompaction",
   "profileSummary",
   "siteBuilder",
@@ -48,7 +47,6 @@ const roleInfoExample = {
 
 const rolesExample = {
   roles: [
-    { role: "chat", modelId: null, defaultModelId: null },
     { role: "memoryCompaction", modelId: null, defaultModelId: null },
     {
       role: "profileSummary",
@@ -188,7 +186,7 @@ export const modelsPaths = {
               roles: { type: "array", items: modelRoleInfoSchema },
             },
           },
-          { default: { summary: "All six roles", value: rolesExample } },
+          { default: { summary: "All five roles", value: rolesExample } },
         ),
         "401": unauthorized,
       },

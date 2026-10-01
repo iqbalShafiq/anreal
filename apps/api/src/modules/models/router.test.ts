@@ -83,7 +83,6 @@ describe("GET /api/models", () => {
 
 const ROLE_FIXTURE: RoleInfo[] = (
   [
-    "chat",
     "memoryCompaction",
     "profileSummary",
     "siteBuilder",
@@ -103,7 +102,6 @@ describe("role assignments", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { roles: { role: string }[] };
     expect(body.roles.map((entry) => entry.role)).toEqual([
-      "chat",
       "memoryCompaction",
       "profileSummary",
       "siteBuilder",
@@ -117,6 +115,15 @@ describe("role assignments", () => {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ modelId: "openai/gpt-6-luna" }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects the removed chat role with 400", async () => {
+    const res = await app.request("/api/models/roles", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ role: "chat", modelId: "openai/gpt-6-luna" }),
     });
     expect(res.status).toBe(400);
   });

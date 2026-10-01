@@ -1,22 +1,31 @@
 import { describe, expect, it } from "vitest";
 import {
+  MODEL_ROLE_KEYS,
   roleModelOptions,
   modelRoleLabel,
   resolveInitialModel,
 } from "./model-role-labels";
 import { DEFAULT_COMPLETION_MODEL } from "./chat/models";
 
-describe("modelRoleLabel", () => {
-  it("names each role for the UI", () => {
-    expect(modelRoleLabel("memoryCompaction")).toBe("Memory compaction");
-    expect(modelRoleLabel("visionHelper")).toBe("Image understanding");
-    expect(modelRoleLabel("scheduledChat")).toBe("Scheduled chats");
+describe("MODEL_ROLE_KEYS", () => {
+  it("lists the five background roles in order", () => {
+    expect([...MODEL_ROLE_KEYS]).toEqual([
+      "memoryCompaction",
+      "profileSummary",
+      "siteBuilder",
+      "visionHelper",
+      "scheduledChat",
+    ]);
   });
+});
 
+describe("modelRoleLabel", () => {
   it("names every role", () => {
-    expect(modelRoleLabel("chat")).toBe("Chat");
+    expect(modelRoleLabel("memoryCompaction")).toBe("Memory compaction");
     expect(modelRoleLabel("profileSummary")).toBe("Profile summary");
     expect(modelRoleLabel("siteBuilder")).toBe("Site builder");
+    expect(modelRoleLabel("visionHelper")).toBe("Image understanding");
+    expect(modelRoleLabel("scheduledChat")).toBe("Scheduled chats");
   });
 });
 
@@ -62,57 +71,33 @@ describe("resolveInitialModel", () => {
     expect(
       resolveInitialModel({
         storedModelId: "deepseek/deepseek-v4-flash-0731",
-        chatAssignmentModelId: "openai/gpt-6-luna",
         models: catalog,
       }),
     ).toBe("deepseek/deepseek-v4-flash-0731");
   });
 
-  it("uses the chat assignment when no preference is stored", () => {
-    expect(
-      resolveInitialModel({
-        storedModelId: null,
-        chatAssignmentModelId: "openai/gpt-6-luna",
-        models: catalog,
-      }),
-    ).toBe("openai/gpt-6-luna");
-  });
-
-  it("falls back to the first catalog model when neither is set", () => {
-    expect(
-      resolveInitialModel({
-        storedModelId: null,
-        chatAssignmentModelId: null,
-        models: catalog,
-      }),
-    ).toBe("openai/gpt-6-luna");
-  });
-
-  it("ignores an assignment naming a model absent from the catalog", () => {
-    expect(
-      resolveInitialModel({
-        storedModelId: null,
-        chatAssignmentModelId: "openai/pruned-model",
-        models: catalog,
-      }),
-    ).toBe("openai/gpt-6-luna");
-  });
-
-  it("ignores a stale stored value and takes the assignment", () => {
+  it("ignores a stored id the catalog lacks and falls back to the first model", () => {
     expect(
       resolveInitialModel({
         storedModelId: "openai/pruned-model",
-        chatAssignmentModelId: "deepseek/deepseek-v4-flash-0731",
         models: catalog,
       }),
-    ).toBe("deepseek/deepseek-v4-flash-0731");
+    ).toBe("openai/gpt-6-luna");
+  });
+
+  it("falls back to the first catalog model when nothing is stored", () => {
+    expect(
+      resolveInitialModel({
+        storedModelId: null,
+        models: catalog,
+      }),
+    ).toBe("openai/gpt-6-luna");
   });
 
   it("uses the app default when the catalog is empty", () => {
     expect(
       resolveInitialModel({
         storedModelId: "openai/gpt-6-luna",
-        chatAssignmentModelId: "openai/gpt-6-luna",
         models: [],
       }),
     ).toBe(DEFAULT_COMPLETION_MODEL);
