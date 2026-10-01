@@ -7,7 +7,9 @@
  */
 
 import type {
+  ImageModelCapabilities,
   ListedProviderModel,
+  ProviderModelInput,
   ProviderModelPrefill,
 } from "#/lib/api";
 
@@ -311,7 +313,7 @@ export function imageCapabilityDraft(
 
 /** A built declaration, or a field-level error the editor shows instead of saving. */
 export type ImageCapabilityBuild =
-  | { ok: true; value: Record<string, unknown> }
+  | { ok: true; value: ImageModelCapabilities }
   | { ok: false; error: string };
 
 /**
@@ -387,18 +389,8 @@ export function modelSavePayload(input: {
   maxInputTokens: number | null;
   maxOutputTokens: number | null;
   reasoningEfforts: string[];
-  imageCapabilities: Record<string, unknown> | null;
-}): {
-  upstreamId: string;
-  name?: string;
-  iconSvg?: string;
-  outputType: "text" | "image";
-  contextWindowTokens: number | null;
-  maxInputTokens: number | null;
-  maxOutputTokens: number | null;
-  reasoningEfforts: string[];
-  imageCapabilities?: Record<string, unknown>;
-} {
+  imageCapabilities: ImageModelCapabilities | null;
+}): ProviderModelInput {
   const trimmedName = input.name.trim();
   const trimmedIcon = input.iconSvg.trim();
   const isImage = input.outputType === "image";

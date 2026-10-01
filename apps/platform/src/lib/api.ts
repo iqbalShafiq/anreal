@@ -2296,6 +2296,12 @@ export type ProviderModelInput = {
   description?: string | null;
   iconSvg?: string;
   outputType?: "text" | "image";
+  /**
+   * Image capability declaration for an image model. Validated against the
+   * kind's published limits server-side; a text model must not carry it. Sent
+   * in full on every save — a PATCH that omits it writes null.
+   */
+  imageCapabilities?: ImageModelCapabilities;
   contextWindowTokens?: number | null;
   maxInputTokens?: number | null;
   maxOutputTokens?: number | null;

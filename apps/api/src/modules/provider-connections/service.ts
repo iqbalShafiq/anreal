@@ -1,7 +1,8 @@
 import {
+  ASPECT_SIZES,
+  MAX_MODEL_IMAGES,
   PROVIDER_KIND_META,
   PROVIDER_KINDS,
-  MAX_MODEL_IMAGES,
   createCompletionModelFor,
   describeModel,
   effortVocabulary,
@@ -305,7 +306,7 @@ function optionalPositiveInteger(path: string, value: unknown): number | null {
  * `isRepresentableAspectRatio` in the tool, which owns the table. No dimensions
  * are invented for them: `21:9` cannot be a reduced fraction at all.
  */
-const IMAGE_CAPABILITY_ALLOWLIST: Record<
+export const IMAGE_CAPABILITY_ALLOWLIST: Record<
   Exclude<ImageStyle, "none">,
   ReadonlySet<string>
 > = {
@@ -321,7 +322,7 @@ const IMAGE_CAPABILITY_ALLOWLIST: Record<
 };
 
 /** `n` reaches the wire only for the OpenRouter-shaped adapter. */
-const IMAGE_STYLE_FIXED_N: ReadonlySet<ImageStyle> = new Set([
+export const IMAGE_STYLE_FIXED_N: ReadonlySet<ImageStyle> = new Set([
   "gemini-native",
   "grok-native",
 ]);
@@ -332,10 +333,46 @@ const IMAGE_STYLE_FIXED_N: ReadonlySet<ImageStyle> = new Set([
  * `IMAGE_STYLE_FIXED_N` today, but a distinct concept: those two adapters can
  * only reach a ratio whose key is already a reduced integer fraction.
  */
-const GCD_DERIVED_STYLES: ReadonlySet<ImageStyle> = new Set([
+export const GCD_DERIVED_STYLES: ReadonlySet<ImageStyle> = new Set([
   "gemini-native",
   "grok-native",
 ]);
+
+/**
+ * The image limits a kind publishes to the client, derived from this module's
+ * own save-time rules — `IMAGE_CAPABILITY_ALLOWLIST` and `IMAGE_STYLE_FIXED_N`
+ * — so the value can never disagree with what `validateImageCapabilities`
+ * enforces. Three of the four facts come straight from those sets:
+ *
+ * - `nMax` is 1 for a fixed-`n` kind (the adapters pin it on the wire) and the
+ *   tool's own cap otherwise; the cap is imported, never restated.
+ * - `sizing` is whichever of `sizes`/`resolutions` the allow-list admits.
+ * - `supportsQuality` / `supportsBackground` are allow-list membership.
+ *
+ * Only `representableAspectRatios` is not from this module: it is the tool's
+ * table filtered through the tool's rule, which the save path also uses.
+ */
+export function publishedImageLimits(
+  style: ImageStyle,
+): {
+  nMax: number;
+  sizing: "sizes" | "resolutions";
+  supportsQuality: boolean;
+  supportsBackground: boolean;
+  representableAspectRatios: string[] | null;
+} | null {
+  if (style === "none") return null;
+  const allowed = IMAGE_CAPABILITY_ALLOWLIST[style];
+  return {
+    nMax: IMAGE_STYLE_FIXED_N.has(style) ? 1 : MAX_MODEL_IMAGES,
+    sizing: allowed.has("sizes") ? "sizes" : "resolutions",
+    supportsQuality: allowed.has("quality"),
+    supportsBackground: allowed.has("background"),
+    representableAspectRatios: GCD_DERIVED_STYLES.has(style)
+      ? Object.keys(ASPECT_SIZES).filter(isRepresentableAspectRatio)
+      : null,
+  };
+}
 
 function validateImageCapabilities(
   style: Exclude<ImageStyle, "none">,

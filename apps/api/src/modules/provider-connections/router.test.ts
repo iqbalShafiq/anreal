@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
 import {
   MAX_MODEL_IMAGES,
+  PROVIDER_KIND_META,
   isRepresentableAspectRatio,
+  type ImageStyle,
 } from "@anreal/agent";
 
 const service = vi.hoisted(() => ({
@@ -35,6 +37,11 @@ vi.mock("../auth/middleware.js", () => ({
 }));
 
 import { providerConnectionsRouter } from "./router.js";
+import {
+  GCD_DERIVED_STYLES,
+  IMAGE_CAPABILITY_ALLOWLIST,
+  IMAGE_STYLE_FIXED_N,
+} from "./service.js";
 
 const app = new Hono().route("/api/providers", providerConnectionsRouter);
 
@@ -52,13 +59,13 @@ describe("provider routes", () => {
     expect(body.kinds.find((k) => k.kind === "compatible")?.requiresBaseUrl).toBe(true);
   });
 
-  it("publishes the per-kind image limits derived from the tool's authority", async () => {
+  it("publishes the per-kind image limits derived from the save path's own rules", async () => {
     const res = await app.request("/api/providers/kinds");
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       kinds: {
         kind: string;
-        imageStyle: string;
+        imageStyle: ImageStyle;
         imageLimits: {
           nMax: number;
           sizing: "sizes" | "resolutions";
@@ -69,37 +76,67 @@ describe("provider routes", () => {
       }[];
     };
 
-    const byKind = Object.fromEntries(body.kinds.map((k) => [k.kind, k]));
+    for (const entry of body.kinds) {
+      const style = PROVIDER_KIND_META[entry.kind as keyof typeof PROVIDER_KIND_META]
+        .imageStyle;
+      // The endpoint's style must be the registry's, or the derivation below
+      // would compare against the wrong rules.
+      expect(entry.imageStyle).toBe(style);
 
-    // OpenRouter-shaped kinds honour every control up to the tool's own cap;
-    // the representable list is null because no gcd reduction constrains them.
-    expect(byKind.compatible?.imageLimits).toEqual({
+      if (style === "none") {
+        expect(entry.imageLimits).toBeNull();
+        continue;
+      }
+
+      // Expected values are read off the save path's own rule sets, not typed
+      // as literals: `IMAGE_STYLE_FIXED_N` decides whether n is pinned, and
+      // `IMAGE_CAPABILITY_ALLOWLIST` decides the sizing key and the optional
+      // controls. A change to either rule without a matching change to the
+      // published payload fails here.
+      const allowed = IMAGE_CAPABILITY_ALLOWLIST[style];
+      expect(entry.imageLimits?.nMax).toBe(
+        IMAGE_STYLE_FIXED_N.has(style) ? 1 : MAX_MODEL_IMAGES,
+      );
+      expect(entry.imageLimits?.sizing).toBe(
+        allowed.has("sizes") ? "sizes" : "resolutions",
+      );
+      expect(entry.imageLimits?.supportsQuality).toBe(allowed.has("quality"));
+      expect(entry.imageLimits?.supportsBackground).toBe(
+        allowed.has("background"),
+      );
+
+      // The representable list is the tool's table filtered by the tool's rule,
+      // and is non-null exactly for the gcd-derived styles.
+      if (GCD_DERIVED_STYLES.has(style)) {
+        expect(
+          entry.imageLimits?.representableAspectRatios?.every(
+            isRepresentableAspectRatio,
+          ),
+        ).toBe(true);
+        // `auto` and the unreduceable ratios the rule rejects are absent by
+        // construction, not by a hand-maintained list.
+        expect(entry.imageLimits?.representableAspectRatios).not.toContain("21:9");
+        expect(entry.imageLimits?.representableAspectRatios).not.toContain("auto");
+      } else {
+        expect(entry.imageLimits?.representableAspectRatios).toBeNull();
+      }
+    }
+
+    // Spot-check the two shapes so a wholly empty payload cannot pass above.
+    const compatible = body.kinds.find((k) => k.kind === "compatible");
+    expect(compatible?.imageLimits).toEqual({
       nMax: MAX_MODEL_IMAGES,
       sizing: "sizes",
       supportsQuality: true,
       supportsBackground: true,
       representableAspectRatios: null,
     });
+    const gemini = body.kinds.find((k) => k.kind === "gemini");
+    expect(gemini?.imageLimits?.nMax).toBe(1);
+    expect(gemini?.imageLimits?.sizing).toBe("resolutions");
+    expect(gemini?.imageLimits?.representableAspectRatios).toContain("1:1");
 
-    // The native kinds pin n to 1, use resolutions, and honour no optional
-    // control. Their representable list comes from the tool's own rule, so a
-    // ratio the adapter cannot reach is absent by construction.
-    for (const kind of ["gemini", "grok"] as const) {
-      const limits = byKind[kind]?.imageLimits;
-      expect(limits?.nMax).toBe(1);
-      expect(limits?.sizing).toBe("resolutions");
-      expect(limits?.supportsQuality).toBe(false);
-      expect(limits?.supportsBackground).toBe(false);
-      expect(limits?.representableAspectRatios).toContain("1:1");
-      expect(limits?.representableAspectRatios).not.toContain("21:9");
-      expect(limits?.representableAspectRatios).not.toContain("auto");
-      expect(
-        limits?.representableAspectRatios?.every(isRepresentableAspectRatio),
-      ).toBe(true);
-    }
-
-    // A kind with no image endpoint publishes no limits.
-    expect(byKind.openai?.imageLimits).toBeNull();
+    expect(body.kinds.find((k) => k.kind === "openai")?.imageLimits).toBeNull();
   });
 
   it("returns 404 for another user's connection", async () => {

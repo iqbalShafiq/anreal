@@ -735,6 +735,7 @@ export const providerKindSchema = {
     "apiVariants",
     "defaultApi",
     "imageStyle",
+    "imageLimits",
   ],
   properties: {
     kind: { type: "string" },
@@ -747,6 +748,43 @@ export const providerKindSchema = {
     imageStyle: {
       type: "string",
       enum: ["openrouter-images", "gemini-native", "grok-native", "none"],
+    },
+    /**
+     * The image controls this kind can honour, derived from the same rules the
+     * save path validates against. Null when `imageStyle` is `none`. The client
+     * reads these instead of mirroring the tool's capabilities.
+     */
+    imageLimits: {
+      type: ["object", "null"],
+      additionalProperties: false,
+      required: [
+        "nMax",
+        "sizing",
+        "supportsQuality",
+        "supportsBackground",
+        "representableAspectRatios",
+      ],
+      properties: {
+        nMax: {
+          type: "integer",
+          minimum: 1,
+          description:
+            "Highest accepted n.max. The image tool's execution cap for OpenRouter-shaped kinds; 1 for the native kinds, which pin it on the wire.",
+        },
+        sizing: {
+          type: "string",
+          enum: ["sizes", "resolutions"],
+          description: "The one sizing key this kind accepts.",
+        },
+        supportsQuality: { type: "boolean" },
+        supportsBackground: { type: "boolean" },
+        representableAspectRatios: {
+          type: ["array", "null"],
+          items: { type: "string" },
+          description:
+            "For gcd-derived kinds, exactly the aspect ratios the adapter can reach; null when the kind has no such constraint.",
+        },
+      },
     },
   },
 };

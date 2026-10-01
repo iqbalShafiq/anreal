@@ -233,6 +233,13 @@ export const providersPaths = {
                     apiVariants: ["chat", "responses"],
                     defaultApi: "chat",
                     imageStyle: "openrouter-images",
+                    imageLimits: {
+                      nMax: 10,
+                      sizing: "sizes",
+                      supportsQuality: true,
+                      supportsBackground: true,
+                      representableAspectRatios: null,
+                    },
                   },
                   {
                     kind: "anthropic",
@@ -243,6 +250,7 @@ export const providersPaths = {
                     apiVariants: [],
                     defaultApi: null,
                     imageStyle: "none",
+                    imageLimits: null,
                   },
                 ],
                 effortVocabulary: [
