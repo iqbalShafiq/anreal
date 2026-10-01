@@ -404,6 +404,8 @@ Katalog model ada di tabel `chat_model` (diseed oleh `pnpm --filter @anreal/api 
 
 Selain katalog model yang di-seed, tiap user bisa membawa **API key provider sendiri** (BYOK). Saat ini BYOK mencakup **model chat/teks**: user mendaftarkan provider **connection** beserta model chat di atasnya, dan model-model itu ikut muncul di pemilih model composer. **Image generation lewat BYOK belum tersedia** — itu fase berikutnya; pemilih model image tetap memakai model katalog dari key server bersama (`OPENAI_*`).
 
+**Menambah model.** Menu model di composer juga punya baris **"Add a model…"** yang membuka form **Settings → Providers** yang sama — hanya ada satu form, bukan dua — sehingga model bisa ditambahkan dari composer maupun dari Settings → Providers. Model yang ditambahkan dari salah satu tempat itu bisa dipakai untuk **semua operasi**: model chat di composer dan kelima peran background (memory compaction, profile summary, site builder, vision helper, scheduled chat).
+
 **Connection vs model.** Alurnya dua tingkat: user membuat sebuah **connection** (provider kind + base URL opsional + API key + custom headers opsional), lalu mendaftarkan **model** di atasnya (upstream model id, display name, context window, reasoning efforts, icon opsional). Semua connection dan model di-scope ke user pembuatnya — user lain tidak bisa melihat atau memakainya.
 
 **Enkripsi.** API key provider dienkripsi saat disimpan (at rest) memakai AES-256-GCM dengan `PROVIDER_CREDENTIALS_KEY`. Key ini **wajib di production**; di dev/test, jika kosong, app memakai ephemeral key dengan peringatan sekali di console, sehingga credential yang tersimpan **tidak bertahan setelah restart**. Key ini **terpisah** dari `MCP_CREDENTIALS_KEY` — keduanya tidak bisa saling menggantikan.
