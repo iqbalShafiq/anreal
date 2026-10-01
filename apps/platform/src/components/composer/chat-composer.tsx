@@ -12,7 +12,7 @@ import { FeaturesPopover, type FeatureCountSummary } from "#/components/composer
 import { MessageQueueDock } from "#/components/composer/message-queue-dock";
 import { ModelReasoningSwitcher } from "#/components/composer/model-reasoning-switcher";
 import { GeneratedImageThumbnail } from "#/components/images/generated-image-thumbnail";
-import { useSettingsDialog } from "#/components/settings/settings-dialog";
+import { useSettingsDialogOptional } from "#/components/settings/settings-dialog";
 import type {
   ContextSnippet,
   ContextUsageInfo,
@@ -207,7 +207,9 @@ export function ChatComposer({
   /** Owner-scoped error rendered inside the normal composer shell. */
   externalError?: { key: number; message: string } | null;
 }) {
-  const { openSettings } = useSettingsDialog();
+  // Optional: the share surface renders the composer without a Settings
+  // provider, so the "Add a model…" row is simply omitted there.
+  const settingsDialog = useSettingsDialogOptional();
   const active = isActiveComposerStatus(chatStatus);
   const busy = isIngesting || active || locked;
   const modelsReady =
@@ -610,7 +612,11 @@ export function ChatComposer({
               disabled={locked || readOnly || busy || modelsUnavailable}
               onModelChange={onModelChange}
               onReasoningChange={onReasoningChange}
-              onAddModel={() => openSettings("providers")}
+              onAddModel={
+                settingsDialog
+                  ? () => settingsDialog.openSettings("providers")
+                  : undefined
+              }
             />
           </div>
 

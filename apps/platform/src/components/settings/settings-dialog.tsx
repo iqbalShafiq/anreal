@@ -80,3 +80,12 @@ export function useSettingsDialog(): SettingsDialogContextValue {
   }
   return context;
 }
+
+/**
+ * Non-throwing variant for components that legitimately render on surfaces
+ * without a Settings dialog (e.g. the public share page): returns `null`
+ * instead of throwing so the caller can omit the entry point entirely.
+ */
+export function useSettingsDialogOptional(): SettingsDialogContextValue | null {
+  return useContext(SettingsDialogContext);
+}

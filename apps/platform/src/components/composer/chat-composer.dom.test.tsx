@@ -10,23 +10,54 @@ import {
 import type { QueuedDraft } from "#/lib/chat/queued-messages";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+/** Mutable state shared with the hoisted mock factories below. */
+const h = vi.hoisted(() => ({
+  openSettings: vi.fn(),
+  // null models the provider-less share surface; an object models the workspace.
+  settingsContext: null as
+    | { openSettings: (section?: string, trigger?: HTMLElement | null) => void }
+    | null,
+  switcherProps: null as { onAddModel?: () => void } | null,
+}));
 
 vi.mock("#/components/chat/context-snippet-chip", () => ({ ContextSnippetChip: () => null }));
 vi.mock("#/components/composer/composer-attach-control", () => ({ ComposerAttachControl: () => null }));
 vi.mock("#/components/composer/context-usage-indicator", () => ({ ContextUsageIndicator: () => null }));
 vi.mock("#/components/composer/features-popover", () => ({ FeaturesPopover: () => null }));
 vi.mock("#/components/composer/message-queue-dock", () => ({ MessageQueueDock: () => null }));
-vi.mock("#/components/composer/model-reasoning-switcher", () => ({ ModelReasoningSwitcher: () => null }));
+vi.mock("#/components/composer/model-reasoning-switcher", () => ({
+  ModelReasoningSwitcher: (props: { onAddModel?: () => void }) => {
+    h.switcherProps = props;
+    return null;
+  },
+}));
 vi.mock("#/components/images/generated-image-thumbnail", () => ({ GeneratedImageThumbnail: () => null }));
 vi.mock("#/components/settings/settings-dialog", () => ({
-  useSettingsDialog: () => ({ openSettings: vi.fn() }),
+  // Mirrors the real module contract: strict throws without a provider, the
+  // optional variant returns null. Production uses the optional variant.
+  useSettingsDialog: () => {
+    if (!h.settingsContext) {
+      throw new Error(
+        "useSettingsDialog must be used within a SettingsDialogProvider",
+      );
+    }
+    return h.settingsContext;
+  },
+  useSettingsDialogOptional: () => h.settingsContext,
 }));
 vi.mock("#/lib/api", () => ({ isImageAttachmentLike: () => false }));
 
 import { ChatComposer } from "./chat-composer";
 
 afterEach(cleanup);
+
+beforeEach(() => {
+  h.settingsContext = null;
+  h.openSettings.mockClear();
+  h.switcherProps = null;
+});
 
 const model = {
   modelId: "deepseek/deepseek-v4-flash-0731",
@@ -362,6 +393,22 @@ describe("Anvia v1 composer DOM contract", () => {
       });
       expect(screen.getByRole("list", { name: "Pinned artifacts" })).toBeTruthy();
       expect(screen.getByRole<HTMLTextAreaElement>("textbox").value).toBe("lanjutkan");
+    });
+  });
+
+  describe("settings add-model entry", () => {
+    it("renders on a provider-less surface and omits the add-model row", () => {
+      h.settingsContext = null;
+      expect(() => renderComposer({ status: "ready" })).not.toThrow();
+      expect(h.switcherProps?.onAddModel).toBeUndefined();
+    });
+
+    it("opens Settings on the providers section when the add row is chosen", () => {
+      h.settingsContext = { openSettings: h.openSettings };
+      renderComposer({ status: "ready" });
+      expect(typeof h.switcherProps?.onAddModel).toBe("function");
+      h.switcherProps?.onAddModel?.();
+      expect(h.openSettings).toHaveBeenCalledWith("providers");
     });
   });
 });
