@@ -418,7 +418,7 @@ Selain katalog model yang di-seed, tiap user bisa membawa **API key provider sen
 
 **Catatan image (rencana).** Ketika BYOK image generation nanti diimplementasikan (Phase D), jalurnya akan lewat kind `compatible`, yang berbicara `POST /images` ala OpenRouter. Kind `openai` native direncanakan **tidak** ikut menawarkan model image: API images native OpenAI punya parameter berbeda dan tidak punya `input_references`, sedangkan alur `edit_image` aplikasi mengirim reference image dan membutuhkannya. Karena itu `compatible` adalah satu-satunya jalur image yang cocok.
 
-**Model per peran.** Setiap peran background — memory compaction, profile summarization, site builder, vision helper, scheduled chat, dan model chat utama — bisa diarahkan ke model pilihannya sendiri. Detailnya di subsection **Model per peran** di bawah. Lewat katalog gabungan yang bisa dipilih per peran adalah model chat/teks; model image tetap berasal dari katalog seed.
+**Model per peran.** Setiap peran background — memory compaction, profile summarization, site builder, vision helper, dan scheduled chat — bisa diarahkan ke model pilihannya sendiri. Detailnya di subsection **Model per peran** di bawah. Lewat katalog gabungan yang bisa dipilih per peran adalah model chat/teks; model image tetap berasal dari katalog seed.
 
 **Menguji connection.** `POST /api/providers/test` memvalidasi credential ke provider **tanpa menyimpan apa pun**; endpoint menerima `connectionId` opsional sehingga field key yang dibiarkan kosong akan memakai credential yang tersimpan. Test yang gagal mengembalikan pesan yang mudah dibaca dan bebas credential.
 
@@ -451,7 +451,6 @@ Setiap **peran background** bisa diarahkan ke model pilihannya sendiri lewat **S
 
 | Peran | Label di UI | Yang diatur |
 | --- | --- | --- |
-| `chat` | Chat | Model chat utama |
 | `memoryCompaction` | Memory compaction | Summarizer yang memadatkan memory percakapan lama di dalam satu run |
 | `profileSummary` | Profile summary | Summarizer profil user/proyek yang jalan di background |
 | `siteBuilder` | Site builder | Worker static site builder |
@@ -460,9 +459,9 @@ Setiap **peran background** bisa diarahkan ke model pilihannya sendiri lewat **S
 
 **Precedence.** Model sebuah peran diresolusi dengan urutan **assignment user → env var yang ada → default yang ada**. User yang belum pernah menyentuh pengaturan ini berjalan byte-identik seperti sebelum fitur ini ada — properti itulah yang dijaga seluruh desainnya.
 
-**Khusus `chat`, pilihan eksplisit di browser menang lebih dulu:** urutannya **model tersimpan di browser → assignment `chat` → model pertama di katalog → default aplikasi**. Jadi assignment hanya mengisi saat user belum pernah memilih model, dan tidak pernah menimpa pilihan yang sudah dibuat.
+**Model chat tidak punya default tingkat akun.** Peran `chat` dihapus: model chat adalah model terakhir yang user pilih di composer, dengan urutan **model tersimpan di browser → model pertama di katalog → default aplikasi**. Sebelum fitur ini, efek reconcile sempat menulis fallback ke `chat.selectedModel`, sehingga nilai tersimpan bisa berarti "user memilih ini" atau "aplikasi yang menulis ini" — default chat yang kalah diam-diam dari nilai tulisan aplikasi sendiri lebih buruk daripada tidak ada default chat.
 
-**Lapisan env var.** Tiga peran masih membaca env var sebagai lapisan tengah: `PROFILE_SUMMARY_MODEL` (profile summary), `SITE_MODEL` (site builder), dan `VISION_HELPER_MODEL` (vision helper). `scheduledChat` tidak punya env var dan jatuh ke default completion model aplikasi (`openai/gpt-6-luna`). `chat` dan `memoryCompaction` tidak punya default sendiri.
+**Lapisan env var.** Tiga peran masih membaca env var sebagai lapisan tengah: `PROFILE_SUMMARY_MODEL` (profile summary), `SITE_MODEL` (site builder), dan `VISION_HELPER_MODEL` (vision helper). `scheduledChat` tidak punya env var dan jatuh ke default completion model aplikasi (`openai/gpt-6-luna`). `memoryCompaction` tidak punya default sendiri.
 
 **Memory compaction mengikuti model chat** kecuali di-assign eksplisit. Default-nya adalah model chat milik run itu sendiri, bukan model terpisah — karena itu picker-nya menampilkan **"Using the chat model"**. **Vision helper** tanpa `VISION_HELPER_MODEL` memilih otomatis model gambar termurah ("Using the cheapest available image model").
 

@@ -659,7 +659,7 @@ model ModelRoleAssignment {
   id              String         @id @default(cuid())
   userId          String
   user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  /// "chat" | "memoryCompaction" | "profileSummary" | "siteBuilder" | "visionHelper" | "scheduledChat"
+  /// "memoryCompaction" | "profileSummary" | "siteBuilder" | "visionHelper" | "scheduledChat"
   role            String
   /// Global catalog model id. Deliberately not a FK: the seed prunes chat_model rows.
   catalogModelId  String?
