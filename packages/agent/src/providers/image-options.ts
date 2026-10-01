@@ -28,6 +28,11 @@ export type NormalizedImageOptions = {
  * emitting those keys would be a no-op at best and a false claim of control at
  * worst. See each branch for the file:line citations.
  *
+ * Because the native adapters derive the ratio by gcd reduction of the
+ * `width`/`height`, those dimensions must reduce to the requested ratio; the
+ * tool's `ASPECT_SIZES` table is shaped for that (tools/image-generation.ts),
+ * and `auto`/`21:9`/`19.5:9`/`9:19.5` cannot be reached as their own string.
+ *
  * Purity: no provider instances, no env reads, no I/O. Absent inputs emit no
  * key at all (not `undefined`), because these objects are spread into a request
  * body where an explicit `undefined` is a real difference from an omission.

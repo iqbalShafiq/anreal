@@ -5,6 +5,7 @@ import {
   createCompletionModelFor,
   describeModel,
   effortVocabulary,
+  isRepresentableAspectRatio,
   listProviderModels,
   redactProviderError,
   type ImageStyle,
@@ -294,6 +295,15 @@ function optionalPositiveInteger(path: string, value: unknown): number | null {
  * `quality`/`background` are honoured, and the permitted `n.max` — the tool's
  * own execution cap (`MAX_MODEL_IMAGES`) for `openrouter-images`, and 1 for the
  * native kinds, which pin `n: 1` on the wire.
+ *
+ * `aspectRatios` is a key every kind carries, but for the native kinds its
+ * *values* are constrained by the ratio defect this allow-list records: the
+ * adapters derive the ratio from the tool's `width`/`height` by gcd reduction,
+ * so only ratios that are already reduced integer fractions can be reached as
+ * themselves. `21:9` (→ `7:3`), `19.5:9` (→ `13:6`), `9:19.5` (→ `6:13`) and
+ * the `auto` sentinel (→ `1:1`) are refused for a native kind — see
+ * `isRepresentableAspectRatio` in the tool, which owns the table. No dimensions
+ * are invented for them: `21:9` cannot be a reduced fraction at all.
  */
 const IMAGE_CAPABILITY_ALLOWLIST: Record<
   Exclude<ImageStyle, "none">,
@@ -312,6 +322,17 @@ const IMAGE_CAPABILITY_ALLOWLIST: Record<
 
 /** `n` reaches the wire only for the OpenRouter-shaped adapter. */
 const IMAGE_STYLE_FIXED_N: ReadonlySet<ImageStyle> = new Set([
+  "gemini-native",
+  "grok-native",
+]);
+
+/**
+ * The styles that derive the output ratio from the tool's `width`/`height` by
+ * gcd reduction rather than from a ratio string. Same membership as
+ * `IMAGE_STYLE_FIXED_N` today, but a distinct concept: those two adapters can
+ * only reach a ratio whose key is already a reduced integer fraction.
+ */
+const GCD_DERIVED_STYLES: ReadonlySet<ImageStyle> = new Set([
   "gemini-native",
   "grok-native",
 ]);
@@ -363,6 +384,25 @@ function validateImageCapabilities(
       "imageCapabilities",
       "imageCapabilities.n.max must be 1 for this provider kind",
     );
+  }
+
+  // The native adapters derive their ratio by reducing the tool's
+  // `width`/`height` and either filter it through their supported set (Grok
+  // collapses anything else to "auto", dist/index.js:190-201) or send it
+  // unfiltered (Gemini, dist/index.js:1391-1395). `21:9`, `19.5:9` and `9:19.5`
+  // are not reduced integer fractions, so no dimensions can reach the adapter
+  // as those strings, and `auto` is a sentinel that reduces to `1:1`. Declaring
+  // one would advertise a ratio the kind cannot honour, so it is refused here.
+  if (GCD_DERIVED_STYLES.has(style)) {
+    const unreachable = (parsed.aspectRatios ?? []).filter(
+      (ratio) => !isRepresentableAspectRatio(ratio),
+    );
+    if (unreachable.length > 0) {
+      return fail(
+        "imageCapabilities",
+        `imageCapabilities.aspectRatios are not reachable for this provider kind: ${unreachable.sort().join(", ")}`,
+      );
+    }
   }
 
   return parsed as unknown as Record<string, unknown>;

@@ -81,6 +81,8 @@ import {
   WEB_SEARCH_TOOL_DEFINITIONS,
   normalizePageImages,
   OpenRouterImageGenerationModel,
+  createImageGenerationModelFor,
+  normalizedImageOptionsToProviderOptions,
   parseSiteBrief,
   compactorProviderOptionsFor,
   createCompletionModelFor,
@@ -99,11 +101,14 @@ import {
   type AgentContextBlock,
   type ToolWaitProgress,
   type ImageCapabilitySet,
+  type ImageProviderOptionsBuilder,
+  type ImageProviderOptionParams,
   type ProfileScope,
   type ProviderKind,
   type StreamingCompletionModel,
   type ProfileSectionKey,
   type ReasoningEffort,
+  PROVIDER_KIND_META,
 } from "@anreal/agent";
 import {
   parseMessage,
@@ -112,6 +117,7 @@ import {
   type UserContentPart,
 } from "@anvia/core/completion";
 import type { AnyTool, CompletionModel, MemoryStore } from "@anvia/core";
+import type { ImageGenerationModel } from "@anvia/core/image-generation";
 import { createSummaryMemoryCompactor } from "@anvia/core/memory";
 import type { McpServer } from "@anvia/core/mcp";
 import { resolveActiveDocuments } from "../documents/service.js";
@@ -249,7 +255,7 @@ export function imageGenerationConfig() {
   return apiKey && baseUrl ? { apiKey, baseUrl } : null;
 }
 
-type FrozenImageModelCapability = {
+export type FrozenImageModelCapability = {
   modelId: string;
   capabilities: ImageCapabilitySet;
 };
@@ -777,6 +783,8 @@ export type ChatAgentRecipeResolverDependencies = {
   webSearchConfig?: typeof webSearchConfig;
   imageGenerationConfig?: typeof imageGenerationConfig;
   loadImageModelCapabilities?: () => Promise<FrozenImageModelCapability[]>;
+  /** Whether the user has a BYOK image model; drives build-time availability. */
+  byokImageAvailability?: (userId: string) => Promise<boolean>;
   profilingEnabled?: () => boolean;
   loadProfileData?: typeof loadProfileData;
   deepResearchLimits?: typeof deepResearchLimits;
@@ -887,6 +895,247 @@ export async function resolveRecipeCompletionModel(
     },
     reasoningEfforts: model.reasoningEfforts,
   });
+}
+
+/**
+ * The image rows the BYOK image resolver reads. Narrowed the same way
+ * `RecipeModelDb` is, so a focused test can inject a fake without a live client.
+ */
+export type RecipeImageDb = {
+  providerModel: {
+    findFirst(args: unknown): Promise<unknown | null>;
+  };
+};
+
+/** An owned image-model row joined to its connection's credential reference. */
+export type RecipeImageModelRow = {
+  slug: string;
+  upstreamId: string;
+  outputType: string;
+  imageCapabilities: unknown;
+  connection: {
+    kind: string;
+    baseUrl: string | null;
+    credentialsRef: string;
+  } | null;
+};
+
+/** A BYOK image target resolved at worker time, never frozen into the recipe. */
+export type ByokImageTarget = {
+  /** The slug the run addresses this model by (what the tool resolves). */
+  modelId: string;
+  /** The stored upstream id the provider is addressed by on the wire. */
+  upstreamId: string;
+  kind: ProviderKind;
+  model: ImageGenerationModel<unknown>;
+  /** The user's declared set, already validated at save time. */
+  capabilities: ImageCapabilitySet;
+  /** Adapter-shaped `providerOptions` builder for this kind. */
+  imageProviderOptions: ImageProviderOptionsBuilder;
+};
+
+/**
+ * Whether a connection kind speaks an image endpoint. `PROVIDER_KIND_META` is
+ * the authority, so this never drifts from the factory's own dispatch.
+ */
+function connectionCanGenerateImages(kind: string): boolean {
+  const meta = PROVIDER_KIND_META[kind as ProviderKind];
+  return meta !== undefined && meta.imageStyle !== "none";
+}
+
+/** The where-clause every BYOK image read shares, so the two paths agree. */
+function ownedImageModelWhere(userId: string, slug?: string) {
+  return {
+    userId,
+    isActive: true,
+    outputType: "image",
+    connection: { isActive: true },
+    ...(slug !== undefined ? { slug } : {}),
+  };
+}
+
+/**
+ * The image option builder for a kind: the structural keys the tool validated
+ * against the declared capability, then the adapter-shaped extras from the
+ * normaliser.
+ *
+ * Only the OpenRouter-shaped kind accepts a pixel `size`, and only it honours a
+ * per-request `model` — its adapter merges `providerOptions` into the body
+ * *after* setting its own `model`, so the tool's slug would otherwise reach the
+ * provider (Review Focus item 5). Emitting the stored `upstreamId` here keeps
+ * the wire id the same one the constructor was given. The native kinds receive
+ * nothing, because their adapters clobber every key a caller could set (see
+ * `providers/image-options.ts`).
+ */
+export function imageProviderOptionsForKind(
+  kind: ProviderKind,
+  upstreamId: string,
+): ImageProviderOptionsBuilder {
+  const style = PROVIDER_KIND_META[kind].imageStyle;
+  return (params: ImageProviderOptionParams) => ({
+    ...(style === "openrouter-images"
+      ? {
+          // The stored upstream id, never the sanitized slug the tool passes.
+          model: upstreamId,
+          ...(params.size ? { size: params.size } : {}),
+        }
+      : {}),
+    ...normalizedImageOptionsToProviderOptions(kind, {
+      ...(params.aspectRatio !== undefined ? { aspectRatio: params.aspectRatio } : {}),
+      ...(params.quality !== undefined ? { quality: params.quality } : {}),
+      ...(params.background !== undefined ? { background: params.background } : {}),
+      ...(params.n !== undefined ? { n: params.n } : {}),
+    }),
+  });
+}
+
+/**
+ * Resolve the session's pinned BYOK image model at worker time. The recipe
+ * freezes only *whether* image generation is available; which target is used is
+ * decided here, exactly as the compactor's role is (no recipe change).
+ *
+ * Returns `null` — never throws — on any missing row, an undecodable credential
+ * reference, or an invalid capability declaration, so a model or connection
+ * deleted mid-run degrades to the shared env path instead of killing the run.
+ */
+export async function resolveRecipeImageTarget(
+  recipe: ChatAgentRecipe,
+  db: RecipeImageDb,
+  options: { fetchFn?: typeof fetch } = {},
+): Promise<ByokImageTarget | null> {
+  const slug = recipe.imageGenSettings?.modelId;
+  if (!slug) return null;
+
+  let row: RecipeImageModelRow | null;
+  try {
+    row = (await db.providerModel.findFirst({
+      where: ownedImageModelWhere(recipe.identity.userId, slug),
+      include: {
+        connection: {
+          select: { kind: true, baseUrl: true, credentialsRef: true },
+        },
+      },
+    })) as RecipeImageModelRow | null;
+  } catch (error) {
+    console.warn("[chat] BYOK image-model lookup failed; using the shared key", {
+      slug,
+      error,
+    });
+    return null;
+  }
+  if (!row || !row.connection || !connectionCanGenerateImages(row.connection.kind)) {
+    return null;
+  }
+
+  const kind = row.connection.kind as ProviderKind;
+  let credentials;
+  try {
+    credentials = decodeProviderCredentials(row.connection.credentialsRef);
+  } catch (error) {
+    console.warn(
+      "[chat] BYOK image-model credentials could not be decoded; using the shared key",
+      { slug: row.slug, error },
+    );
+    return null;
+  }
+
+  let capabilities: ImageCapabilitySet;
+  try {
+    capabilities = parseImageCapabilities(row.imageCapabilities);
+  } catch (error) {
+    console.warn(
+      "[chat] BYOK image-model capabilities are invalid; using the shared key",
+      { slug: row.slug, error },
+    );
+    return null;
+  }
+
+  let model: ImageGenerationModel<unknown> | null;
+  try {
+    model = createImageGenerationModelFor({
+      kind,
+      // The stored upstream id, never parsed back out of the sanitized slug.
+      modelId: row.upstreamId,
+      apiKey: credentials.apiKey,
+      baseUrl: row.connection.baseUrl,
+      ...(options.fetchFn ? { fetchFn: options.fetchFn } : {}),
+    });
+  } catch (error) {
+    console.warn("[chat] BYOK image model could not be built; using the shared key", {
+      slug: row.slug,
+      error,
+    });
+    return null;
+  }
+  if (!model) return null;
+
+  return {
+    modelId: row.slug,
+    upstreamId: row.upstreamId,
+    kind,
+    model,
+    capabilities,
+    imageProviderOptions: imageProviderOptionsForKind(kind, row.upstreamId),
+  };
+}
+
+/**
+ * Whether the user has any active BYOK image model on an image-capable
+ * connection. This is the build-time availability read; it shares the
+ * resolver's where-clause (`ownedImageModelWhere`) so the two cannot disagree.
+ * A read failure is treated as "none" rather than failing the recipe.
+ */
+export async function hasByokImageModel(
+  db: RecipeImageDb,
+  userId: string,
+): Promise<boolean> {
+  try {
+    const row = (await db.providerModel.findFirst({
+      where: ownedImageModelWhere(userId),
+      include: { connection: { select: { kind: true } } },
+    })) as { connection: { kind: string } | null } | null;
+    return (
+      row !== null &&
+      row.connection !== null &&
+      connectionCanGenerateImages(row.connection.kind)
+    );
+  } catch (error) {
+    console.warn("[chat] BYOK image-model availability read failed", { error });
+    return false;
+  }
+}
+
+/**
+ * Choose the image model the run generates with. A pinned BYOK target wins;
+ * otherwise the shared env pair builds exactly the model the run built before
+ * this phase (`OpenRouterImageGenerationModel` with no `defaultModel`).
+ */
+export function selectRunImageModel(input: {
+  envConfig: { apiKey: string; baseUrl: string } | null;
+  byok: ByokImageTarget | null;
+}): ImageGenerationModel<unknown> | null {
+  if (input.byok) return input.byok.model;
+  if (!input.envConfig) return null;
+  return new OpenRouterImageGenerationModel({
+    apiKey: input.envConfig.apiKey,
+    baseUrl: input.envConfig.baseUrl,
+  });
+}
+
+/**
+ * The `capabilities(modelId)` source for the image tools: the frozen catalog,
+ * overridden by a BYOK target's own declaration for its own id (Design ruling
+ * 4 — the save-time allow-list is what makes that declaration safe to trust).
+ */
+export function buildImageCapabilitySource(
+  frozen: readonly FrozenImageModelCapability[],
+  byok: ByokImageTarget | null,
+): Map<string, ImageCapabilitySet> {
+  const source = new Map<string, ImageCapabilitySet>(
+    frozen.map((entry) => [entry.modelId, entry.capabilities]),
+  );
+  if (byok) source.set(byok.modelId, byok.capabilities);
+  return source;
 }
 
 export type ProviderShape = {
@@ -1016,6 +1265,7 @@ export type ChatRunReconstructionRuntime = {
   createAgent?: typeof createAgent;
   createCompletionModel?: typeof createCompletionModel;
   resolveRecipeCompletionModel?: typeof resolveRecipeCompletionModel;
+  resolveRecipeImageTarget?: typeof resolveRecipeImageTarget;
   createMemoryStore?: (database: PrismaClient) => MemoryStore;
   sessionExists?: (sessionId: string, userId: string) => Promise<boolean>;
   onToolWaitProgress?: (event: ToolWaitProgress) => void | Promise<void>;
@@ -1050,6 +1300,9 @@ export async function resolveChatAgentRecipe(
     dependencies?.imageGenerationConfig ?? imageGenerationConfig;
   const readImageModelCapabilities =
     dependencies?.loadImageModelCapabilities ?? loadImageModelCapabilities;
+  const readByokImageAvailability =
+    dependencies?.byokImageAvailability ??
+    ((userId: string) => hasByokImageModel(prisma as RecipeImageDb, userId));
   // Keep profile policy resolution data-only. profileConfig() also creates a
   // completion-model handle for the profile worker, which does not belong in
   // the authenticated recipe resolver.
@@ -1194,11 +1447,21 @@ export async function resolveChatAgentRecipe(
   }
 
   const imageConfig = readImageGenerationConfig();
-  const imageGenerationAvailable = imageConfig !== null;
+  // A user with a BYOK image model can generate even without the shared env
+  // pair. The read path is shared with the worker-time resolver so the two
+  // cannot disagree about what "available" means.
+  const byokImageAvailable = await readByokImageAvailability(input.userId);
+  const imageGenerationAvailable = imageConfig !== null || byokImageAvailable;
   const imageModelCapabilities = imageGenerationAvailable
     ? await readImageModelCapabilities()
     : [];
-  if (imageGenerationAvailable && imageModelCapabilities.length === 0) {
+  // A corrupt frozen catalog is a configuration error — but a BYOK-only run
+  // has its own capability source, so an empty catalog must not trip it.
+  if (
+    imageGenerationAvailable &&
+    imageModelCapabilities.length === 0 &&
+    !byokImageAvailable
+  ) {
     throw new Error("image-generation capability catalog is empty");
   }
   if (imageGenerationAvailable) {
@@ -1448,13 +1711,28 @@ export async function reconstructChatRunInput(input: {
   const profilingEnabled = recipe.capabilities.profilingEnabled;
   const resolvedWebConfig = webSearchConfig();
   const resolvedImageConfig = imageGenerationConfig();
+  // Resolve the BYOK image target at worker time. The resolver never throws, so
+  // a model/connection row deleted after the recipe was frozen degrades here.
+  const resolveImageTarget =
+    runtime?.resolveRecipeImageTarget ?? resolveRecipeImageTarget;
+  const byokImageTarget = recipe.capabilities.imageGenerationAvailable
+    ? await resolveImageTarget(recipe, prisma)
+    : null;
 
   if (recipe.capabilities.webSearchAvailable && !resolvedWebConfig) {
     throw new Error(
       "frozen web-search capability is unavailable in this worker process",
     );
   }
-  if (recipe.capabilities.imageGenerationAvailable && !resolvedImageConfig) {
+  if (
+    recipe.capabilities.imageGenerationAvailable &&
+    !resolvedImageConfig &&
+    !byokImageTarget
+  ) {
+    // Accounting for a BYOK target: the frozen capability is satisfied by the
+    // shared env pair *or* a resolvable BYOK target. The BYOK resolver itself
+    // never throws — it returns null with a warning — so the only failure left
+    // here is a frozen surface the worker genuinely cannot reconstruct.
     throw new Error(
       "frozen image-generation capability is unavailable in this worker process",
     );
@@ -2072,22 +2350,26 @@ export async function reconstructChatRunInput(input: {
     );
   }
 
-  // Image generation tools: registered only when the image provider env pair
-  // is set. Grants/overrides come from the approval registry (live per-call
-  // reads); references resolve to generated or document images.
-  const imgConfig = recipe.capabilities.imageGenerationAvailable
-    ? resolvedImageConfig
-    : null;
-  const imageGenerationAvailable = recipe.capabilities.imageGenerationAvailable;
-  if (imageGenerationAvailable && imgConfig) {
-    // Model/image capability policy was resolved into the recipe. Unknown
+  // Image generation tools: registered only when a model source exists — a
+  // BYOK target the session pinned, else the shared provider env pair. Grants/
+  // overrides come from the approval registry (live per-call reads); references
+  // resolve to generated or document images.
+  const runImageModel = selectRunImageModel({
+    envConfig: resolvedImageConfig,
+    byok: byokImageTarget,
+  });
+  const imageGenerationAvailable =
+    recipe.capabilities.imageGenerationAvailable && runImageModel !== null;
+  if (imageGenerationAvailable && runImageModel) {
+    // Model/image capability policy was resolved into the recipe; a BYOK
+    // target's own declaration overrides the frozen catalog for its id. Unknown
     // ids intentionally use the image tool's bounded defaults on resume.
-    const capabilities = new Map<string, ImageCapabilitySet>(
-      recipe.capabilities.imageModelCapabilities.map((entry) => [
-        entry.modelId,
-        entry.capabilities,
-      ]),
+    const capabilities = buildImageCapabilitySource(
+      recipe.capabilities.imageModelCapabilities,
+      byokImageTarget,
     );
+    // The frozen catalog guard exists to catch a corrupt catalog; a BYOK-only
+    // run serves capabilities from its own row and must not trip it.
     if (capabilities.size === 0) {
       throw new Error(
         "frozen image-generation capability catalog is empty",
@@ -2106,10 +2388,7 @@ export async function reconstructChatRunInput(input: {
     };
     tools.push(
       ...createImageGenerationTools({
-        model: new OpenRouterImageGenerationModel({
-          apiKey: imgConfig.apiKey,
-          baseUrl: imgConfig.baseUrl,
-        }),
+        model: runImageModel,
         store: {
           saveGeneratedImage: (input) => getImageStore().saveGeneratedImage(input),
         },
@@ -2123,6 +2402,9 @@ export async function reconstructChatRunInput(input: {
         resolveReference: (imageId) =>
           resolveImageReference({ imageId, userId, sessionId }, resolveDeps),
         capabilities: (modelId) => capabilities.get(modelId) ?? null,
+        ...(byokImageTarget
+          ? { imageProviderOptions: byokImageTarget.imageProviderOptions }
+          : {}),
         defaultSettings: recipe.imageGenSettings ?? undefined,
       }),
     );

@@ -364,6 +364,86 @@ describe("validateModelInput", () => {
     });
   });
 
+  it.each([
+    ["21:9", "7:3"],
+    ["9:19.5", "6:13"],
+    ["19.5:9", "13:6"],
+  ])(
+    "rejects the unreachable ratio %s for a gcd-derived native kind",
+    (ratio) => {
+      // These are not reduced integer fractions, so no width/height can reach
+      // the adapter as this string: Grok collapses it to "auto" and Gemini sends
+      // the reduction, which its API rejects. Declaring one would advertise a
+      // ratio the kind cannot honour, so the save path refuses it.
+      for (const imageStyle of ["gemini-native", "grok-native"] as const) {
+        expect(() =>
+          validateModelInput(
+            {
+              upstreamId: "x",
+              outputType: "image",
+              imageCapabilities: {
+                n: { min: 1, max: 1 },
+                aspectRatios: ["1:1", ratio],
+                resolutions: ["1K"],
+              },
+            },
+            { imageStyle },
+          ),
+        ).toThrow(/aspectRatios are not reachable/i);
+      }
+    },
+  );
+
+  it("rejects the auto sentinel for a native kind but accepts it for openrouter", () => {
+    // `auto` is not a ratio a native adapter can be asked for; it reduces to
+    // 1:1. The OpenRouter-shaped kind forwards it to the provider as-is.
+    expect(() =>
+      validateModelInput(
+        {
+          upstreamId: "gemini-3.1-flash-image",
+          outputType: "image",
+          imageCapabilities: {
+            n: { min: 1, max: 1 },
+            aspectRatios: ["1:1", "auto"],
+            resolutions: ["1K"],
+          },
+        },
+        { imageStyle: "gemini-native" },
+      ),
+    ).toThrow(/aspectRatios are not reachable/i);
+
+    const value = validateModelInput(
+      {
+        upstreamId: "openai/gpt-5-image-mini",
+        outputType: "image",
+        imageCapabilities: {
+          n: { min: 1, max: 4 },
+          aspectRatios: ["1:1", "auto"],
+          sizes: ["1024x1024", "auto"],
+        },
+      },
+      { imageStyle: "openrouter-images" },
+    );
+    expect(value.imageCapabilities?.aspectRatios).toEqual(["1:1", "auto"]);
+  });
+
+  it("rejects an unknown ratio string for a native kind", () => {
+    expect(() =>
+      validateModelInput(
+        {
+          upstreamId: "grok-imagine-image",
+          outputType: "image",
+          imageCapabilities: {
+            n: { min: 1, max: 1 },
+            aspectRatios: ["1:1", "5:7"],
+            resolutions: ["1K"],
+          },
+        },
+        { imageStyle: "grok-native" },
+      ),
+    ).toThrow(/aspectRatios are not reachable/i);
+  });
+
   it("rejects a quality control the grok-native kind cannot honour", () => {
     expect(() =>
       validateModelInput(

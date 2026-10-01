@@ -5,9 +5,11 @@ import type {
   ImageGenerationModel,
 } from "@anvia/core/image-generation";
 import {
+  ASPECT_SIZES,
   aspectRatioToSize,
   buildImageGenerationInstruction,
   createImageGenerationTools,
+  defaultImageProviderOptions,
   IMAGE_GENERATION_INSTRUCTION,
   resolveImageRequestParams,
   type GeneratedImageRecord,
@@ -15,11 +17,47 @@ import {
   type ImageGenerationToolScope,
 } from "./image-generation.js";
 
+/**
+ * The reduction the two gcd-derived native adapters perform
+ * (`@anvia/grok` dist/index.js:190-201, `@anvia/gemini` dist/index.js:1391-1395):
+ * `${w/gcd}:${h/gcd}`. Mirrored here so the table's agreement with the adapters
+ * is asserted by computation rather than by eyeballing.
+ */
+function gcd(left: number, right: number): number {
+  let a = left;
+  let b = right;
+  while (b !== 0) {
+    [a, b] = [b, a % b];
+  }
+  return a;
+}
+
+function reduce(width: number, height: number): string {
+  const divisor = gcd(width, height);
+  return `${width / divisor}:${height / divisor}`;
+}
+
+/**
+ * Ratios whose literal key is not a reduced integer fraction, so no integer
+ * dimensions can reduce back to it. They stay in the table (the catalog
+ * advertises them), and the per-kind allow-list refuses to let a native kind
+ * declare them. The expectation is the adapter's derived string, recorded so
+ * the set cannot grow silently.
+ */
+const UNREPRESENTABLE_RATIOS: Record<string, string> = {
+  "21:9": "7:3",
+  "9:19.5": "6:13",
+  "19.5:9": "13:6",
+};
+
+/** `auto` is a sentinel, not a ratio; its dimensions only need to be square. */
+const NON_RATIO_KEYS = new Set(["auto"]);
+
 const DEFAULT_MODEL = "test-model";
 const AUTHORITATIVE_CAPABILITY = {
   nMax: 4,
   aspectRatios: ["1:1", "16:9"],
-  sizes: ["1024x1024", "1344x768"],
+  sizes: ["1024x1024", "1280x720"],
   quality: ["medium", "high"],
   background: ["opaque", "transparent"],
 };
@@ -435,11 +473,10 @@ describe("createImageGenerationTools", () => {
       await tools[0]!.call({ prompt: "a red fox" });
 
       const request = imageGeneration.mock.calls[0]![0];
-      expect(request.width).toBe(1344);
-      expect(request.height).toBe(768);
+      expect(reduce(request.width, request.height)).toBe("16:9");
       expect(request.providerOptions).toEqual({
         model: "default-model",
-        size: "1344x768",
+        size: `${request.width}x${request.height}`,
       });
       expect(saveGeneratedImage).toHaveBeenCalledWith(
         expect.objectContaining({ modelId: "default-model" }),
@@ -564,8 +601,8 @@ describe("createImageGenerationTools", () => {
 describe("aspectRatioToSize", () => {
   it("returns the mapped dimensions for known ratios", () => {
     expect(aspectRatioToSize("1:1")).toEqual({ width: 1024, height: 1024 });
-    expect(aspectRatioToSize("16:9")).toEqual({ width: 1344, height: 768 });
-    expect(aspectRatioToSize("9:16")).toEqual({ width: 768, height: 1344 });
+    expect(reduce(aspectRatioToSize("16:9").width, aspectRatioToSize("16:9").height)).toBe("16:9");
+    expect(reduce(aspectRatioToSize("9:16").width, aspectRatioToSize("9:16").height)).toBe("9:16");
     expect(aspectRatioToSize("auto")).toEqual({ width: 1024, height: 1024 });
   });
 
@@ -646,6 +683,183 @@ describe("resolveImageRequestParams", () => {
     const g = resolveImageRequestParams("1:1", gemini);
     expect(g.size).toBeUndefined();
     expect(g.aspectRatio).toBe("1:1");
+  });
+});
+
+describe("ASPECT_SIZES agreement with the gcd-derived native adapters", () => {
+  it("reduces every representable entry to its own key", () => {
+    for (const [key, { width, height }] of Object.entries(ASPECT_SIZES)) {
+      if (NON_RATIO_KEYS.has(key)) continue;
+      if (key in UNREPRESENTABLE_RATIOS) continue;
+      expect(reduce(width, height)).toBe(key);
+    }
+  });
+
+  it("leaves a sentinel entry square", () => {
+    for (const key of NON_RATIO_KEYS) {
+      const dimensions = ASPECT_SIZES[key]!;
+      expect(dimensions.width).toBe(dimensions.height);
+    }
+  });
+
+  it("records the exact reduction for the ratios that cannot be represented", () => {
+    // 21:9 and the 19.5:9 pair are not reduced integer fractions, so no
+    // dimensions can reach the adapters as their literal key. Asserting the
+    // derived string keeps the documented set honest — a new unrepresentable
+    // entry fails here until it is added with its real reduction.
+    expect(Object.keys(UNREPRESENTABLE_RATIOS).sort()).toEqual(
+      Object.keys(ASPECT_SIZES)
+        .filter((key) => !NON_RATIO_KEYS.has(key))
+        .filter((key) => reduce(ASPECT_SIZES[key]!.width, ASPECT_SIZES[key]!.height) !== key)
+        .sort(),
+    );
+    for (const [key, expected] of Object.entries(UNREPRESENTABLE_RATIOS)) {
+      const { width, height } = ASPECT_SIZES[key]!;
+      expect(reduce(width, height)).toBe(expected);
+    }
+  });
+
+  it("keeps 16:9 and 9:16 reachable as their own ratio", () => {
+    // The defect this fix removes: 1344x768 has gcd 192 and reduced to 7:4, so
+    // Grok collapsed a 16:9 request to "auto" and Gemini sent "7:4".
+    expect(reduce(ASPECT_SIZES["16:9"]!.width, ASPECT_SIZES["16:9"]!.height)).toBe(
+      "16:9",
+    );
+    expect(reduce(ASPECT_SIZES["9:16"]!.width, ASPECT_SIZES["9:16"]!.height)).toBe(
+      "9:16",
+    );
+  });
+});
+
+describe("imageProviderOptions injection", () => {
+  it("defaults to the OpenRouter-shaped object the tool has always sent", () => {
+    expect(
+      defaultImageProviderOptions({
+        size: "1024x1024",
+        aspectRatio: "16:9",
+        resolution: "1K",
+        quality: "high",
+        background: "transparent",
+        n: 2,
+      }),
+    ).toEqual({
+      size: "1024x1024",
+      aspect_ratio: "16:9",
+      resolution: "1K",
+      quality: "high",
+      background: "transparent",
+      output_format: "png",
+      n: 2,
+    });
+  });
+
+  it("omits absent keys rather than emitting undefined", () => {
+    expect(defaultImageProviderOptions({})).toEqual({});
+  });
+
+  it("replaces the adapter-shaped keys while keeping model and extraParams", async () => {
+    const { scope, imageGeneration, saveGeneratedImage } = makeScope({
+      // A native-shaped capability, where the tool computes aspect_ratio +
+      // resolution instead of a pixel size.
+      capabilities: () => ({
+        nMax: 4,
+        aspectRatios: ["1:1"],
+        resolutions: ["1K"],
+        quality: ["high"],
+        background: ["transparent"],
+      }),
+      imageProviderOptions: (params) => {
+        expect(params).toEqual({
+          aspectRatio: "1:1",
+          resolution: "1K",
+          quality: "high",
+          background: "transparent",
+          n: 2,
+        });
+        return {};
+      },
+    });
+    imageGeneration.mockResolvedValue(response(image(1)));
+    saveGeneratedImage.mockResolvedValue(record("rec-1"));
+    const tools = createImageGenerationTools(scope);
+
+    await tools[0]!.call({
+      prompt: "a red fox",
+      quality: "high",
+      background: "transparent",
+      n: 2,
+    });
+
+    const request = imageGeneration.mock.calls[0]![0];
+    // `model` is the tool's, not the builder's: it survives for every adapter.
+    expect(request.providerOptions).toEqual({ model: DEFAULT_MODEL });
+  });
+
+  it("keeps input_references when a builder is injected for edits", async () => {
+    const { scope, imageGeneration, saveGeneratedImage } = makeScope({
+      imageProviderOptions: () => ({}),
+      resolveReference: async () => ({
+        mediaType: "image/png",
+        buffer: new Uint8Array([1, 2, 3]),
+      }),
+    });
+    imageGeneration.mockResolvedValue(response(image(9)));
+    saveGeneratedImage.mockResolvedValue(record("rec-1"));
+    const tools = createImageGenerationTools(scope);
+
+    await tools[1]!.call({ prompt: "make it red", referenceImageId: "img-1" });
+
+    const request = imageGeneration.mock.calls[0]![0];
+    expect(request.providerOptions).toEqual({
+      model: DEFAULT_MODEL,
+      input_references: [
+        { type: "image_url", image_url: { url: "data:image/png;base64,AQID" } },
+      ],
+    });
+  });
+
+  it("reaches the adapter with dimensions whose reduction is 16:9", async () => {
+    const { scope, imageGeneration } = makeScope({
+      defaultSettings: { modelId: DEFAULT_MODEL, aspectRatio: "16:9" },
+      capabilities: () => ({
+        nMax: 1,
+        aspectRatios: ["1:1", "16:9"],
+        resolutions: ["1K"],
+      }),
+      imageProviderOptions: defaultImageProviderOptions,
+    });
+    imageGeneration.mockResolvedValue(response(image(1)));
+    const tools = createImageGenerationTools(scope);
+
+    await tools[0]!.call({ prompt: "a red fox" });
+
+    const request = imageGeneration.mock.calls[0]![0];
+    // Assert the reduction, not the raw numbers, so a future re-sizing of the
+    // table does not break the agreement this test exists to protect.
+    expect(reduce(request.width, request.height)).toBe("16:9");
+  });
+
+  it("sends no aspect_ratio on the Grok path, whose adapter derives and overwrites it", async () => {
+    // The Grok adapter spreads providerOptions first and then writes its own
+    // `aspect_ratio` (dist/index.js:144-153), so a key here could never reach
+    // the wire. Assert the absence so nobody re-adds one.
+    const { scope, imageGeneration } = makeScope({
+      defaultSettings: { modelId: DEFAULT_MODEL, aspectRatio: "16:9" },
+      capabilities: () => ({
+        nMax: 1,
+        aspectRatios: ["1:1", "16:9"],
+        resolutions: ["1K"],
+      }),
+      imageProviderOptions: () => ({}),
+    });
+    imageGeneration.mockResolvedValue(response(image(1)));
+    const tools = createImageGenerationTools(scope);
+
+    await tools[0]!.call({ prompt: "a red fox" });
+
+    const request = imageGeneration.mock.calls[0]![0];
+    expect("aspect_ratio" in request.providerOptions).toBe(false);
+    expect(reduce(request.width, request.height)).toBe("16:9");
   });
 });
 
