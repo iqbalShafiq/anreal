@@ -163,9 +163,9 @@ export function modelDraftFromPrefill(prefill: ProviderModelPrefill): ModelDraft
 }
 
 /**
- * The output type the model editor submits. Until BYOK image generation is
- * wired (Phase D) a new model is always text; an existing row keeps whatever it
- * carries, so editing never silently rewrites an image model to text.
+ * The output type the model editor submits. A new model defaults to text; an
+ * existing row keeps whatever it carries, so editing never silently rewrites an
+ * image model to text.
  */
 export function modelOutputType(
   existing: "text" | "image" | null | undefined,
@@ -174,7 +174,7 @@ export function modelOutputType(
 }
 
 /**
- * A one-line warning when the user's reasoning set diverges from the adapter's
+ * One line warning when the user's reasoning set diverges from the adapter's
  * declared set, or `null` when they agree or the adapter declares nothing.
  */
 export function effortWarning(
@@ -192,4 +192,307 @@ export function effortWarning(
     parts.push(`the adapter also declares ${missing.join(", ")}`);
   }
   return `Custom reasoning set: ${parts.join("; ")}.`;
+}
+
+/** The image capability style a kind carries, from `GET /api/providers/kinds`. */
+export type ImageStyle =
+  | "openrouter-images"
+  | "gemini-native"
+  | "grok-native"
+  | "none";
+
+/** One option of the output-type selector. */
+export type ImageOutputTypeOption = {
+  value: "text" | "image";
+  label: string;
+};
+
+/**
+ * The output-type choices for a connection's kind. `text` is always offered;
+ * `image` is offered only when the kind has an image endpoint, so the selector
+ * can never submit an image row the server would refuse.
+ */
+export function imageOutputTypeOptions(
+  imageStyle: ImageStyle,
+): ImageOutputTypeOption[] {
+  const options: ImageOutputTypeOption[] = [
+    { value: "text", label: "Text" },
+  ];
+  if (imageStyle !== "none") {
+    options.push({ value: "image", label: "Image" });
+  }
+  return options;
+}
+
+/**
+ * The reasoning set to submit for an output type. The server forces `[]` for an
+ * image model, so the UI drops the value too rather than showing a selection
+ * the server will discard.
+ */
+export function reasoningEffortsForOutputType(
+  outputType: "text" | "image",
+  efforts: string[],
+): string[] {
+  return outputType === "image" ? [] : efforts;
+}
+
+/**
+ * What each image-capable kind can honour, derived from the same per-kind
+ * allow-list the server validates against
+ * (`apps/api/src/modules/provider-connections/service.ts`):
+ *
+ * - `openrouter-images` merges every declared control into `POST /images`, so
+ *   it keeps `sizes`, `quality`, `background` and the tool's full `n.max` cap.
+ * - `gemini-native`/`grok-native` overwrite or ignore optional controls and pin
+ *   `n: 1` on the wire, so they keep only `resolutions` and a fixed `n.max` of
+ *   1. Both derive their ratio from the tool's `width`/`height` by gcd
+ *   reduction, so only ratios whose key is already a reduced fraction can be
+ *   reached.
+ */
+export type ImageCapabilityLimits = {
+  /** The one sizing key the kind accepts; the other is never emitted. */
+  sizing: "sizes" | "resolutions";
+  /** The highest `n.max` the server will accept for this kind. */
+  nMax: number;
+  supportsQuality: boolean;
+  supportsBackground: boolean;
+  /** True when the adapter derives the ratio by gcd reduction. */
+  gcdDerivedRatios: boolean;
+};
+
+export function imageCapabilityLimits(
+  imageStyle: ImageStyle,
+): ImageCapabilityLimits | null {
+  switch (imageStyle) {
+    case "openrouter-images":
+      return {
+        sizing: "sizes",
+        nMax: MAX_MODEL_IMAGES,
+        supportsQuality: true,
+        supportsBackground: true,
+        gcdDerivedRatios: false,
+      };
+    case "gemini-native":
+    case "grok-native":
+      return {
+        sizing: "resolutions",
+        nMax: 1,
+        supportsQuality: false,
+        supportsBackground: false,
+        gcdDerivedRatios: true,
+      };
+    case "none":
+      return null;
+  }
+}
+
+/** The tool's execution cap, mirrored from `packages/agent/src/tools/image-generation.ts`. */
+const MAX_MODEL_IMAGES = 10;
+
+/**
+ * The gcd-derived adapters' canonical sizes, mirrored from
+ * `ASPECT_SIZES` in `packages/agent/src/tools/image-generation.ts`. Only the
+ * reduction matters here: it decides which ratio strings a native kind can
+ * reach.
+ */
+const ASPECT_SIZES: Record<string, { width: number; height: number }> = {
+  "1:1": { width: 1024, height: 1024 },
+  "3:2": { width: 1536, height: 1024 },
+  "2:3": { width: 1024, height: 1536 },
+  "4:3": { width: 1152, height: 864 },
+  "3:4": { width: 864, height: 1152 },
+  "16:9": { width: 1280, height: 720 },
+  "9:16": { width: 720, height: 1280 },
+  "21:9": { width: 1344, height: 576 },
+  "9:19.5": { width: 720, height: 1560 },
+  "19.5:9": { width: 1560, height: 720 },
+  auto: { width: 1024, height: 1024 },
+};
+
+function greatestCommonDivisor(left: number, right: number): number {
+  let a = left;
+  let b = right;
+  while (b !== 0) {
+    [a, b] = [b, a % b];
+  }
+  return a;
+}
+
+/**
+ * Whether a native kind can reach the adapter with `aspectRatio` as its own
+ * literal string. Mirrors `isRepresentableAspectRatio` in the tool: `auto`
+ * reduces to `1:1`, and any entry whose gcd reduction differs from its key
+ * (21:9 → 7:3, 19.5:9 → 13:6, 9:19.5 → 6:13) is unreachable.
+ */
+export function isRepresentableAspectRatio(aspectRatio: string): boolean {
+  if (aspectRatio === "auto") return false;
+  const dimensions = ASPECT_SIZES[aspectRatio];
+  if (!dimensions) return false;
+  const divisor = greatestCommonDivisor(dimensions.width, dimensions.height);
+  return `${dimensions.width / divisor}:${dimensions.height / divisor}` === aspectRatio;
+}
+
+/** Editable image-capability state; list fields live as comma-separated text. */
+export type ImageCapabilityDraft = {
+  nMax: string;
+  aspectRatios: string;
+  sizes: string;
+  resolutions: string;
+  quality: string;
+  background: string;
+};
+
+function listText(values: readonly string[] | undefined): string {
+  return values && values.length > 0 ? values.join(", ") : "";
+}
+
+function parseList(value: string): string[] {
+  return value
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+}
+
+/** Seed the capability editor from an existing row's declaration. */
+export function imageCapabilityDraft(
+  capabilities: {
+    n?: { min: number; max: number };
+    aspectRatios?: string[];
+    sizes?: string[];
+    resolutions?: string[];
+    quality?: string[];
+    background?: string[];
+  } | null,
+): ImageCapabilityDraft {
+  if (!capabilities) {
+    return {
+      nMax: "",
+      aspectRatios: "",
+      sizes: "",
+      resolutions: "",
+      quality: "",
+      background: "",
+    };
+  }
+  return {
+    nMax: capabilities.n ? String(capabilities.n.max) : "",
+    aspectRatios: listText(capabilities.aspectRatios),
+    sizes: listText(capabilities.sizes),
+    resolutions: listText(capabilities.resolutions),
+    quality: listText(capabilities.quality),
+    background: listText(capabilities.background),
+  };
+}
+
+/** A built declaration, or a field-level error the editor shows instead of saving. */
+export type ImageCapabilityBuild =
+  | { ok: true; value: Record<string, unknown> }
+  | { ok: false; error: string };
+
+/**
+ * Build the capability set to submit for a draft, applying the kind's limits so
+ * the editor cannot express a value the server's allow-list would reject. Only
+ * the kind's own sizing key is emitted; `quality`/`background` are dropped for
+ * kinds that do not honour them; `n.max` is bounded to the kind's cap; and a
+ * native kind's aspect ratios are checked against the gcd reduction.
+ */
+export function imageCapabilityPayload(
+  draft: ImageCapabilityDraft,
+  limits: ImageCapabilityLimits,
+): ImageCapabilityBuild {
+  const aspectRatios = parseList(draft.aspectRatios);
+  if (aspectRatios.length === 0) {
+    return { ok: false, error: "Declare at least one aspect ratio." };
+  }
+  if (limits.gcdDerivedRatios) {
+    const unreachable = aspectRatios.filter(
+      (ratio) => !isRepresentableAspectRatio(ratio),
+    );
+    if (unreachable.length > 0) {
+      return {
+        ok: false,
+        error: `This provider kind cannot generate ${unreachable.join(", ")}.`,
+      };
+    }
+  }
+
+  const sizingValues = parseList(
+    limits.sizing === "sizes" ? draft.sizes : draft.resolutions,
+  );
+  if (sizingValues.length === 0) {
+    return {
+      ok: false,
+      error:
+        limits.sizing === "sizes"
+          ? "Declare at least one size."
+          : "Declare at least one resolution.",
+    };
+  }
+
+  const parsedN = Number(draft.nMax.trim());
+  const nMax =
+    Number.isSafeInteger(parsedN) && parsedN >= 1 ? parsedN : limits.nMax;
+  const value: Record<string, unknown> = {
+    n: { min: 1, max: Math.min(nMax, limits.nMax) },
+    aspectRatios,
+    [limits.sizing]: sizingValues,
+  };
+  const quality = limits.supportsQuality ? parseList(draft.quality) : [];
+  if (quality.length > 0) value.quality = quality;
+  const background = limits.supportsBackground
+    ? parseList(draft.background)
+    : [];
+  if (background.length > 0) value.background = background;
+  return { ok: true, value };
+}
+
+/**
+ * The body the model editor submits. Kept pure so the full-set resend is
+ * pinned by a test: a partial PATCH that omits `imageCapabilities` writes
+ * `null`, so an image row always carries the whole capability set (when it has
+ * one), even on a save where the user changed nothing. A text row never carries
+ * the field at all.
+ */
+export function modelSavePayload(input: {
+  upstreamId: string;
+  name: string;
+  iconSvg: string;
+  outputType: "text" | "image";
+  contextWindowTokens: number | null;
+  maxInputTokens: number | null;
+  maxOutputTokens: number | null;
+  reasoningEfforts: string[];
+  imageCapabilities: Record<string, unknown> | null;
+}): {
+  upstreamId: string;
+  name?: string;
+  iconSvg?: string;
+  outputType: "text" | "image";
+  contextWindowTokens: number | null;
+  maxInputTokens: number | null;
+  maxOutputTokens: number | null;
+  reasoningEfforts: string[];
+  imageCapabilities?: Record<string, unknown>;
+} {
+  const trimmedName = input.name.trim();
+  const trimmedIcon = input.iconSvg.trim();
+  const isImage = input.outputType === "image";
+  return {
+    upstreamId: input.upstreamId,
+    ...(trimmedName.length > 0 ? { name: trimmedName } : {}),
+    ...(trimmedIcon.length > 0 ? { iconSvg: trimmedIcon } : {}),
+    outputType: input.outputType,
+    contextWindowTokens: input.contextWindowTokens,
+    maxInputTokens: input.maxInputTokens,
+    maxOutputTokens: input.maxOutputTokens,
+    // The server forces [] for an image model; the UI must not submit a set it
+    // will discard.
+    reasoningEfforts: reasoningEffortsForOutputType(
+      input.outputType,
+      input.reasoningEfforts,
+    ),
+    ...(isImage && input.imageCapabilities
+      ? { imageCapabilities: input.imageCapabilities }
+      : {}),
+  };
 }

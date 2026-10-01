@@ -566,6 +566,7 @@ function ProviderConnectionEditor({
       {!isNew && initial ? (
         <ConnectionModels
           connection={initial}
+          kinds={kinds}
           effortVocabulary={effortVocabulary}
         />
       ) : null}
@@ -589,9 +590,11 @@ function ProviderConnectionEditor({
 
 function ConnectionModels({
   connection,
+  kinds,
   effortVocabulary,
 }: {
   connection: ProviderConnection;
+  kinds: ProviderKindInfo[];
   effortVocabulary: string[];
 }) {
   const models = useProviderModels(connection.id, true);
@@ -629,6 +632,10 @@ function ConnectionModels({
           key={editingModelId ?? "new"}
           connectionId={connection.id}
           connectionSlug={connection.slug}
+          imageStyle={
+            kinds.find((info) => info.kind === connection.kind)?.imageStyle ??
+            "none"
+          }
           effortVocabulary={effortVocabulary}
           initial={
             editingModelId

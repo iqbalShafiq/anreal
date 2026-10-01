@@ -1106,6 +1106,12 @@ const modelsCacheListeners = new Set<() => void>();
  */
 export function invalidateModelsCache(): void {
   modelsCache = null;
+  // The image picker caches its own catalog (fetchImageModels). A provider
+  // write can add, change, or remove an image model, so the cache is dropped
+  // here too — otherwise a freshly registered BYOK image model would not be
+  // selectable (and so could not be pinned as the session's image model)
+  // until a full reload.
+  imageModelsPromise = null;
   // Snapshot before iterating: a listener may unsubscribe during notification.
   for (const listener of [...modelsCacheListeners]) listener();
 }

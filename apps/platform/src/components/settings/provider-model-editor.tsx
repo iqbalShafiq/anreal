@@ -4,9 +4,16 @@ import { FormTextAreaField, FormTextField } from "#/components/ui/form-field";
 import { Select } from "#/components/ui/select";
 import {
   effortWarning,
+  imageCapabilityDraft,
+  imageCapabilityLimits,
+  imageCapabilityPayload,
+  imageOutputTypeOptions,
   modelDraftFromPrefill,
   modelOutputType,
+  modelSavePayload,
   slugPreview,
+  type ImageCapabilityDraft,
+  type ImageStyle,
 } from "#/lib/provider-model-draft";
 import {
   prefillProviderModel,
@@ -38,6 +45,7 @@ function parseLimit(value: string): number | null | "invalid" {
 export function ProviderModelEditor({
   connectionId,
   connectionSlug,
+  imageStyle,
   effortVocabulary,
   initial,
   saving,
@@ -47,6 +55,7 @@ export function ProviderModelEditor({
 }: {
   connectionId: string;
   connectionSlug: string;
+  imageStyle: ImageStyle;
   effortVocabulary: string[];
   initial: ProviderModelRow | null;
   saving: boolean;
@@ -86,12 +95,18 @@ export function ProviderModelEditor({
   const [filter, setFilter] = useState("");
   const [prefilling, setPrefilling] = useState(false);
   const [errors, setErrors] = useState<FieldErrors>({});
+  // The output type the editor submits; an existing image row keeps its value
+  // so editing cannot corrupt it, and a text row starts as text.
+  const [outputType, setOutputType] = useState<"text" | "image">(
+    modelOutputType(initial?.outputType ?? null),
+  );
+  const [imageCapabilities, setImageCapabilities] = useState<ImageCapabilityDraft>(
+    imageCapabilityDraft(initial?.imageCapabilities ?? null),
+  );
 
-  // Text is the only registerable output type until BYOK image generation ships
-  // (Phase D); an existing image row keeps its value so editing cannot corrupt
-  // it.
-  const outputType = modelOutputType(initial?.outputType ?? null);
   const busy = saving || prefilling;
+  const isImage = outputType === "image";
+  const limits = imageCapabilityLimits(imageStyle);
   const wantsReasoning = outputType === "text";
 
   const loadModels = async () => {
@@ -161,17 +176,36 @@ export function ProviderModelEditor({
       setErrors({ form: "Limits must be positive whole numbers" });
       return;
     }
+    // An image model must declare a capability set the kind can honour; the
+    // helper applies the same limits the server validates against, so a value
+    // the server would refuse cannot leave the form.
+    let capabilities: Record<string, unknown> | null = null;
+    if (isImage) {
+      if (!limits) {
+        setErrors({ form: "This provider kind has no image endpoint" });
+        return;
+      }
+      const built = imageCapabilityPayload(imageCapabilities, limits);
+      if (!built.ok) {
+        setErrors({ form: built.error });
+        return;
+      }
+      capabilities = built.value;
+    }
     try {
-      await onSave({
-        upstreamId: upstreamId.trim(),
-        name: name.trim() || undefined,
-        iconSvg: iconSvg.trim() || undefined,
-        outputType,
-        contextWindowTokens: context,
-        maxInputTokens: input,
-        maxOutputTokens: output,
-        reasoningEfforts: wantsReasoning ? reasoningEfforts : [],
-      });
+      await onSave(
+        modelSavePayload({
+          upstreamId: upstreamId.trim(),
+          name,
+          iconSvg,
+          outputType,
+          contextWindowTokens: context,
+          maxInputTokens: input,
+          maxOutputTokens: output,
+          reasoningEfforts,
+          imageCapabilities: capabilities,
+        }),
+      );
     } catch (error) {
       setErrors(issuesToFieldErrors(issuesFromError(error)));
     }
@@ -200,6 +234,31 @@ export function ProviderModelEditor({
       <h4 className="text-sm font-medium text-text">
         {initial ? "Edit model" : "New model"}
       </h4>
+
+      {limits ? (
+        <div className="flex flex-col gap-1.5">
+          <span className="text-xs font-medium tracking-wide text-text-muted">
+            Output type
+          </span>
+          <Select
+            value={outputType}
+            onChange={(value) => {
+              const next = value === "image" ? "image" : "text";
+              setOutputType(next);
+              // The server forces [] for an image model, so the UI drops the
+              // reasoning set too rather than showing one it will discard.
+              if (next === "image") setReasoningEfforts([]);
+            }}
+            options={imageOutputTypeOptions(imageStyle)}
+            ariaLabel="Output type"
+            disabled={busy}
+          />
+          <p className="text-[11px] text-text-faint">
+            Image models appear in the composer's image picker, not the chat
+            model list.
+          </p>
+        </div>
+      ) : null}
 
       <div className="flex flex-col gap-1.5">
         <span className="text-xs font-medium tracking-wide text-text-muted">
@@ -321,6 +380,109 @@ export function ProviderModelEditor({
           The provider did not report a context window for this model — set one
           so conversations can be sized correctly.
         </p>
+      ) : null}
+
+      {isImage && limits ? (
+        <fieldset className="flex flex-col gap-2.5 rounded-xl border border-white/[0.06] p-3">
+          <legend className="px-1 text-[11px] font-medium uppercase tracking-wide text-text-faint">
+            Image capabilities
+          </legend>
+          <p className="text-[11px] text-text-faint">
+            Validated against what this provider kind can actually generate.
+          </p>
+          <FormTextField
+            label="Aspect ratios"
+            value={imageCapabilities.aspectRatios}
+            onChange={(event) =>
+              setImageCapabilities((current) => ({
+                ...current,
+                aspectRatios: event.target.value,
+              }))
+            }
+            placeholder="1:1, 16:9"
+            helper="Comma-separated. At least one is required."
+            disabled={busy}
+          />
+          {limits.sizing === "sizes" ? (
+            <FormTextField
+              label="Sizes"
+              value={imageCapabilities.sizes}
+              onChange={(event) =>
+                setImageCapabilities((current) => ({
+                  ...current,
+                  sizes: event.target.value,
+                }))
+              }
+              placeholder="1024x1024, 1280x720"
+              helper="Comma-separated pixel sizes the model accepts."
+              disabled={busy}
+            />
+          ) : (
+            <FormTextField
+              label="Resolutions"
+              value={imageCapabilities.resolutions}
+              onChange={(event) =>
+                setImageCapabilities((current) => ({
+                  ...current,
+                  resolutions: event.target.value,
+                }))
+              }
+              placeholder="1K, 2K"
+              helper="Comma-separated resolutions the model accepts."
+              disabled={busy}
+            />
+          )}
+          <FormTextField
+            label="Max images"
+            value={imageCapabilities.nMax}
+            onChange={(event) =>
+              setImageCapabilities((current) => ({
+                ...current,
+                nMax: event.target.value,
+              }))
+            }
+            inputMode="numeric"
+            placeholder={String(limits.nMax)}
+            helper={
+              limits.nMax > 1
+                ? `Default ${limits.nMax}. Higher values are capped at ${limits.nMax}.`
+                : "This provider kind generates one image per request."
+            }
+            disabled={busy}
+          />
+          {limits.supportsQuality ? (
+            <FormTextField
+              label="Quality"
+              value={imageCapabilities.quality}
+              onChange={(event) =>
+                setImageCapabilities((current) => ({
+                  ...current,
+                  quality: event.target.value,
+                }))
+              }
+              placeholder="low, high"
+              helper="Optional. Comma-separated."
+              optional
+              disabled={busy}
+            />
+          ) : null}
+          {limits.supportsBackground ? (
+            <FormTextField
+              label="Background"
+              value={imageCapabilities.background}
+              onChange={(event) =>
+                setImageCapabilities((current) => ({
+                  ...current,
+                  background: event.target.value,
+                }))
+              }
+              placeholder="transparent"
+              helper="Optional. Comma-separated."
+              optional
+              disabled={busy}
+            />
+          ) : null}
+        </fieldset>
       ) : null}
 
       {wantsReasoning ? (
