@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
+import {
+  MAX_MODEL_IMAGES,
+  isRepresentableAspectRatio,
+} from "@anreal/agent";
 
 const service = vi.hoisted(() => ({
   listConnections: vi.fn(async () => []),
@@ -46,6 +50,56 @@ describe("provider routes", () => {
     expect(body.kinds.map((k) => k.kind)).toContain("anthropic");
     expect(body.effortVocabulary).toContain("none");
     expect(body.kinds.find((k) => k.kind === "compatible")?.requiresBaseUrl).toBe(true);
+  });
+
+  it("publishes the per-kind image limits derived from the tool's authority", async () => {
+    const res = await app.request("/api/providers/kinds");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      kinds: {
+        kind: string;
+        imageStyle: string;
+        imageLimits: {
+          nMax: number;
+          sizing: "sizes" | "resolutions";
+          supportsQuality: boolean;
+          supportsBackground: boolean;
+          representableAspectRatios: string[] | null;
+        } | null;
+      }[];
+    };
+
+    const byKind = Object.fromEntries(body.kinds.map((k) => [k.kind, k]));
+
+    // OpenRouter-shaped kinds honour every control up to the tool's own cap;
+    // the representable list is null because no gcd reduction constrains them.
+    expect(byKind.compatible?.imageLimits).toEqual({
+      nMax: MAX_MODEL_IMAGES,
+      sizing: "sizes",
+      supportsQuality: true,
+      supportsBackground: true,
+      representableAspectRatios: null,
+    });
+
+    // The native kinds pin n to 1, use resolutions, and honour no optional
+    // control. Their representable list comes from the tool's own rule, so a
+    // ratio the adapter cannot reach is absent by construction.
+    for (const kind of ["gemini", "grok"] as const) {
+      const limits = byKind[kind]?.imageLimits;
+      expect(limits?.nMax).toBe(1);
+      expect(limits?.sizing).toBe("resolutions");
+      expect(limits?.supportsQuality).toBe(false);
+      expect(limits?.supportsBackground).toBe(false);
+      expect(limits?.representableAspectRatios).toContain("1:1");
+      expect(limits?.representableAspectRatios).not.toContain("21:9");
+      expect(limits?.representableAspectRatios).not.toContain("auto");
+      expect(
+        limits?.representableAspectRatios?.every(isRepresentableAspectRatio),
+      ).toBe(true);
+    }
+
+    // A kind with no image endpoint publishes no limits.
+    expect(byKind.openai?.imageLimits).toBeNull();
   });
 
   it("returns 404 for another user's connection", async () => {

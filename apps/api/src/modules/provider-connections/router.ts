@@ -1,9 +1,13 @@
 import { Hono } from "hono";
 import z from "zod";
 import {
+  ASPECT_SIZES,
+  MAX_MODEL_IMAGES,
   PROVIDER_KINDS,
   PROVIDER_KIND_META,
   effortVocabulary,
+  isRepresentableAspectRatio,
+  type ImageStyle,
 } from "@anreal/agent";
 import { prisma } from "../../utils/prisma.js";
 import { requireUser, type AuthVariables } from "../auth/middleware.js";
@@ -125,6 +129,58 @@ function notFound(path = "id") {
   return { error: "Connection not found", issues: [{ path, message: "Connection not found" }] };
 }
 
+/**
+ * The image controls a kind can honour, published to the client so the Settings
+ * editor applies the same limits the server validates against rather than
+ * mirroring them. Every value is imported from the tool that owns the rule
+ * (`packages/agent/src/tools/image-generation.ts`) — `MAX_MODEL_IMAGES`,
+ * `ASPECT_SIZES` and `isRepresentableAspectRatio` — and never restated here.
+ *
+ * Computed in the router, beside the existing `kinds` mapping, rather than on
+ * `ProviderKindMeta`: the registry is a providers-layer artifact and putting
+ * the tool's table on it would make providers depend on tools. No import cycle
+ * would actually arise (the tool does not import the registry), but the layer
+ * inversion is the reason to keep the composition at this boundary.
+ *
+ * `representableAspectRatios` is non-null only for the gcd-derived kinds. It is
+ * the tool's own table filtered through the tool's own rule, so a ratio the
+ * adapter cannot reach (`21:9`, `19.5:9`, `9:19.5`, `auto`) is absent by
+ * construction.
+ */
+function imageLimitsFor(
+  imageStyle: ImageStyle,
+): {
+  nMax: number;
+  sizing: "sizes" | "resolutions";
+  supportsQuality: boolean;
+  supportsBackground: boolean;
+  representableAspectRatios: string[] | null;
+} | null {
+  switch (imageStyle) {
+    case "openrouter-images":
+      return {
+        nMax: MAX_MODEL_IMAGES,
+        sizing: "sizes",
+        supportsQuality: true,
+        supportsBackground: true,
+        representableAspectRatios: null,
+      };
+    case "gemini-native":
+    case "grok-native":
+      return {
+        nMax: 1,
+        sizing: "resolutions",
+        supportsQuality: false,
+        supportsBackground: false,
+        representableAspectRatios: Object.keys(ASPECT_SIZES).filter(
+          isRepresentableAspectRatio,
+        ),
+      };
+    case "none":
+      return null;
+  }
+}
+
 /** Map a service failure onto a status plus a field-level body. */
 function providerErrorResponse(error: unknown) {
   // A Prisma unique violation has no ProviderInputError shape, so it has to be
@@ -157,10 +213,14 @@ export const providerConnectionsRouter = new Hono<{ Variables: AuthVariables }>(
   // Registered before `/:id` so "kinds" is never captured as an id.
   .get("/kinds", (c) =>
     c.json({
-      kinds: PROVIDER_KINDS.map((kind) => ({
-        kind,
-        ...PROVIDER_KIND_META[kind],
-      })),
+      kinds: PROVIDER_KINDS.map((kind) => {
+        const meta = PROVIDER_KIND_META[kind];
+        return {
+          kind,
+          ...meta,
+          imageLimits: imageLimitsFor(meta.imageStyle),
+        };
+      }),
       effortVocabulary: effortVocabulary(),
     }),
   )

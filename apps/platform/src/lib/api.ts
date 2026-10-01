@@ -2206,6 +2206,16 @@ export async function testMcpConnection(input: McpServerInput): Promise<McpTestR
 
 // ─── Provider connections (BYOK) ────────────────────────────────────────────
 
+/** The per-kind image limits the server publishes (see the API's `/kinds`). */
+export type ProviderKindImageLimits = {
+  nMax: number;
+  sizing: "sizes" | "resolutions";
+  supportsQuality: boolean;
+  supportsBackground: boolean;
+  /** Non-null only for gcd-derived kinds: the ratios the adapter can reach. */
+  representableAspectRatios: string[] | null;
+};
+
 export type ProviderKindInfo = {
   kind: string;
   label: string;
@@ -2215,6 +2225,7 @@ export type ProviderKindInfo = {
   apiVariants: ("chat" | "responses")[];
   defaultApi: "chat" | "responses" | null;
   imageStyle: "openrouter-images" | "gemini-native" | "grok-native" | "none";
+  imageLimits: ProviderKindImageLimits | null;
 };
 
 export type ProviderConnection = {
@@ -2333,6 +2344,27 @@ function isProviderKindInfo(value: unknown): value is ProviderKindInfo {
   );
 }
 
+/** Parse the published per-kind image limits; null when absent or malformed. */
+function parseImageLimits(value: unknown): ProviderKindImageLimits | null {
+  if (!isRecord(value)) return null;
+  const sizing = value.sizing;
+  if (sizing !== "sizes" && sizing !== "resolutions") return null;
+  if (typeof value.nMax !== "number" || !Number.isSafeInteger(value.nMax)) {
+    return null;
+  }
+  const ratios = value.representableAspectRatios;
+  if (ratios !== null && !Array.isArray(ratios)) return null;
+  return {
+    nMax: value.nMax,
+    sizing,
+    supportsQuality: value.supportsQuality === true,
+    supportsBackground: value.supportsBackground === true,
+    representableAspectRatios: Array.isArray(ratios)
+      ? toStringArray(ratios)
+      : null,
+  };
+}
+
 function isProviderConnection(value: unknown): value is ProviderConnection {
   return (
     isRecord(value) &&
@@ -2369,7 +2401,12 @@ export async function listProviderKinds(): Promise<{
     throw new Error("Unexpected provider kinds response shape");
   }
   return {
-    kinds: data.kinds.filter(isProviderKindInfo),
+    kinds: data.kinds.filter(isProviderKindInfo).map((kind) => ({
+      ...kind,
+      // A server without the field publishes none; the editor then simply
+      // offers no image registration for that kind.
+      imageLimits: parseImageLimits((kind as { imageLimits?: unknown }).imageLimits),
+    })),
     effortVocabulary: toStringArray(data.effortVocabulary),
   };
 }

@@ -7,7 +7,6 @@ import {
   effortDiff,
   effortWarning,
   imageCapabilityDraft,
-  imageCapabilityLimits,
   imageCapabilityPayload,
   imageOutputTypeOptions,
   modelDraftFromPrefill,
@@ -15,7 +14,43 @@ import {
   modelSavePayload,
   reasoningEffortsForOutputType,
   slugPreview,
+  type ImageCapabilityLimits,
 } from "./provider-model-draft";
+
+/**
+ * The per-kind limits as the server publishes them on `GET
+ * /api/providers/kinds` (`imageLimits`). These fixtures stand in for the
+ * endpoint response; the binding to the tool's real cap, size table, and ratio
+ * rule is asserted where the server computes them
+ * (`apps/api/src/modules/provider-connections/router.test.ts`), so the platform
+ * never restates the authority. A drift there fails that test; the client
+ * simply consumes whatever the endpoint sends.
+ */
+const OPENROUTER_LIMITS: ImageCapabilityLimits = {
+  nMax: 10,
+  sizing: "sizes",
+  supportsQuality: true,
+  supportsBackground: true,
+  representableAspectRatios: null,
+};
+
+const NATIVE_LIMITS: ImageCapabilityLimits = {
+  nMax: 1,
+  sizing: "resolutions",
+  supportsQuality: false,
+  supportsBackground: false,
+  // The reduced fractions the native adapters can reach; `21:9`, `19.5:9`,
+  // `9:19.5` and `auto` are absent for the reasons the server documents.
+  representableAspectRatios: [
+    "1:1",
+    "3:2",
+    "2:3",
+    "4:3",
+    "3:4",
+    "16:9",
+    "9:16",
+  ],
+};
 
 describe("slugPreview", () => {
   it("mirrors the server slug rule", () => {
@@ -204,33 +239,37 @@ describe("reasoningEffortsForOutputType", () => {
   });
 });
 
-describe("imageCapabilityLimits", () => {
-  it("bounds n by the OpenRouter-shaped kind, which honours every control", () => {
-    const limits = imageCapabilityLimits("openrouter-images");
-    expect(limits).toEqual({
-      sizing: "sizes",
-      nMax: 10,
+describe("published image limits", () => {
+  it("are consumed verbatim, not re-derived from a kind name", () => {
+    // A synthetic set proves the client holds no authority of its own: if it
+    // restated the tool's cap or table, these values could not take effect.
+    const synthetic: ImageCapabilityLimits = {
+      nMax: 3,
+      sizing: "resolutions",
       supportsQuality: true,
-      supportsBackground: true,
-      gcdDerivedRatios: false,
-    });
-  });
-
-  it("pins the native kinds to n=1 and the resolution shape", () => {
-    for (const style of ["gemini-native", "grok-native"] as const) {
-      const limits = imageCapabilityLimits(style);
-      expect(limits).toEqual({
-        sizing: "resolutions",
-        nMax: 1,
-        supportsQuality: false,
-        supportsBackground: false,
-        gcdDerivedRatios: true,
+      supportsBackground: false,
+      representableAspectRatios: ["7:5"],
+    };
+    const built = imageCapabilityPayload(
+      {
+        nMax: "9",
+        aspectRatios: "7:5",
+        sizes: "1024x1024",
+        resolutions: "4K",
+        quality: "ultra",
+        background: "transparent",
+      },
+      synthetic,
+    );
+    expect(built.ok).toBe(true);
+    if (built.ok) {
+      expect(built.value).toEqual({
+        n: { min: 1, max: 3 },
+        aspectRatios: ["7:5"],
+        resolutions: ["4K"],
+        quality: ["ultra"],
       });
     }
-  });
-
-  it("has no limits for a kind with no image endpoint", () => {
-    expect(imageCapabilityLimits("none")).toBeNull();
   });
 });
 
@@ -250,10 +289,7 @@ describe("imageCapabilityDraft", () => {
     expect(draft.quality).toBe("low, high");
     expect(draft.background).toBe("transparent");
 
-    const built = imageCapabilityPayload(
-      draft,
-      imageCapabilityLimits("openrouter-images")!,
-    );
+    const built = imageCapabilityPayload(draft, OPENROUTER_LIMITS);
     expect(built).toEqual({ ok: true, value: declared });
   });
 
@@ -270,8 +306,8 @@ describe("imageCapabilityDraft", () => {
 });
 
 describe("imageCapabilityPayload — the client half of the per-kind allow-list", () => {
-  const openrouter = imageCapabilityLimits("openrouter-images")!;
-  const native = imageCapabilityLimits("gemini-native")!;
+  const openrouter = OPENROUTER_LIMITS;
+  const native = NATIVE_LIMITS;
 
   it("cannot express the sizing key the kind does not accept", () => {
     const draft = {
@@ -288,7 +324,7 @@ describe("imageCapabilityPayload — the client half of the per-kind allow-list"
     if (built.ok) {
       expect(built.value).not.toHaveProperty("sizes");
       expect(built.value).toEqual({
-        n: { min: 1, max: 1 },
+        n: { min: 1, max: native.nMax },
         aspectRatios: ["1:1"],
         resolutions: ["1K"],
       });
@@ -323,7 +359,9 @@ describe("imageCapabilityPayload — the client half of the per-kind allow-list"
     };
     const built = imageCapabilityPayload(overCap, openrouter);
     expect(built.ok).toBe(true);
-    if (built.ok) expect(built.value.n).toEqual({ min: 1, max: 10 });
+    if (built.ok) {
+      expect(built.value.n).toEqual({ min: 1, max: openrouter.nMax });
+    }
 
     const nativeOverCap = imageCapabilityPayload(
       {
@@ -336,14 +374,20 @@ describe("imageCapabilityPayload — the client half of the per-kind allow-list"
     );
     expect(nativeOverCap.ok).toBe(true);
     if (nativeOverCap.ok) {
-      expect(nativeOverCap.value.n).toEqual({ min: 1, max: 1 });
+      expect(nativeOverCap.value.n).toEqual({ min: 1, max: native.nMax });
     }
   });
 
   it("refuses a native aspect ratio the adapter cannot reach", () => {
+    // `21:9` and `auto` are absent from the published representable list; the
+    // client refuses them from that list, not from a local rule.
+    const unreachable = ["21:9", "auto"].filter(
+      (ratio) => !native.representableAspectRatios!.includes(ratio),
+    );
+    expect(unreachable).toEqual(["21:9", "auto"]);
     const draft = {
       nMax: "1",
-      aspectRatios: "1:1, 21:9, auto",
+      aspectRatios: `1:1, ${unreachable.join(", ")}`,
       sizes: "",
       resolutions: "1K",
       quality: "",
@@ -352,8 +396,9 @@ describe("imageCapabilityPayload — the client half of the per-kind allow-list"
     const built = imageCapabilityPayload(draft, native);
     expect(built.ok).toBe(false);
     if (!built.ok) {
-      expect(built.error).toContain("21:9");
-      expect(built.error).toContain("auto");
+      for (const ratio of unreachable) {
+        expect(built.error).toContain(ratio);
+      }
     }
   });
 

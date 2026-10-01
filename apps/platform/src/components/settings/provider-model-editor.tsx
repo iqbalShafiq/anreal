@@ -5,7 +5,6 @@ import { Select } from "#/components/ui/select";
 import {
   effortWarning,
   imageCapabilityDraft,
-  imageCapabilityLimits,
   imageCapabilityPayload,
   imageOutputTypeOptions,
   modelDraftFromPrefill,
@@ -13,6 +12,7 @@ import {
   modelSavePayload,
   slugPreview,
   type ImageCapabilityDraft,
+  type ImageCapabilityLimits,
   type ImageStyle,
 } from "#/lib/provider-model-draft";
 import {
@@ -46,6 +46,7 @@ export function ProviderModelEditor({
   connectionId,
   connectionSlug,
   imageStyle,
+  imageLimits,
   effortVocabulary,
   initial,
   saving,
@@ -56,6 +57,7 @@ export function ProviderModelEditor({
   connectionId: string;
   connectionSlug: string;
   imageStyle: ImageStyle;
+  imageLimits: ImageCapabilityLimits | null;
   effortVocabulary: string[];
   initial: ProviderModelRow | null;
   saving: boolean;
@@ -106,7 +108,9 @@ export function ProviderModelEditor({
 
   const busy = saving || prefilling;
   const isImage = outputType === "image";
-  const limits = imageCapabilityLimits(imageStyle);
+  // The limits are published by the server (`GET /api/providers/kinds`) from the
+  // tool's own cap, size table, and ratio rule; the platform keeps no copy.
+  const limits = imageLimits;
   const wantsReasoning = outputType === "text";
 
   const loadModels = async () => {

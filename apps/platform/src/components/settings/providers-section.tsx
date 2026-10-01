@@ -636,6 +636,10 @@ function ConnectionModels({
             kinds.find((info) => info.kind === connection.kind)?.imageStyle ??
             "none"
           }
+          imageLimits={
+            kinds.find((info) => info.kind === connection.kind)?.imageLimits ??
+            null
+          }
           effortVocabulary={effortVocabulary}
           initial={
             editingModelId

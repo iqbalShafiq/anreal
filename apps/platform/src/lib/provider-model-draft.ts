@@ -237,100 +237,25 @@ export function reasoningEffortsForOutputType(
 }
 
 /**
- * What each image-capable kind can honour, derived from the same per-kind
- * allow-list the server validates against
- * (`apps/api/src/modules/provider-connections/service.ts`):
- *
- * - `openrouter-images` merges every declared control into `POST /images`, so
- *   it keeps `sizes`, `quality`, `background` and the tool's full `n.max` cap.
- * - `gemini-native`/`grok-native` overwrite or ignore optional controls and pin
- *   `n: 1` on the wire, so they keep only `resolutions` and a fixed `n.max` of
- *   1. Both derive their ratio from the tool's `width`/`height` by gcd
- *   reduction, so only ratios whose key is already a reduced fraction can be
- *   reached.
+ * The image controls a kind can honour, as published by the server
+ * (`GET /api/providers/kinds` → `imageLimits`). This is the same shape the
+ * editor reads off `ProviderKindInfo.imageLimits`; the platform keeps no copy
+ * of the tool's cap, size table, or ratio rule — it consumes the server's.
  */
 export type ImageCapabilityLimits = {
-  /** The one sizing key the kind accepts; the other is never emitted. */
-  sizing: "sizes" | "resolutions";
   /** The highest `n.max` the server will accept for this kind. */
   nMax: number;
+  /** The one sizing key the kind accepts; the other is never emitted. */
+  sizing: "sizes" | "resolutions";
   supportsQuality: boolean;
   supportsBackground: boolean;
-  /** True when the adapter derives the ratio by gcd reduction. */
-  gcdDerivedRatios: boolean;
+  /**
+   * Non-null only for the gcd-derived kinds: exactly the ratios the adapter
+   * can reach, computed server-side from the tool's own table and rule. Null
+   * means the kind has no gcd constraint.
+   */
+  representableAspectRatios: string[] | null;
 };
-
-export function imageCapabilityLimits(
-  imageStyle: ImageStyle,
-): ImageCapabilityLimits | null {
-  switch (imageStyle) {
-    case "openrouter-images":
-      return {
-        sizing: "sizes",
-        nMax: MAX_MODEL_IMAGES,
-        supportsQuality: true,
-        supportsBackground: true,
-        gcdDerivedRatios: false,
-      };
-    case "gemini-native":
-    case "grok-native":
-      return {
-        sizing: "resolutions",
-        nMax: 1,
-        supportsQuality: false,
-        supportsBackground: false,
-        gcdDerivedRatios: true,
-      };
-    case "none":
-      return null;
-  }
-}
-
-/** The tool's execution cap, mirrored from `packages/agent/src/tools/image-generation.ts`. */
-const MAX_MODEL_IMAGES = 10;
-
-/**
- * The gcd-derived adapters' canonical sizes, mirrored from
- * `ASPECT_SIZES` in `packages/agent/src/tools/image-generation.ts`. Only the
- * reduction matters here: it decides which ratio strings a native kind can
- * reach.
- */
-const ASPECT_SIZES: Record<string, { width: number; height: number }> = {
-  "1:1": { width: 1024, height: 1024 },
-  "3:2": { width: 1536, height: 1024 },
-  "2:3": { width: 1024, height: 1536 },
-  "4:3": { width: 1152, height: 864 },
-  "3:4": { width: 864, height: 1152 },
-  "16:9": { width: 1280, height: 720 },
-  "9:16": { width: 720, height: 1280 },
-  "21:9": { width: 1344, height: 576 },
-  "9:19.5": { width: 720, height: 1560 },
-  "19.5:9": { width: 1560, height: 720 },
-  auto: { width: 1024, height: 1024 },
-};
-
-function greatestCommonDivisor(left: number, right: number): number {
-  let a = left;
-  let b = right;
-  while (b !== 0) {
-    [a, b] = [b, a % b];
-  }
-  return a;
-}
-
-/**
- * Whether a native kind can reach the adapter with `aspectRatio` as its own
- * literal string. Mirrors `isRepresentableAspectRatio` in the tool: `auto`
- * reduces to `1:1`, and any entry whose gcd reduction differs from its key
- * (21:9 → 7:3, 19.5:9 → 13:6, 9:19.5 → 6:13) is unreachable.
- */
-export function isRepresentableAspectRatio(aspectRatio: string): boolean {
-  if (aspectRatio === "auto") return false;
-  const dimensions = ASPECT_SIZES[aspectRatio];
-  if (!dimensions) return false;
-  const divisor = greatestCommonDivisor(dimensions.width, dimensions.height);
-  return `${dimensions.width / divisor}:${dimensions.height / divisor}` === aspectRatio;
-}
 
 /** Editable image-capability state; list fields live as comma-separated text. */
 export type ImageCapabilityDraft = {
@@ -390,11 +315,12 @@ export type ImageCapabilityBuild =
   | { ok: false; error: string };
 
 /**
- * Build the capability set to submit for a draft, applying the kind's limits so
- * the editor cannot express a value the server's allow-list would reject. Only
- * the kind's own sizing key is emitted; `quality`/`background` are dropped for
- * kinds that do not honour them; `n.max` is bounded to the kind's cap; and a
- * native kind's aspect ratios are checked against the gcd reduction.
+ * Build the capability set to submit for a draft, applying the kind's published
+ * limits so the editor cannot express a value the server's allow-list would
+ * reject. Only the kind's own sizing key is emitted; `quality`/`background` are
+ * dropped for kinds that do not honour them; `n.max` is bounded to the kind's
+ * cap; and a gcd-derived kind's aspect ratios are checked against the list the
+ * server published from the tool's own rule.
  */
 export function imageCapabilityPayload(
   draft: ImageCapabilityDraft,
@@ -404,10 +330,9 @@ export function imageCapabilityPayload(
   if (aspectRatios.length === 0) {
     return { ok: false, error: "Declare at least one aspect ratio." };
   }
-  if (limits.gcdDerivedRatios) {
-    const unreachable = aspectRatios.filter(
-      (ratio) => !isRepresentableAspectRatio(ratio),
-    );
+  if (limits.representableAspectRatios !== null) {
+    const allowed = new Set(limits.representableAspectRatios);
+    const unreachable = aspectRatios.filter((ratio) => !allowed.has(ratio));
     if (unreachable.length > 0) {
       return {
         ok: false,
