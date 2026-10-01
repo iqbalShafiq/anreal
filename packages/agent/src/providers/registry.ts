@@ -295,8 +295,14 @@ export function createImageGenerationModelFor(
       // is the family whose request the normaliser models
       // (`config.imageConfig.aspectRatio`); `generateImages` (Imagen) has a
       // different contract, so routing an Imagen id here would be a wrong
-      // request rather than a degraded one. Task 3 rejects a known
-      // `generateImages`-family id at save time.
+      // request rather than a degraded one.
+      //
+      // Imagen-family ids are NOT supported in v1, and note that **nothing
+      // rejects them at save time**: the known-id sets in `@anvia/gemini` are
+      // type-only with no runtime value, so the save-path guard Ruling A
+      // originally proposed could not be built. Registering one is therefore
+      // accepted, and at generation time it is sent through `generateContent`
+      // as a wrong request rather than failing early.
       return new GeminiClient({ apiKey }).imageGenerationModel({
         api: "generateContent",
         modelId,

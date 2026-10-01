@@ -1,6 +1,7 @@
 import {
   PROVIDER_KIND_META,
   PROVIDER_KINDS,
+  MAX_MODEL_IMAGES,
   createCompletionModelFor,
   describeModel,
   effortVocabulary,
@@ -289,8 +290,10 @@ function optionalPositiveInteger(path: string, value: unknown): number | null {
  *
  * `n` and `aspectRatios` and exactly one of `sizes`/`resolutions` are
  * structural: `parseImageCapabilities` requires them, so every non-`none`
- * allow-list contains them. What differs per kind is the sizing key and
- * whether `quality`/`background` are honoured.
+ * allow-list contains them. What differs per kind is the sizing key, whether
+ * `quality`/`background` are honoured, and the permitted `n.max` — the tool's
+ * own execution cap (`MAX_MODEL_IMAGES`) for `openrouter-images`, and 1 for the
+ * native kinds, which pin `n: 1` on the wire.
  */
 const IMAGE_CAPABILITY_ALLOWLIST: Record<
   Exclude<ImageStyle, "none">,
@@ -341,6 +344,17 @@ function validateImageCapabilities(
     return fail(
       "imageCapabilities",
       `imageCapabilities includes controls this provider kind does not support: ${unsupported.sort().join(", ")}`,
+    );
+  }
+
+  // The image tool refuses any capability whose nMax exceeds its own execution
+  // cap (`packages/agent/src/tools/image-generation.ts:399`), so a declaration
+  // above it would save cleanly and then make the model unusable at generation
+  // time. The bound is imported rather than restated so it cannot drift.
+  if (parsed.nMax > MAX_MODEL_IMAGES) {
+    return fail(
+      "imageCapabilities",
+      `imageCapabilities.n.max must be at most ${MAX_MODEL_IMAGES}`,
     );
   }
 

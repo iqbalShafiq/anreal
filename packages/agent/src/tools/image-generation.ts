@@ -27,7 +27,7 @@ import {
 
 const MAX_PROMPT_LENGTH = 4000;
 /** Upper bound the model may request directly (the execution cap is capability-aware). */
-const MAX_MODEL_IMAGES = 10;
+export const MAX_MODEL_IMAGES = 10;
 const MAX_REFERENCE_BYTES = 10 * 1024 * 1024;
 
 const PROMPT_DESCRIPTION =

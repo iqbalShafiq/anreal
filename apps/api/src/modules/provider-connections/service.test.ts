@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { MAX_MODEL_IMAGES } from "@anreal/agent";
 import {
   ProviderInputError,
   createConnection,
@@ -223,6 +224,42 @@ describe("validateModelInput", () => {
       quality: ["auto", "high"],
       background: ["transparent"],
     });
+  });
+
+  it("rejects an openrouter-images set whose n.max exceeds the tool's execution cap", () => {
+    expect(() =>
+      validateModelInput(
+        {
+          upstreamId: "openai/gpt-5-image-mini",
+          outputType: "image",
+          // The tool refuses any capability with nMax > MAX_MODEL_IMAGES, so a
+          // declaration above the cap would save cleanly and then make the
+          // model unusable at generation time.
+          imageCapabilities: {
+            n: { min: 1, max: MAX_MODEL_IMAGES + 1 },
+            sizes: ["1024x1024", "auto"],
+            aspectRatios: ["1:1", "auto"],
+          },
+        },
+        { imageStyle: "openrouter-images" },
+      ),
+    ).toThrow(new RegExp(`at most ${MAX_MODEL_IMAGES}`));
+  });
+
+  it("accepts an openrouter-images set exactly at the tool's execution cap", () => {
+    const value = validateModelInput(
+      {
+        upstreamId: "openai/gpt-5-image-mini",
+        outputType: "image",
+        imageCapabilities: {
+          n: { min: 1, max: MAX_MODEL_IMAGES },
+          sizes: ["1024x1024", "auto"],
+          aspectRatios: ["1:1", "auto"],
+        },
+      },
+      { imageStyle: "openrouter-images" },
+    );
+    expect(value.imageCapabilities).toMatchObject({ nMax: MAX_MODEL_IMAGES });
   });
 
   it("treats absent imageCapabilities on an image model as null", () => {
