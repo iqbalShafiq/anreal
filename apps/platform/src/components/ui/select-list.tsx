@@ -28,11 +28,21 @@ export type SelectOptionListProps = {
   onKeyDown?: KeyboardEventHandler;
   /** Where the option detail hover card appears relative to the popover. */
   hoverSide?: "top" | "right";
+  /**
+   * `"list"` (default) keeps the single-column rows every existing caller
+   * (Select) renders. `"grid"` renders the same `<li>`/`<button>` options as a
+   * card grid on the same listbox — only the container's layout changes.
+   */
+  layout?: "list" | "grid";
+  /** Grid columns. Ignored in list layout. Defaults to 1. */
+  columns?: number;
 };
 
 /**
  * Presentational listbox panel shared by Select and the model/reasoning
- * switcher. Open/close and keyboard logic live in the caller.
+ * switcher. Open/close and the caller's own keyboard logic stay with the
+ * caller; grid layouts add column-aware arrow handling here so list and grid
+ * share one selection implementation.
  */
 export function SelectOptionList({
   ref,
@@ -45,16 +55,82 @@ export function SelectOptionList({
   className = "",
   onKeyDown,
   hoverSide = "top",
+  layout = "list",
+  columns = 1,
 }: SelectOptionListProps) {
+  const isGrid = layout === "grid";
+  const columnCount = Math.max(1, Math.floor(columns) || 1);
+
+  /**
+   * Grid-only arrow handling. In list layout the caller owns the keys (Select
+   * moves by ±1 in `select.tsx`), so this stays inert there and every existing
+   * caller keeps its exact keyboard behaviour. In grid layout ↑/↓ move by a row
+   * (the column count) and ←/→ by one card, clamped at the edges.
+   */
+  const handleKeyDown: KeyboardEventHandler = (event) => {
+    onKeyDown?.(event);
+    if (!isGrid || event.defaultPrevented) return;
+    const keys = ["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight"];
+    if (!keys.includes(event.key)) return;
+
+    const list = event.currentTarget as HTMLUListElement;
+    const buttons = Array.from(
+      list.querySelectorAll<HTMLButtonElement>("button[data-option-value]"),
+    );
+    if (buttons.length === 0) return;
+    const currentIndex = buttons.indexOf(
+      document.activeElement as HTMLButtonElement,
+    );
+    if (currentIndex < 0) return;
+
+    event.preventDefault();
+    const delta =
+      event.key === "ArrowUp"
+        ? -columnCount
+        : event.key === "ArrowDown"
+          ? columnCount
+          : event.key === "ArrowLeft"
+            ? -1
+            : 1;
+    const target = Math.min(
+      buttons.length - 1,
+      Math.max(0, currentIndex + delta),
+    );
+    // Skip disabled cards so focus always lands somewhere usable, walking in
+    // the direction of travel and stopping once we come back to the target.
+    const stepDirection = Math.sign(delta) || 1;
+    let index = target;
+    for (let step = 0; step < buttons.length; step += 1) {
+      const button = buttons[index];
+      if (button && !button.disabled) {
+        button.focus();
+        return;
+      }
+      index = Math.min(buttons.length - 1, Math.max(0, index + stepDirection));
+      if (index === target) return;
+    }
+  };
+
   return (
     <ul
       ref={ref}
       id={id}
       role="listbox"
       aria-label={ariaLabel}
-      style={style}
-      onKeyDown={onKeyDown}
-      className={`chat-scroll overflow-hidden rounded-xl border border-white/[0.08] bg-canvas-elevated text-text shadow-[0_12px_40px_-12px_rgba(0,0,0,0.75)] animate-fade-in ${className}`}
+      style={
+        isGrid
+          ? {
+              ...style,
+              gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))`,
+            }
+          : style
+      }
+      data-layout={isGrid ? "grid" : undefined}
+      data-columns={isGrid ? String(columnCount) : undefined}
+      onKeyDown={handleKeyDown}
+      className={`chat-scroll overflow-hidden rounded-xl border border-white/[0.08] bg-canvas-elevated text-text shadow-[0_12px_40px_-12px_rgba(0,0,0,0.75)] animate-fade-in ${
+        isGrid ? "grid gap-1 p-1 " : ""
+      }${className}`}
     >
       {options.map((opt) => {
         const isSelected = opt.value === value;
