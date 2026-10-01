@@ -26,6 +26,7 @@ import {
   canSaveConnection,
   connectionSlugError,
   deriveConnectionSlug,
+  geminiHeaderWarning,
 } from "#/lib/provider-model-draft";
 import {
   issuesFromError,
@@ -317,6 +318,7 @@ function ProviderConnectionEditor({
       .map((row) => [row.name.trim(), row.value]),
   );
   const busy = saving || testing;
+  const headersWarning = geminiHeaderWarning(kind, headers);
 
   const signature = JSON.stringify({
     kind,
@@ -530,6 +532,12 @@ function ProviderConnectionEditor({
         secretValues
         disabled={busy}
       />
+
+      {headersWarning ? (
+        <p className="text-[11px] text-amber-400/90" role="status">
+          {headersWarning}
+        </p>
+      ) : null}
 
       <div className="flex flex-wrap items-center gap-2">
         <Button

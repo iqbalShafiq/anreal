@@ -6,6 +6,7 @@ import {
   draftFromListedModel,
   effortDiff,
   effortWarning,
+  geminiHeaderWarning,
   imageCapabilityDraft,
   imageCapabilityPayload,
   imageOutputTypeOptions,
@@ -138,6 +139,24 @@ describe("canSaveConnection", () => {
 
   it("lets an existing connection save without a test", () => {
     expect(canSaveConnection({ isNew: false, testPassed: false })).toBe(true);
+  });
+});
+
+describe("geminiHeaderWarning", () => {
+  it("warns when a Gemini connection declares custom headers", () => {
+    const warning = geminiHeaderWarning("gemini", { "X-Api-Key": "abc" });
+    expect(warning).not.toBeNull();
+    expect(warning).toMatch(/cannot send custom headers/i);
+    expect(warning).toMatch(/API key/i);
+  });
+
+  it("does not warn for a Gemini connection with no headers", () => {
+    expect(geminiHeaderWarning("gemini", {})).toBeNull();
+  });
+
+  it("does not warn for a non-Gemini connection with headers", () => {
+    expect(geminiHeaderWarning("compatible", { "X-Api-Key": "abc" })).toBeNull();
+    expect(geminiHeaderWarning("grok", { "X-Api-Key": "abc" })).toBeNull();
   });
 });
 

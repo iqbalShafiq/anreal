@@ -129,6 +129,25 @@ export function canSaveConnection(input: {
   return input.isNew ? input.testPassed : true;
 }
 
+/**
+ * Warn when a Gemini connection declares custom headers. `@anvia/gemini`'s
+ * client options are `{ apiKey, vertexAi?, client? }` with no header or fetch
+ * seam — the adapter builds the Google SDK itself — so a Gemini connection's
+ * headers are silently ignored, for text models as well as images. The form
+ * lets the user act on it here rather than discovering unauthenticated requests
+ * later. Non-blocking: the connection is still valid, so this only informs.
+ * `kind` is the selected provider kind and `headers` the headers the form would
+ * submit; a non-Gemini kind is never warned about.
+ */
+export function geminiHeaderWarning(
+  kind: string,
+  headers: Record<string, string>,
+): string | null {
+  if (kind !== "gemini") return null;
+  if (Object.keys(headers).length === 0) return null;
+  return "Gemini connections cannot send custom headers, so these will not be used. The API key is the only credential that reaches Gemini.";
+}
+
 /** Editable model-form state; numbers live as text so inputs stay controlled. */
 export type ModelDraft = {
   name: string;
