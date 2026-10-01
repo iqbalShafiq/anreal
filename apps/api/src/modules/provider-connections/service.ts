@@ -6,6 +6,7 @@ import {
   effortVocabulary,
   listProviderModels,
   redactProviderError,
+  type ImageStyle,
   type ModelContextLimits,
   type ProviderCredentials,
   type ProviderKind,
@@ -16,6 +17,7 @@ import {
   encodeProviderCredentials,
   sanitizeHeaders,
 } from "./credentials.js";
+import { parseImageCapabilities } from "../chat/image-capabilities.js";
 import {
   deriveConnectionSlug,
   deriveModelSlug,
@@ -205,6 +207,7 @@ export type ProviderModelInput = {
   description?: unknown;
   iconSvg?: unknown;
   outputType?: unknown;
+  imageCapabilities?: unknown;
   contextWindowTokens?: unknown;
   maxInputTokens?: unknown;
   maxOutputTokens?: unknown;
@@ -219,6 +222,8 @@ export type ValidatedModelInput = {
   description: string | null;
   iconSvg: string;
   outputType: "text" | "image";
+  /** The parsed ImageCapabilitySet for an image model; null for a text model. */
+  imageCapabilities: Record<string, unknown> | null;
   contextWindowTokens: number | null;
   maxInputTokens: number | null;
   maxOutputTokens: number | null;
@@ -254,6 +259,101 @@ function optionalPositiveInteger(path: string, value: unknown): number | null {
   return value;
 }
 
+/**
+ * Which declared capability keys each image style can honour. This list is the
+ * only thing standing between a user's declaration and a request the provider
+ * rejects, and there is no live test to catch a mistake here, so every cell is
+ * derived from what the adapter actually puts on the wire:
+ *
+ * - `openrouter-images` — the tool builds `additionalParams`
+ *   (`packages/agent/src/tools/image-generation.ts:592-601`) with `size`,
+ *   `aspect_ratio`, `quality`, `background` (+ `output_format: "png"`) and `n`;
+ *   `OpenRouterImageGenerationModel` merges all of `providerOptions` into the
+ *   request body (`packages/agent/src/providers/image-generation.ts:139-145`),
+ *   so all of them reach `POST /images`. The sizing key is `sizes` — the
+ *   OpenRouter adapter suppresses `size` only when `aspect_ratio` is present,
+ *   and never sends a `resolution`.
+ * - `gemini-native` — `@anvia/gemini` destructures `{ config, ...topLevel }`
+ *   from `providerOptions` and rebuilds `config.imageConfig.aspectRatio` from
+ *   `width`/`height` (`packages/agent/node_modules/@anvia/gemini/dist/index.js:1282-1292`),
+ *   so every declared control is overwritten or ignored. The tool still needs
+ *   `aspectRatios` + a sizing key to validate a requested ratio, and the
+ *   native shape is `aspect_ratio` + `resolution` — hence `resolutions`, never
+ *   `sizes`. `n` is fixed at 1 because the adapter never sends it.
+ * - `grok-native` — `@anvia/grok` builds
+ *   `{ ...providerOptions, model, prompt, n: 1, response_format, aspect_ratio }`
+ *   (`packages/agent/node_modules/@anvia/grok/dist/index.js:146-153`), pinning
+ *   `n: 1` and overwriting `aspect_ratio` with a ratio derived from
+ *   `width`/`height`. `quality`/`background`/`sizes` are not part of its
+ *   contract, so only the `resolutions` shape is declared, and `n` is 1.
+ *
+ * `n` and `aspectRatios` and exactly one of `sizes`/`resolutions` are
+ * structural: `parseImageCapabilities` requires them, so every non-`none`
+ * allow-list contains them. What differs per kind is the sizing key and
+ * whether `quality`/`background` are honoured.
+ */
+const IMAGE_CAPABILITY_ALLOWLIST: Record<
+  Exclude<ImageStyle, "none">,
+  ReadonlySet<string>
+> = {
+  "openrouter-images": new Set([
+    "n",
+    "aspectRatios",
+    "sizes",
+    "quality",
+    "background",
+  ]),
+  "gemini-native": new Set(["n", "aspectRatios", "resolutions"]),
+  "grok-native": new Set(["n", "aspectRatios", "resolutions"]),
+};
+
+/** `n` reaches the wire only for the OpenRouter-shaped adapter. */
+const IMAGE_STYLE_FIXED_N: ReadonlySet<ImageStyle> = new Set([
+  "gemini-native",
+  "grok-native",
+]);
+
+function validateImageCapabilities(
+  style: Exclude<ImageStyle, "none">,
+  value: unknown,
+): Record<string, unknown> {
+  let parsed;
+  try {
+    parsed = parseImageCapabilities(value);
+  } catch {
+    // A malformed declaration is a field-level error, never a 500 — the shape
+    // is owned by parseImageCapabilities, and its detail is deliberately not
+    // echoed (the catalog error carries no field information).
+    return fail(
+      "imageCapabilities",
+      "imageCapabilities is not valid for this provider kind",
+    );
+  }
+
+  // Re-read the raw keys so the allow-list is checked against what the user
+  // declared, not against the normalised shape the parser returns.
+  const declared = value as Record<string, unknown>;
+  const allowlist = IMAGE_CAPABILITY_ALLOWLIST[style];
+  const unsupported = Object.keys(declared).filter(
+    (key) => !allowlist.has(key),
+  );
+  if (unsupported.length > 0) {
+    return fail(
+      "imageCapabilities",
+      `imageCapabilities includes controls this provider kind does not support: ${unsupported.sort().join(", ")}`,
+    );
+  }
+
+  if (IMAGE_STYLE_FIXED_N.has(style) && parsed.nMax !== 1) {
+    return fail(
+      "imageCapabilities",
+      "imageCapabilities.n.max must be 1 for this provider kind",
+    );
+  }
+
+  return parsed as unknown as Record<string, unknown>;
+}
+
 export function validateModelInput(
   input: ProviderModelInput,
   meta: Pick<ProviderKindMeta, "imageStyle">,
@@ -279,6 +379,32 @@ export function validateModelInput(
       "This provider kind has no image endpoint; connect an OpenAI-compatible gateway to use image models",
     );
   }
+
+  // Image capabilities are meaningful only for an image model on an
+  // image-capable kind. A text model may not carry them at all, and the
+  // declaration is validated against the kind's allow-list before it is
+  // persisted, so a capability the adapter cannot honour is caught here
+  // rather than by the provider at generation time.
+  const imageCapabilities = (() => {
+    if (input.imageCapabilities === undefined || input.imageCapabilities === null) {
+      return null;
+    }
+    if (outputType !== "image") {
+      return fail(
+        "imageCapabilities",
+        "imageCapabilities is only valid for an image model",
+      );
+    }
+    if (meta.imageStyle === "none") {
+      // Unreachable: the outputType gate above already rejected this. Kept as
+      // a type narrowing so the allow-list index is total.
+      return fail(
+        "imageCapabilities",
+        "This provider kind has no image endpoint",
+      );
+    }
+    return validateImageCapabilities(meta.imageStyle, input.imageCapabilities);
+  })();
 
   const vocabulary = effortVocabulary();
   const reasoningEfforts =
@@ -355,6 +481,7 @@ export function validateModelInput(
         ? input.iconSvg
         : "",
     outputType,
+    imageCapabilities,
     contextWindowTokens,
     maxInputTokens,
     maxOutputTokens,
@@ -929,6 +1056,7 @@ export async function createConnectionModel(
       description: value.description,
       iconSvg: value.iconSvg,
       outputType: value.outputType,
+      imageCapabilities: value.imageCapabilities,
       contextWindowTokens: value.contextWindowTokens,
       maxInputTokens: value.maxInputTokens,
       maxOutputTokens: value.maxOutputTokens,
@@ -976,6 +1104,7 @@ export async function updateConnectionModel(
       description: value.description,
       iconSvg: value.iconSvg,
       outputType: value.outputType,
+      imageCapabilities: value.imageCapabilities,
       contextWindowTokens: value.contextWindowTokens,
       maxInputTokens: value.maxInputTokens,
       maxOutputTokens: value.maxOutputTokens,

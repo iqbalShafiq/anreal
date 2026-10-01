@@ -64,6 +64,8 @@ const modelCreateSchema = z
       .optional(),
     iconSvg: z.string().max(ICON_SVG_MAX).optional(),
     outputType: z.enum(["text", "image"]).optional(),
+    // Shape is validated by parseImageCapabilities, which owns the rules.
+    imageCapabilities: z.unknown().optional(),
     contextWindowTokens: z.number().int().positive().nullable().optional(),
     maxInputTokens: z.number().int().positive().nullable().optional(),
     maxOutputTokens: z.number().int().positive().nullable().optional(),

@@ -209,6 +209,31 @@ describe("provider routes", () => {
     expect(body.error).toMatch(/already in use/i);
   });
 
+  it("passes imageCapabilities through the strict model schema to the service", async () => {
+    service.createConnectionModel.mockResolvedValueOnce({ id: "pm_1" });
+    const caps = {
+      n: { min: 1, max: 4 },
+      sizes: ["1024x1024", "auto"],
+      aspectRatios: ["1:1", "auto"],
+    };
+    const res = await app.request("/api/providers/pc_1/models", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        upstreamId: "openai/gpt-5-image-mini",
+        outputType: "image",
+        imageCapabilities: caps,
+      }),
+    });
+    expect(res.status).toBe(201);
+    expect(service.createConnectionModel).toHaveBeenCalledWith(
+      expect.anything(),
+      "u_1",
+      "pc_1",
+      expect.objectContaining({ imageCapabilities: caps }),
+    );
+  });
+
   it("is registered before the :id route", async () => {
     service.testProviderConnection.mockClear();
     const res = await app.request("/api/providers/test", {

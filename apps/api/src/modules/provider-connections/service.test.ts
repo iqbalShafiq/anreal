@@ -12,6 +12,7 @@ import {
   setConnectionEnabled,
   testProviderConnection,
   toPublicConnection,
+  toPublicModel,
   updateConnection,
   updateConnectionModel,
   validateConnectionInput,
@@ -184,6 +185,194 @@ describe("validateModelInput", () => {
     expect(value.reasoningEfforts).toEqual([]);
   });
 
+  it("rejects imageCapabilities on a text model, naming the field", () => {
+    expect(() =>
+      validateModelInput(
+        {
+          upstreamId: "openai/gpt-5.6-luna",
+          imageCapabilities: {
+            n: { min: 1, max: 1 },
+            aspectRatios: ["1:1"],
+            resolutions: ["1K"],
+          },
+        },
+        meta,
+      ),
+    ).toThrow(/imageCapabilities/i);
+  });
+
+  it("accepts imageCapabilities on an image model and persists the parsed set", () => {
+    const value = validateModelInput(
+      {
+        upstreamId: "openai/gpt-5-image-mini",
+        outputType: "image",
+        imageCapabilities: {
+          n: { min: 1, max: 10 },
+          sizes: ["1024x1024", "auto"],
+          aspectRatios: ["1:1", "auto"],
+          quality: ["auto", "high"],
+          background: ["transparent"],
+        },
+      },
+      meta,
+    );
+    expect(value.imageCapabilities).toEqual({
+      nMax: 10,
+      sizes: ["1024x1024", "auto"],
+      aspectRatios: ["1:1", "auto"],
+      quality: ["auto", "high"],
+      background: ["transparent"],
+    });
+  });
+
+  it("treats absent imageCapabilities on an image model as null", () => {
+    const value = validateModelInput(
+      { upstreamId: "openai/gpt-5-image-mini", outputType: "image" },
+      meta,
+    );
+    expect(value.imageCapabilities).toBeNull();
+  });
+
+  it("still rejects an image model on a kind with no image endpoint, with the existing message", () => {
+    expect(() =>
+      validateModelInput(
+        {
+          upstreamId: "x",
+          outputType: "image",
+          imageCapabilities: { n: { min: 1, max: 1 }, aspectRatios: ["1:1"] },
+        },
+        { imageStyle: "none" },
+      ),
+    ).toThrow(/no image endpoint/i);
+  });
+
+  it("rejects a capability set the openrouter-images kind cannot honour", () => {
+    expect(() =>
+      validateModelInput(
+        {
+          upstreamId: "openai/gpt-5-image-mini",
+          outputType: "image",
+          // resolutions is the Gemini/Grok shape; the OpenRouter adapter sends
+          // `size` and never emits `resolution`.
+          imageCapabilities: { n: { min: 1, max: 1 }, aspectRatios: ["1:1"], resolutions: ["1K"] },
+        },
+        { imageStyle: "openrouter-images" },
+      ),
+    ).toThrow(/imageCapabilities/);
+  });
+
+  it("rejects a sizing control the gemini-native kind cannot honour", () => {
+    expect(() =>
+      validateModelInput(
+        {
+          upstreamId: "gemini-3.1-flash-image",
+          outputType: "image",
+          // `sizes` is the OpenAI-style shape; Gemini uses aspect_ratio +
+          // resolution and never sends a pixel size.
+          imageCapabilities: { n: { min: 1, max: 1 }, aspectRatios: ["1:1"], sizes: ["1024x1024"] },
+        },
+        { imageStyle: "gemini-native" },
+      ),
+    ).toThrow(/imageCapabilities/);
+  });
+
+  it("rejects a quality control the gemini-native kind cannot honour", () => {
+    expect(() =>
+      validateModelInput(
+        {
+          upstreamId: "gemini-3.1-flash-image",
+          outputType: "image",
+          imageCapabilities: {
+            n: { min: 1, max: 1 },
+            aspectRatios: ["1:1"],
+            resolutions: ["1K"],
+            quality: ["high"],
+          },
+        },
+        { imageStyle: "gemini-native" },
+      ),
+    ).toThrow(/imageCapabilities/);
+  });
+
+  it("rejects n.max greater than 1 for the gemini-native kind", () => {
+    expect(() =>
+      validateModelInput(
+        {
+          upstreamId: "gemini-3.1-flash-image",
+          outputType: "image",
+          imageCapabilities: { n: { min: 1, max: 4 }, aspectRatios: ["1:1"], resolutions: ["1K"] },
+        },
+        { imageStyle: "gemini-native" },
+      ),
+    ).toThrow(/imageCapabilities/);
+  });
+
+  it("accepts a resolutions-shaped capability set for gemini-native", () => {
+    const value = validateModelInput(
+      {
+        upstreamId: "gemini-3.1-flash-image",
+        outputType: "image",
+        imageCapabilities: {
+          n: { min: 1, max: 1 },
+          aspectRatios: ["1:1", "16:9"],
+          resolutions: ["1K"],
+        },
+      },
+      { imageStyle: "gemini-native" },
+    );
+    expect(value.imageCapabilities).toEqual({
+      nMax: 1,
+      aspectRatios: ["1:1", "16:9"],
+      resolutions: ["1K"],
+    });
+  });
+
+  it("rejects a quality control the grok-native kind cannot honour", () => {
+    expect(() =>
+      validateModelInput(
+        {
+          upstreamId: "grok-imagine-image",
+          outputType: "image",
+          imageCapabilities: {
+            n: { min: 1, max: 1 },
+            aspectRatios: ["1:1"],
+            resolutions: ["1K"],
+            quality: ["high"],
+          },
+        },
+        { imageStyle: "grok-native" },
+      ),
+    ).toThrow(/imageCapabilities/);
+  });
+
+  it("rejects n.max greater than 1 for the grok-native kind", () => {
+    expect(() =>
+      validateModelInput(
+        {
+          upstreamId: "grok-imagine-image",
+          outputType: "image",
+          imageCapabilities: { n: { min: 1, max: 2 }, aspectRatios: ["1:1"], resolutions: ["1K"] },
+        },
+        { imageStyle: "grok-native" },
+      ),
+    ).toThrow(/imageCapabilities/);
+  });
+
+  it("rejects an invalid imageCapabilities payload as a field-level error, not a 500", () => {
+    for (const bad of [
+      "not-an-object",
+      [1, 2, 3],
+      { n: { min: 1 }, aspectRatios: ["1:1"], resolutions: ["1K"] },
+    ]) {
+      expect(() =>
+        validateModelInput(
+          { upstreamId: "x", outputType: "image", imageCapabilities: bad },
+          meta,
+        ),
+      ).toThrow(ProviderInputError);
+    }
+  });
+
   it("rejects a context window that cannot hold its own budgets", () => {
     expect(() =>
       validateModelInput(
@@ -262,6 +451,46 @@ function updatedCredentialsRef(db: unknown): string {
   };
   return call.data.credentialsRef;
 }
+
+describe("toPublicModel", () => {
+  function row(overrides: Record<string, unknown> = {}) {
+    return {
+      id: "pm_1",
+      slug: "gw/model",
+      upstreamId: "model",
+      name: "Model",
+      label: "Model",
+      hint: null,
+      description: null,
+      iconSvg: "",
+      outputType: "text",
+      contextWindowTokens: null,
+      maxInputTokens: null,
+      maxOutputTokens: null,
+      reasoningEfforts: [],
+      capabilities: null,
+      imageCapabilities: null,
+      isActive: true,
+      sortOrder: 0,
+      connectionId: "pc_1",
+      ...overrides,
+    } as never;
+  }
+
+  it("projects the declared imageCapabilities for an image model", () => {
+    const caps = { n: { min: 1, max: 4 }, aspectRatios: ["1:1"], sizes: ["1024x1024"] };
+    const projected = toPublicModel(
+      row({ outputType: "image", imageCapabilities: caps }),
+    );
+    expect(projected.imageCapabilities).toEqual(caps);
+    expect(projected.outputType).toBe("image");
+  });
+
+  it("projects null imageCapabilities for a text model", () => {
+    const projected = toPublicModel(row());
+    expect(projected.imageCapabilities).toBeNull();
+  });
+});
 
 describe("connection CRUD", () => {
   it("never returns the credential reference", () => {
@@ -881,6 +1110,52 @@ describe("createConnectionModel", () => {
     expect(call.data.slug).toBe("gw/model-x-2");
   });
 
+  it("persists the validated imageCapabilities for an image model", async () => {
+    const db = makeDb({
+      providerConnection: {
+        count: vi.fn(async () => 1),
+        findFirst: vi.fn(async () => ({
+          id: "pc_1",
+          userId: "u_1",
+          kind: "compatible",
+          slug: "gw",
+          baseUrl: "https://gw.example/v1",
+          api: "chat",
+          credentialsRef: encodeProviderCredentials({ apiKey: "sk-stored" }),
+        })),
+      },
+      providerModel: {
+        count: vi.fn(async () => 0),
+        findMany: vi.fn(async () => []),
+        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({
+          id: "pm_2",
+          ...data,
+        })),
+      },
+    });
+
+    await createConnectionModel(db, "u_1", "pc_1", {
+      upstreamId: "openai/gpt-5-image-mini",
+      outputType: "image",
+      imageCapabilities: {
+        n: { min: 1, max: 4 },
+        sizes: ["1024x1024", "auto"],
+        aspectRatios: ["1:1", "auto"],
+      },
+    });
+
+    const call = (
+      db as never as { providerModel: { create: ReturnType<typeof vi.fn> } }
+    ).providerModel.create.mock.calls[0]?.[0] as {
+      data: { imageCapabilities: unknown };
+    };
+    expect(call.data.imageCapabilities).toEqual({
+      nMax: 4,
+      sizes: ["1024x1024", "auto"],
+      aspectRatios: ["1:1", "auto"],
+    });
+  });
+
   it("enforces the per-user model cap", async () => {
     const db = makeDb({
       providerConnection: {
@@ -955,6 +1230,31 @@ describe("updateConnectionModel", () => {
     expect(call.data.slug).toBe("gw/model-x");
     expect(call.data.name).toBe("Renamed");
     expect(call.data.reasoningEfforts).toEqual(["high"]);
+  });
+
+  it("persists imageCapabilities supplied on update", async () => {
+    const db = dbWithModel();
+
+    await updateConnectionModel(db, "u_1", "pc_1", "pm_1", {
+      upstreamId: "model-x",
+      outputType: "image",
+      imageCapabilities: {
+        n: { min: 1, max: 2 },
+        sizes: ["1024x1024"],
+        aspectRatios: ["1:1"],
+      },
+    });
+
+    const call = (
+      db as never as { providerModel: { update: ReturnType<typeof vi.fn> } }
+    ).providerModel.update.mock.calls[0]?.[0] as {
+      data: { imageCapabilities: unknown };
+    };
+    expect(call.data.imageCapabilities).toEqual({
+      nMax: 2,
+      sizes: ["1024x1024"],
+      aspectRatios: ["1:1"],
+    });
   });
 
   it("404s a model the caller does not own", async () => {
