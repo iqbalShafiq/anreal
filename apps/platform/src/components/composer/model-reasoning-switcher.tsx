@@ -1,4 +1,4 @@
-import { ChevronDown, Cpu } from "lucide-react";
+import { ChevronDown, Cpu, Plus } from "lucide-react";
 import {
   useEffect,
   useId,
@@ -23,6 +23,14 @@ import {
 
 /** Used only to order the icon fill; the actual list comes from props. */
 const EFFORT_ORDER = ["minimal", "low", "medium", "high", "xhigh", "max"];
+
+/**
+ * Sentinel value for the "Add a model…" row. A real provider model id is
+ * always `<connection-slug>/<model-slug>` (see PROVIDER_MODEL_SLUG_RE in
+ * apps/api/src/lib/provider-slug.ts): it starts with `[a-z0-9]` and contains
+ * exactly one `/`. A `__`-prefixed value with no slash can never collide.
+ */
+const ADD_MODEL_VALUE = "__add_model__";
 
 /**
  * Hover detail for a model option: input modality tags (icons only), max
@@ -96,6 +104,7 @@ export function ModelReasoningSwitcher({
   disabled,
   onModelChange,
   onReasoningChange,
+  onAddModel,
 }: {
   models: ModelInfo[];
   reasoningEfforts: ReasoningEffortInfo[];
@@ -104,6 +113,8 @@ export function ModelReasoningSwitcher({
   disabled?: boolean;
   onModelChange: (model: string) => void;
   onReasoningChange: (effort: string | null) => void;
+  /** When set, a trailing "Add a model…" row opens the BYOK add flow. */
+  onAddModel?: () => void;
 }) {
   const [openMenu, setOpenMenu] = useState<"model" | "reasoning" | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -198,6 +209,13 @@ export function ModelReasoningSwitcher({
     ),
     detail: <ModelDetail model={m} />,
   }));
+  if (onAddModel) {
+    modelOptions.push({
+      value: ADD_MODEL_VALUE,
+      label: "Add a model…",
+      icon: <Plus className="size-3.5 shrink-0 opacity-70" strokeWidth={1.75} />,
+    });
+  }
 
   const reasoningOptions: SelectOption[] =
     supportedEfforts.length === 0
@@ -235,7 +253,14 @@ export function ModelReasoningSwitcher({
             hoverSide={openMenu === "model" ? "right" : "top"}
             onSelect={(selectedValue) => {
               if (openMenu === "model") {
-                onModelChange(selectedValue);
+                // The add-model sentinel is an action, not a selection: it must
+                // not change the model or trigger the reasoning-effort
+                // resolution that runs on a real model change.
+                if (selectedValue === ADD_MODEL_VALUE) {
+                  onAddModel?.();
+                } else {
+                  onModelChange(selectedValue);
+                }
               } else {
                 onReasoningChange(selectedValue === "" ? null : selectedValue);
               }

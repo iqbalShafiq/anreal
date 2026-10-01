@@ -3,6 +3,7 @@ import {
   ChatSidebar,
   type WorkspaceViewMode,
 } from "#/components/sidebar/chat-sidebar";
+import { SettingsDialogProvider } from "#/components/settings/settings-dialog";
 import type { SessionUser } from "#/lib/auth-client";
 import type { SessionSummary } from "#/lib/session-history";
 import type { ProjectListItem } from "#/lib/api";
@@ -141,7 +142,7 @@ export function AppShell({
 
   // Aurora lives on the root route so auth → chat keeps the same ambient layer.
   // vt-* names pair with AuthShell for a continuous view-transition morph.
-  return (
+  const workspace = (
     <div className="relative flex h-[100dvh] max-h-[100dvh] overflow-hidden text-text">
       <div className="relative z-[1] flex min-h-0 min-w-0 flex-1">
         {/* Desktop sidebar — full-bleed; width track matches auth (272px) */}
@@ -209,5 +210,9 @@ export function AppShell({
         </div>
       </div>
     </div>
+  );
+
+  return (
+    <SettingsDialogProvider user={user}>{workspace}</SettingsDialogProvider>
   );
 }

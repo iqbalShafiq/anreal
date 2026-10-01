@@ -19,6 +19,9 @@ vi.mock("#/components/composer/features-popover", () => ({ FeaturesPopover: () =
 vi.mock("#/components/composer/message-queue-dock", () => ({ MessageQueueDock: () => null }));
 vi.mock("#/components/composer/model-reasoning-switcher", () => ({ ModelReasoningSwitcher: () => null }));
 vi.mock("#/components/images/generated-image-thumbnail", () => ({ GeneratedImageThumbnail: () => null }));
+vi.mock("#/components/settings/settings-dialog", () => ({
+  useSettingsDialog: () => ({ openSettings: vi.fn() }),
+}));
 vi.mock("#/lib/api", () => ({ isImageAttachmentLike: () => false }));
 
 import { ChatComposer } from "./chat-composer";

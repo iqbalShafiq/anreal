@@ -35,11 +35,17 @@ import {
   type ReasoningEffort,
 } from "#/lib/chat/models";
 
-type SettingsSection = "account" | "usage" | "personalization" | "providers";
+export type SettingsSection =
+  | "account"
+  | "usage"
+  | "personalization"
+  | "providers";
 
 export type SettingsModalProps = {
   open: boolean;
   user: SessionUser;
+  section: SettingsSection;
+  onSectionChange: (section: SettingsSection) => void;
   onClose: () => void;
   restoreFocusRef?: RefObject<HTMLElement | null>;
 };
@@ -80,6 +86,8 @@ function percent(part: number, total: number): number {
 export function SettingsModal({
   open,
   user,
+  section,
+  onSectionChange,
   onClose,
   restoreFocusRef,
 }: SettingsModalProps) {
@@ -87,7 +95,6 @@ export function SettingsModal({
   const closeRef = useRef<HTMLButtonElement>(null);
   const contentScrollRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
-  const [section, setSection] = useState<SettingsSection>("account");
   const [usage, setUsage] = useState<UserUsageSummary | null>(null);
   const [usageLoading, setUsageLoading] = useState(false);
   const [usageError, setUsageError] = useState<string | null>(null);
@@ -122,7 +129,6 @@ export function SettingsModal({
 
   useEffect(() => {
     if (!open) {
-      setSection("account");
       setUsage(null);
       setUsageError(null);
       return;
@@ -202,25 +208,25 @@ export function SettingsModal({
             active={section === "account"}
             icon={<UserRound className="size-4" strokeWidth={1.75} />}
             label="Account"
-            onClick={() => setSection("account")}
+            onClick={() => onSectionChange("account")}
           />
           <SettingsNavButton
             active={section === "usage"}
             icon={<Zap className="size-4" strokeWidth={1.75} />}
             label="Usage"
-            onClick={() => setSection("usage")}
+            onClick={() => onSectionChange("usage")}
           />
           <SettingsNavButton
             active={section === "personalization"}
             icon={<Sparkles className="size-4" strokeWidth={1.75} />}
             label="Personalization"
-            onClick={() => setSection("personalization")}
+            onClick={() => onSectionChange("personalization")}
           />
           <SettingsNavButton
             active={section === "providers"}
             icon={<KeyRound className="size-4" strokeWidth={1.75} />}
             label="Providers"
-            onClick={() => setSection("providers")}
+            onClick={() => onSectionChange("providers")}
           />
         </nav>
 

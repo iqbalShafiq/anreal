@@ -2,13 +2,12 @@ import { ChevronUp, LogOut, Settings } from "lucide-react";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "@tanstack/react-router";
-import { SettingsModal } from "#/components/settings/settings-modal";
+import { useSettingsDialog } from "#/components/settings/settings-dialog";
 import { authClient, userInitials, type SessionUser } from "#/lib/auth-client";
 import { clearStoredSessionId } from "#/lib/session-storage";
 
 export function AccountMenu({ user }: { user: SessionUser }) {
   const [open, setOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -21,6 +20,7 @@ export function AccountMenu({ user }: { user: SessionUser }) {
   const menuId = useId();
   const buttonId = useId();
   const navigate = useNavigate();
+  const { openSettings } = useSettingsDialog();
   const initials = userInitials(user);
 
   useEffect(() => {
@@ -109,7 +109,7 @@ export function AccountMenu({ user }: { user: SessionUser }) {
             role="menuitem"
             onClick={() => {
               setOpen(false);
-              setSettingsOpen(true);
+              openSettings("account");
             }}
             className="flex w-full cursor-pointer items-center gap-2.5 px-3 py-2.5 text-left text-sm text-text transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-white/[0.06] active:scale-[0.99]"
           >
@@ -170,13 +170,6 @@ export function AccountMenu({ user }: { user: SessionUser }) {
           />
         </button>
       </div>
-
-      <SettingsModal
-        open={settingsOpen}
-        user={user}
-        onClose={() => setSettingsOpen(false)}
-        restoreFocusRef={triggerRef}
-      />
     </div>
   );
 }
