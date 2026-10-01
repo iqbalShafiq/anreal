@@ -1,36 +1,71 @@
 // @vitest-environment jsdom
+import { useRef, type ReactNode } from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { SessionUser } from "#/lib/auth-client";
 
-vi.mock("#/components/settings/settings-modal", () => ({
-  SettingsModal: ({
-    open,
-    section,
-    onSectionChange,
-    onClose,
-  }: {
-    open: boolean;
-    section: string;
-    onSectionChange: (section: string) => void;
-    onClose: () => void;
-  }) => (
-    <dialog open={open}>
-      <p>{section} body</p>
-      <button type="button" onClick={() => onSectionChange("account")}>
-        nav account
-      </button>
-      <button type="button" onClick={() => onSectionChange("providers")}>
-        nav providers
-      </button>
-      <button type="button" onClick={onClose}>
-        Close settings
-      </button>
-    </dialog>
-  ),
+vi.mock("#/hooks/use-models", () => ({
+  useModels: () => ({
+    models: [],
+    reasoningEfforts: [],
+    status: "success",
+    error: null,
+    retry: () => undefined,
+  }),
+}));
+
+vi.mock("#/hooks/use-profile", () => ({
+  useProfilePersonalization: () => ({
+    data: null,
+    loading: false,
+    error: null,
+    resetting: null,
+    resetUser: vi.fn(),
+    resetProject: vi.fn(),
+  }),
+}));
+
+vi.mock("#/components/settings/providers-section", () => ({
+  ProvidersSection: () => <p>Providers body</p>,
+}));
+
+vi.mock("#/components/settings/personalization-section", () => ({
+  PersonalizationSection: () => <p>Personalization body</p>,
+}));
+
+vi.mock("#/components/settings/model-roles-section", () => ({
+  ModelRolesSection: () => <p>Model roles body</p>,
+}));
+
+vi.mock("#/components/chat/inset-scrollbar", () => ({
+  InsetScrollbar: () => null,
 }));
 
 import { SettingsDialogProvider, useSettingsDialog } from "./settings-dialog";
+
+beforeAll(() => {
+  // jsdom 30 ships an empty HTMLDialogElement (only the reflected `open`
+  // attribute). Supply the two lifecycle calls SettingsModal uses so its real
+  // close listener runs. The `close` event is what drives focus restoration.
+  window.HTMLDialogElement.prototype.showModal = function (
+    this: HTMLDialogElement,
+  ) {
+    this.open = true;
+  };
+  window.HTMLDialogElement.prototype.close = function (
+    this: HTMLDialogElement,
+  ) {
+    this.open = false;
+    this.dispatchEvent(new Event("close"));
+  };
+  // jsdom has no element scrolling; the modal resets it per section.
+  Element.prototype.scrollTo = () => undefined;
+  // Deterministic: run the modal's post-open focus frame synchronously.
+  vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+    cb(0);
+    return 0;
+  });
+});
 
 afterEach(cleanup);
 
@@ -54,31 +89,29 @@ function EntryPoints() {
   );
 }
 
+function renderProvider(children: ReactNode = <EntryPoints />) {
+  return render(
+    <SettingsDialogProvider user={user}>{children}</SettingsDialogProvider>,
+  );
+}
+
 describe("SettingsDialogProvider", () => {
   it("keeps one dialog and shows the last requested section across openings", () => {
-    render(
-      <SettingsDialogProvider user={user}>
-        <EntryPoints />
-      </SettingsDialogProvider>,
-    );
+    renderProvider();
 
     // First open: the composer entry lands on Providers.
     fireEvent.click(screen.getByRole("button", { name: "open providers" }));
-    expect(screen.getByText("providers body")).toBeTruthy();
-    expect(screen.queryByText("account body")).toBeNull();
+    expect(screen.getByText("Providers body")).toBeTruthy();
+    expect(screen.queryByText("Model roles body")).toBeNull();
     expect(document.querySelectorAll("dialog")).toHaveLength(1);
     expect(document.querySelectorAll("dialog[open]")).toHaveLength(1);
 
     // Second open while visible: the last requested section wins, no stale
     // section and no second dialog instance.
     fireEvent.click(screen.getByRole("button", { name: "open account" }));
-    expect(screen.getByText("account body")).toBeTruthy();
-    expect(screen.queryByText("providers body")).toBeNull();
+    expect(screen.getByText("Model roles body")).toBeTruthy();
+    expect(screen.queryByText("Providers body")).toBeNull();
     expect(document.querySelectorAll("dialog")).toHaveLength(1);
-
-    // The modal's own nav drives the same section state the provider owns.
-    fireEvent.click(screen.getByRole("button", { name: "nav providers" }));
-    expect(screen.getByText("providers body")).toBeTruthy();
 
     // Close, then reopen from the composer entry: still one dialog, still
     // Providers — nothing stale survives.
@@ -86,9 +119,33 @@ describe("SettingsDialogProvider", () => {
     expect(document.querySelectorAll("dialog[open]")).toHaveLength(0);
 
     fireEvent.click(screen.getByRole("button", { name: "open providers" }));
-    expect(screen.getByText("providers body")).toBeTruthy();
+    expect(screen.getByText("Providers body")).toBeTruthy();
     expect(document.querySelectorAll("dialog")).toHaveLength(1);
     expect(document.querySelectorAll("dialog[open]")).toHaveLength(1);
+  });
+
+  it("returns focus to the trigger supplied to openSettings on close", () => {
+    function FocusEntry() {
+      const { openSettings } = useSettingsDialog();
+      const triggerRef = useRef<HTMLButtonElement>(null);
+      return (
+        <button
+          ref={triggerRef}
+          type="button"
+          onClick={() => openSettings("account", triggerRef.current)}
+        >
+          focus entry
+        </button>
+      );
+    }
+    renderProvider(<FocusEntry />);
+
+    const trigger = screen.getByRole("button", { name: "focus entry" });
+    fireEvent.click(trigger);
+    expect(document.querySelectorAll("dialog[open]")).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Close settings" }));
+    expect(document.activeElement).toBe(trigger);
   });
 
   it("throws a clear error when used outside its provider", () => {
@@ -108,11 +165,7 @@ describe("SettingsDialogProvider", () => {
       captured = useSettingsDialog().openSettings;
       return null;
     }
-    const view = render(
-      <SettingsDialogProvider user={user}>
-        <Capture />
-      </SettingsDialogProvider>,
-    );
+    const view = renderProvider(<Capture />);
     const first = captured;
     view.rerender(
       <SettingsDialogProvider user={user}>

@@ -3,6 +3,7 @@ import {
   useCallback,
   useContext,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -13,7 +14,10 @@ import {
 import type { SessionUser } from "#/lib/auth-client";
 
 type SettingsDialogContextValue = {
-  openSettings: (section?: SettingsSection) => void;
+  openSettings: (
+    section?: SettingsSection,
+    trigger?: HTMLElement | null,
+  ) => void;
 };
 
 const SettingsDialogContext = createContext<SettingsDialogContextValue | null>(
@@ -34,11 +38,17 @@ export function SettingsDialogProvider({
 }) {
   const [open, setOpen] = useState(false);
   const [section, setSection] = useState<SettingsSection>("account");
+  const restoreFocusRef = useRef<HTMLElement | null>(null);
 
-  const openSettings = useCallback((next: SettingsSection = "account") => {
-    setSection(next);
-    setOpen(true);
-  }, []);
+  const openSettings = useCallback(
+    (next: SettingsSection = "account", trigger: HTMLElement | null = null) => {
+      // Only the caller knows which element should regain focus on close.
+      restoreFocusRef.current = trigger;
+      setSection(next);
+      setOpen(true);
+    },
+    [],
+  );
 
   const closeSettings = useCallback(() => setOpen(false), []);
 
@@ -55,6 +65,7 @@ export function SettingsDialogProvider({
         section={section}
         onSectionChange={setSection}
         onClose={closeSettings}
+        restoreFocusRef={restoreFocusRef}
       />
     </SettingsDialogContext.Provider>
   );

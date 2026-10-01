@@ -601,6 +601,7 @@ export function ChatComposer({
               onOpenSkills={onOpenSkills}
               onOpenMcp={onOpenMcp}
             />
+            {/* Composer entry passes no trigger: its row lives inside the Select, so use the dialog's native focus restore. */}
             <ModelReasoningSwitcher
               models={models}
               reasoningEfforts={reasoningEfforts}

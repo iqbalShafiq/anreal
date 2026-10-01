@@ -109,7 +109,7 @@ export function AccountMenu({ user }: { user: SessionUser }) {
             role="menuitem"
             onClick={() => {
               setOpen(false);
-              openSettings("account");
+              openSettings("account", triggerRef.current);
             }}
             className="flex w-full cursor-pointer items-center gap-2.5 px-3 py-2.5 text-left text-sm text-text transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-white/[0.06] active:scale-[0.99]"
           >
