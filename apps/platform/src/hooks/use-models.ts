@@ -55,5 +55,9 @@ export function useModels(): {
   // tolerates a setState after unmount, so no abort machinery is added.
   useEffect(() => subscribeModelsCache(() => load(true)), [load]);
 
+  // `retry` aliases `load`. The optional `force` is safe: the only caller is
+  // the composer's error-state button, which passes a click event (truthy) and
+  // renders only while the catalog is null, so both forms issue one request.
+  // Do not wrap this in an argument-less function.
   return { ...state, retry: load };
 }
