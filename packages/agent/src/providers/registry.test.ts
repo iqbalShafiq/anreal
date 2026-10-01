@@ -6,19 +6,28 @@ const mocks = vi.hoisted(() => {
     modelId: (options as { modelId: string }).modelId,
     options,
   }));
+  // The native image factories report the id from their own options, so a
+  // faithful stub must too — that is the property the factory test pins.
+  const imageGenerationModel = vi.fn((options: unknown) => ({
+    provider: "stub",
+    modelId: (options as { modelId: string }).modelId,
+    options,
+  }));
   type ClientShape = {
     options?: unknown;
     completionModel: typeof completionModel;
+    imageGenerationModel?: typeof imageGenerationModel;
     listModels?: unknown;
   };
   return {
     completionModel,
+    imageGenerationModel,
     // A regular function, not an arrow: the registry constructs these clients
     // with `new`, and `new` on an arrow-function mock throws. The return type
     // keeps every member optional except completionModel so per-test
     // `mockImplementationOnce` values stay assignable.
     client: vi.fn(function (this: unknown, options: unknown): ClientShape {
-      return { options, completionModel };
+      return { options, completionModel, imageGenerationModel };
     }),
   };
 });
@@ -42,6 +51,7 @@ vi.mock("@anvia/grok", () => ({
 vi.mock("@anvia/mistral", () => ({ MistralClient: mocks.client }));
 
 import {
+  createImageGenerationModelFor,
   createCompletionModelFor,
   effortVocabulary,
   PROVIDER_KIND_META,
@@ -220,6 +230,124 @@ describe("createCompletionModelFor", () => {
 
     expect(mocks.client).toHaveBeenCalledWith(
       expect.objectContaining({ headers: { "X-Workspace": "acme" } }),
+    );
+  });
+});
+
+describe("createImageGenerationModelFor", () => {
+  const fetchFn = vi.fn(async () => new Response("{}"));
+
+  it("builds the native Gemini model with the id it was given", () => {
+    mocks.client.mockClear();
+    mocks.imageGenerationModel.mockClear();
+
+    const model = createImageGenerationModelFor({
+      kind: "gemini",
+      modelId: "gemini-3.1-flash-image",
+      apiKey: "AIza-test",
+      fetchFn,
+    });
+
+    // A BYOK image model is addressed by its stored upstream id, so the
+    // constructor must receive it — never a hardcoded default.
+    expect(model?.modelId).toBe("gemini-3.1-flash-image");
+    // Ruling A: v1 drives Gemini images through `generateContent` only. The
+    // `api` field is observable here because the adapter selects its model
+    // class from it (dist/index.js:1615).
+    expect(mocks.imageGenerationModel).toHaveBeenCalledWith({
+      api: "generateContent",
+      modelId: "gemini-3.1-flash-image",
+    });
+  });
+
+  it("builds the native Grok model with the id it was given", () => {
+    mocks.client.mockClear();
+    mocks.imageGenerationModel.mockClear();
+
+    const model = createImageGenerationModelFor({
+      kind: "grok",
+      modelId: "grok-imagine-image-quality",
+      apiKey: "xai-test",
+      fetchFn,
+    });
+
+    expect(model?.modelId).toBe("grok-imagine-image-quality");
+    expect(mocks.imageGenerationModel).toHaveBeenCalledWith({
+      modelId: "grok-imagine-image-quality",
+    });
+  });
+
+  it("builds an OpenRouter-shaped model with the id it was given", () => {
+    const model = createImageGenerationModelFor({
+      kind: "compatible",
+      modelId: "my-gateway/flux-pro",
+      apiKey: "sk-test",
+      baseUrl: "https://gw.example/v1",
+      fetchFn,
+    });
+
+    expect(model?.modelId).toBe("my-gateway/flux-pro");
+  });
+
+  it("reaches every native client with a pass-through fetch where the adapter has a seam", () => {
+    mocks.client.mockClear();
+
+    createImageGenerationModelFor({
+      kind: "grok",
+      modelId: "grok-imagine-image",
+      apiKey: "xai-test",
+      fetchFn,
+    });
+
+    // Grok carries the fetch on the client options, which is the only public
+    // seam it exposes (GrokClientOptions.fetch, dist/index.d.ts:22).
+    expect(mocks.client).toHaveBeenCalledWith(
+      expect.objectContaining({ apiKey: "xai-test", fetch: fetchFn }),
+    );
+  });
+
+  it("throws a clear error when a compatible endpoint has no base URL", () => {
+    expect(() =>
+      createImageGenerationModelFor({
+        kind: "compatible",
+        modelId: "my-gateway/flux-pro",
+        apiKey: "sk-test",
+        fetchFn,
+      }),
+    ).toThrow(/base ?url/i);
+  });
+
+  it("returns null, and never throws, for kinds with no image endpoint", () => {
+    for (const kind of ["openai", "anthropic", "mistral"] as const) {
+      expect(
+        createImageGenerationModelFor({
+          kind,
+          modelId: "some-model",
+          apiKey: "sk-test",
+          fetchFn,
+        }),
+      ).toBeNull();
+    }
+  });
+
+  it("injects the fetch into the OpenRouter-shaped instance", async () => {
+    const seenFetch = vi.fn(async () => new Response("{}"));
+    const model = createImageGenerationModelFor({
+      kind: "compatible",
+      modelId: "my-gateway/flux-pro",
+      apiKey: "sk-test",
+      baseUrl: "https://gw.example/v1",
+      fetchFn: seenFetch,
+    });
+
+    // Drive the instance: if the injected fetch reached it, our fake sees the
+    // call and no real network is touched.
+    await expect(
+      model?.imageGeneration({ prompt: "a cat", width: 512, height: 512 }),
+    ).rejects.toThrow(/no usable images/i);
+    expect(seenFetch).toHaveBeenCalledWith(
+      "https://gw.example/v1/images",
+      expect.objectContaining({ method: "POST" }),
     );
   });
 });

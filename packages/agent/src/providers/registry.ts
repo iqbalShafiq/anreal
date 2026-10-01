@@ -6,6 +6,7 @@ import {
   type ModelContextLimits,
   type StreamingCompletionModel,
 } from "@anvia/core/completion";
+import type { ImageGenerationModel } from "@anvia/core/image-generation";
 import {
   ANTHROPIC_REASONING_EFFORTS,
   AnthropicClient,
@@ -14,6 +15,8 @@ import { GEMINI_REASONING_EFFORTS, GeminiClient } from "@anvia/gemini";
 import { GROK_REASONING_EFFORTS, GrokClient } from "@anvia/grok";
 import { MistralClient } from "@anvia/mistral";
 import { OPENAI_REASONING_EFFORTS, OpenAIClient } from "@anvia/openai";
+
+import { OpenRouterImageGenerationModel } from "./image-generation.js";
 
 export const PROVIDER_KINDS = [
   "openai",
@@ -231,6 +234,92 @@ export function createCompletionModelFor(
           ...explicitControls(efforts),
         },
       );
+    }
+  }
+}
+
+export type ImageTarget = {
+  kind: ProviderKind;
+  /** The stored upstream id — a BYOK model is addressed by this, never by slug. */
+  modelId: string;
+  apiKey: string;
+  baseUrl?: string | null;
+  /** Injected for tests and for callers that proxy requests. */
+  fetchFn?: typeof fetch;
+};
+
+/**
+ * Build the image-generation model a BYOK target names, dispatched on the
+ * kind's declared `imageStyle` — never on the kind name, so
+ * `PROVIDER_KIND_META` stays the single source of truth.
+ *
+ * Returns `null` exactly when the kind has no image endpoint (`imageStyle:
+ * "none"`), which is the caller's signal to fall back or report unavailable.
+ *
+ * The resolved target's id is authoritative for every kind: the native
+ * adapters take the model id as a constructor/function parameter and overwrite
+ * any per-request `model` (Grok dist/index.js:144-153, Gemini
+ * dist/index.js:1613-1615), and the OpenRouter-shaped adapter is given the same
+ * id as its `defaultModel`. The tool's per-request `model` override therefore
+ * remains an OpenRouter-only capability (Design ruling 2).
+ *
+ * Only the OpenRouter-shaped and Grok adapters expose a public `fetch` seam, so
+ * the injected `fetchFn` reaches those two. `@anvia/gemini` accepts only
+ * `{ apiKey }` on its managed client path — it builds the Google SDK itself and
+ * exposes no fetch option — so a Gemini test drives the adapter through a
+ * stubbed `GeminiClient` rather than an injected fetch.
+ */
+export function createImageGenerationModelFor(
+  target: ImageTarget,
+): ImageGenerationModel<unknown> | null {
+  const { kind, modelId, apiKey, baseUrl, fetchFn } = target;
+
+  switch (PROVIDER_KIND_META[kind].imageStyle) {
+    case "openrouter-images": {
+      // The only kind that cannot reach a provider without an address; the
+      // metadata says so, so the error is derived from it rather than assumed.
+      if (!baseUrl) {
+        throw new Error(
+          `The ${kind} provider requires a base URL for image generation.`,
+        );
+      }
+      return new OpenRouterImageGenerationModel({
+        apiKey,
+        baseUrl,
+        defaultModel: modelId,
+        ...(fetchFn ? { fetchFn } : {}),
+      });
+    }
+    case "gemini-native": {
+      // Ruling A: v1 drives Gemini images through `generateContent` only. That
+      // is the family whose request the normaliser models
+      // (`config.imageConfig.aspectRatio`); `generateImages` (Imagen) has a
+      // different contract, so routing an Imagen id here would be a wrong
+      // request rather than a degraded one. Task 3 rejects a known
+      // `generateImages`-family id at save time.
+      return new GeminiClient({ apiKey }).imageGenerationModel({
+        api: "generateContent",
+        modelId,
+      });
+    }
+    case "grok-native": {
+      // Grok carries the fetch on the client options, which is the seam its
+      // image model reads (GrokClientOptions.fetch → this.fetchFn →
+      // GrokImageGenerationModel, dist/index.js:552-576).
+      return new GrokClient({
+        apiKey,
+        ...(baseUrl ? { baseUrl } : {}),
+        ...(fetchFn ? { fetch: fetchFn } : {}),
+      }).imageGenerationModel({ modelId });
+    }
+    // No image endpoint: the caller has already decided not to build a model,
+    // so return `null` rather than throwing in a path that should be
+    // unreachable.
+    case "none":
+      return null;
+    default: {
+      const exhaustive: never = PROVIDER_KIND_META[kind].imageStyle;
+      return exhaustive;
     }
   }
 }
