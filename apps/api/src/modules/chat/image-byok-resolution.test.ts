@@ -92,10 +92,32 @@ function imageRow(overrides: Partial<RecipeImageModelRow> = {}): RecipeImageMode
   };
 }
 
+/**
+ * A fake db that honours the predicate's `where` clause rather than ignoring
+ * it. Honouring `where.slug` is what lets the Critical case actually exercise
+ * the fallback: with an ignorable filter the pinned seeded id resolves in
+ * branch 1 and the genuine discrimination (branch 3) never runs. The `kind.in`
+ * narrowing and `orderBy: { slug: "asc" }` fallback are honoured too, so every
+ * full build-and-reconstruct path is decided by the pinned id, not by luck.
+ */
 function fakeImageDb(row: RecipeImageModelRow | null): RecipeImageDb & {
   providerModel: { findFirst: ReturnType<typeof vi.fn> };
 } {
-  const findFirst = vi.fn(async () => row);
+  const findFirst = vi.fn(async (args: unknown) => {
+    if (!row) return null;
+    const where = (args as {
+      where?: { slug?: string; connection?: { kind?: { in?: string[] } } };
+    }).where;
+    if (where?.slug !== undefined && row.slug !== where.slug) return null;
+    const kindFilter = where?.connection?.kind?.in;
+    if (
+      kindFilter &&
+      !kindFilter.includes((row.connection?.kind ?? "") as string)
+    ) {
+      return null;
+    }
+    return row;
+  });
   return { providerModel: { findFirst } } as never;
 }
 
