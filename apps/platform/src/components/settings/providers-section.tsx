@@ -192,12 +192,16 @@ export function ProvidersSection({ active }: { active: boolean }) {
         />
       ) : (
         <>
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-xs text-text-muted">
-              {rows.length === 0
-                ? "No providers yet — add your first connection."
-                : "Keys are encrypted at rest. Toggle a connection to include its models."}
-            </p>
+          <div
+            className={`flex items-center gap-2 ${
+              rows.length === 0 ? "justify-between" : "justify-end"
+            }`}
+          >
+            {rows.length === 0 ? (
+              <p className="text-xs text-text-muted">
+                No providers yet — add your first connection.
+              </p>
+            ) : null}
             <Button
               variant="primary"
               size="sm"
