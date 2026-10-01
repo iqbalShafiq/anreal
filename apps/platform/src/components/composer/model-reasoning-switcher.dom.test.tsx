@@ -242,3 +242,185 @@ describe("ModelReasoningSwitcher model menu: panel width follows the view", () =
     expect(panelWidth()).toBe(560);
   });
 });
+
+describe("ModelReasoningSwitcher model menu: grid columns follow the panel width (I3)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /**
+   * Grid column count, parsed from the `repeat(N, …)` track list the list sets
+   * — the behavioural signal, not the CSS-redundant `data-columns`.
+   */
+  async function gridColumnCount(): Promise<number> {
+    const list = screen.getByRole("listbox", { name: "Model" }) as HTMLUListElement;
+    const match = /repeat\((\d+)/.exec(list.style.gridTemplateColumns);
+    return match ? Number(match[1]) : 0;
+  }
+
+  it("shows three columns on a wide panel", async () => {
+    stubGeometry(240, 1200);
+    renderSwitcher();
+    fireEvent.click(screen.getByRole("button", { name: "Model" }));
+    await flush();
+    fireEvent.click(screen.getByRole("button", { name: "Grid view" }));
+    await flush();
+
+    // Panel 560 ≥ 480 → 3 columns, and it re-run after the toggle.
+    await vi.waitFor(async () => expect(await gridColumnCount()).toBe(3));
+  });
+
+  it("shows two columns on a narrow panel", async () => {
+    stubGeometry(200, 400);
+    renderSwitcher();
+    fireEvent.click(screen.getByRole("button", { name: "Model" }));
+    await flush();
+    fireEvent.click(screen.getByRole("button", { name: "Grid view" }));
+    await flush();
+
+    // Panel 384 < 480 → 2 columns.
+    await vi.waitFor(async () => expect(await gridColumnCount()).toBe(2));
+  });
+
+  it("recomputes the columns when the viewport resizes", async () => {
+    stubGeometry(240, 1200);
+    renderSwitcher();
+    fireEvent.click(screen.getByRole("button", { name: "Model" }));
+    await flush();
+    fireEvent.click(screen.getByRole("button", { name: "Grid view" }));
+    await flush();
+    await vi.waitFor(async () => expect(await gridColumnCount()).toBe(3));
+
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      writable: true,
+      value: 400,
+    });
+    fireEvent(window, new Event("resize"));
+
+    await vi.waitFor(async () => expect(await gridColumnCount()).toBe(2));
+  });
+});
+
+describe("ModelReasoningSwitcher model menu: filters survive closing (I2)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const twoModels: ModelInfo[] = [
+    { ...model, modelId: "gateway/alpha", name: "Alpha", label: "Alpha" },
+    { ...model, modelId: "gateway/beta", name: "Beta", label: "Beta" },
+  ];
+
+  function renderMany() {
+    render(
+      <ModelReasoningSwitcher
+        models={twoModels}
+        reasoningEfforts={efforts}
+        model={twoModels[0].modelId}
+        reasoningEffort="max"
+        onModelChange={vi.fn()}
+        onReasoningChange={vi.fn()}
+      />,
+    );
+  }
+
+  const optionCount = () =>
+    document.querySelectorAll("button[data-option-value]").length;
+
+  it("keeps the query and its active dot after close and reopen", async () => {
+    renderMany();
+    fireEvent.click(screen.getByRole("button", { name: "Model" }));
+    await flush();
+
+    const search = screen.getByRole("searchbox", { name: "Search models" });
+    fireEvent.change(search, { target: { value: "alpha" } });
+    expect(optionCount()).toBe(1);
+
+    // Close via the trigger, then reopen.
+    fireEvent.click(screen.getByRole("button", { name: "Model" }));
+    fireEvent.click(screen.getByRole("button", { name: "Model" }));
+    await flush();
+
+    // The query is still applied...
+    expect((screen.getByRole("searchbox", { name: "Search models" }) as HTMLInputElement).value).toBe(
+      "alpha",
+    );
+    expect(optionCount()).toBe(1);
+
+    // ...and the Filter button still carries its active dot.
+    const filterButton = screen.getByRole("button", { name: "Filter" });
+    expect(filterButton.querySelector("span[aria-hidden]")).not.toBeNull();
+  });
+});
+
+describe("ModelReasoningSwitcher model menu: aria wiring (I1)", () => {
+  /** Elements carrying `id`, so uniqueness needs no CSS-selector escaping. */
+  const elementsWithId = (id: string) =>
+    [...document.querySelectorAll("[id]")].filter((element) => element.id === id);
+
+  it("points the model trigger at the real model listbox, with one id", async () => {
+    renderSwitcher();
+    fireEvent.click(screen.getByRole("button", { name: "Model" }));
+    await flush();
+
+    const modelList = screen.getByRole("listbox", { name: "Model" });
+    expect(
+      screen.getByRole("button", { name: "Model" }).getAttribute("aria-controls"),
+    ).toBe(modelList.id);
+    // The id lives on the listbox, exactly once — not on a wrapper too.
+    expect(elementsWithId(modelList.id)).toHaveLength(1);
+    expect(modelList.getAttribute("role")).toBe("listbox");
+  });
+
+  it("points the reasoning trigger at the real reasoning listbox, with one id", async () => {
+    renderSwitcher();
+    fireEvent.click(screen.getByRole("button", { name: "Reasoning effort" }));
+    await flush();
+
+    const reasoningList = screen.getByRole("listbox", { name: "Reasoning effort" });
+    expect(
+      screen
+        .getByRole("button", { name: "Reasoning effort" })
+        .getAttribute("aria-controls"),
+    ).toBe(reasoningList.id);
+    expect(elementsWithId(reasoningList.id)).toHaveLength(1);
+  });
+});
+
+describe("ModelReasoningSwitcher model menu: Esc keeps the sort (M6)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("clears the query on Esc without resetting the chosen sort", async () => {
+    render(
+      <ModelReasoningSwitcher
+        models={[model]}
+        reasoningEfforts={efforts}
+        model={model.modelId}
+        reasoningEffort="max"
+        onModelChange={vi.fn()}
+        onReasoningChange={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Model" }));
+    await flush();
+
+    fireEvent.click(screen.getByRole("button", { name: "Sort" }));
+    fireEvent.click(screen.getByRole("button", { name: "Name" }));
+    expect(
+      screen.getByRole("button", { name: "Name" }).getAttribute("aria-pressed"),
+    ).toBe("true");
+
+    const search = screen.getByRole("searchbox", { name: "Search models" });
+    fireEvent.change(search, { target: { value: "my" } });
+    fireEvent.keyDown(search, { key: "Escape" });
+
+    // Query cleared, menu open, and the Name sort is still pressed.
+    expect((search as HTMLInputElement).value).toBe("");
+    expect(
+      screen.getByRole("button", { name: "Name" }).getAttribute("aria-pressed"),
+    ).toBe("true");
+  });
+});

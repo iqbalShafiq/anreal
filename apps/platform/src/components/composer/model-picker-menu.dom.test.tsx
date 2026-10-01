@@ -1,9 +1,21 @@
 // @vitest-environment jsdom
+import { useState } from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ModelInfo } from "#/lib/api";
 import { MODEL_PICKER_VIEW_KEY } from "#/lib/chat-preferences";
-import { ModelPickerMenu } from "./model-picker-menu";
+import {
+  EMPTY_PICKER_FILTERS,
+  type PickerFilterState,
+  type PickerSort,
+} from "#/lib/model-picker";
+import {
+  GRID_CARD_HEIGHT,
+  GRID_VISIBLE_ROWS,
+  LIST_ROW_HEIGHT,
+  LIST_VISIBLE_ROWS,
+  ModelPickerMenu,
+} from "./model-picker-menu";
 
 afterEach(cleanup);
 
@@ -84,18 +96,66 @@ function optionValues(): string[] {
   ).map((button) => button.getAttribute("data-option-value") ?? "");
 }
 
-function renderMenu(models: ModelInfo[], onAddModel?: () => void) {
+/**
+ * Renders the menu under a stateful wrapper, mirroring the switcher: filter and
+ * sort are controlled props owned by the caller, so a test can assert they
+ * survive a remount (I2) and that Esc does not reset the sort (M6).
+ */
+function renderMenu(
+  models: ModelInfo[],
+  options: {
+    onAddModel?: () => void;
+    onClose?: () => void;
+    gridColumns?: number;
+  } = {},
+) {
   const onSelect = vi.fn();
   render(
+    <MenuHost
+      models={models}
+      onSelect={onSelect}
+      onAddModel={options.onAddModel}
+      onClose={options.onClose}
+      gridColumns={options.gridColumns ?? 3}
+    />,
+  );
+  return { onSelect };
+}
+
+/** A small stateful host: the menu is controlled, exactly as in production. */
+function MenuHost({
+  models,
+  onSelect,
+  onAddModel,
+  onClose,
+  gridColumns,
+}: {
+  models: ModelInfo[];
+  onSelect: (value: string) => void;
+  onAddModel?: () => void;
+  onClose?: () => void;
+  gridColumns: number;
+}) {
+  const [filters, setFilters] = useState<PickerFilterState>(
+    EMPTY_PICKER_FILTERS,
+  );
+  const [sort, setSort] = useState<PickerSort>("default");
+  return (
     <ModelPickerMenu
+      id="model-list"
       models={models}
       value={models[0]?.modelId ?? ""}
       onSelect={onSelect}
       onAddModel={onAddModel}
       open
-    />,
+      onClose={onClose}
+      filters={filters}
+      onFiltersChange={setFilters}
+      sort={sort}
+      onSortChange={setSort}
+      gridColumns={gridColumns}
+    />
   );
-  return { onSelect };
 }
 
 const search = () => screen.getByRole("searchbox", { name: "Search models" });
@@ -224,12 +284,16 @@ describe("ModelPickerMenu: scroll cap and the action row", () => {
     catalogModel(`openai/model-${index}`, { name: `Model ${index}` }),
   );
 
-  it("caps the option container and keeps 'Add a model…' outside it", () => {
+  it("caps the option container at 8 rows and keeps 'Add a model…' outside it", () => {
     const onAddModel = vi.fn();
-    renderMenu(manyModels, onAddModel);
+    renderMenu(manyModels, { onAddModel });
 
     const list = optionList();
-    expect(list.style.maxHeight).not.toBe("");
+    // The exact cap: 8 rows at the component's own row height. A regression to
+    // any other number, or a changed row height, fails here.
+    expect(list.style.maxHeight).toBe(
+      `${LIST_VISIBLE_ROWS * LIST_ROW_HEIGHT}px`,
+    );
     expect(list.className).toContain("overflow-y-auto");
 
     const addButton = screen.getByText("Add a model…").closest("button");
@@ -241,12 +305,14 @@ describe("ModelPickerMenu: scroll cap and the action row", () => {
     expect(onAddModel).toHaveBeenCalledOnce();
   });
 
-  it("caps the grid too", () => {
+  it("caps the grid at 3 rows", () => {
     localStorage.setItem(MODEL_PICKER_VIEW_KEY, "grid");
     renderMenu(manyModels);
 
     const list = optionList();
-    expect(list.style.maxHeight).not.toBe("");
+    expect(list.style.maxHeight).toBe(
+      `${GRID_VISIBLE_ROWS * GRID_CARD_HEIGHT}px`,
+    );
     expect(list.className).toContain("grid");
   });
 });
@@ -303,15 +369,7 @@ describe("ModelPickerMenu: keyboard", () => {
 
   it("closes on Esc when there is nothing to clear", () => {
     const onClose = vi.fn();
-    render(
-      <ModelPickerMenu
-        models={models}
-        value={models[0].modelId}
-        onSelect={vi.fn()}
-        open
-        onClose={onClose}
-      />,
-    );
+    renderMenu(models, { onClose });
 
     fireEvent.keyDown(search(), { key: "Escape" });
 

@@ -39,17 +39,35 @@ import {
 } from "#/components/ui/select-list";
 import { ModelDetail, ModelIcon } from "./model-reasoning-switcher";
 
-/** Row caps, in rows; the option container scrolls past this. */
-const LIST_VISIBLE_ROWS = 8;
-const GRID_VISIBLE_ROWS = 3;
-const GRID_COLUMNS = 3;
+/**
+ * Row caps, in rows; the option container scrolls past this. The cap is
+ * exported so tests can assert the rendered height against the same constants
+ * the component uses, rather than a magic number that could drift.
+ */
+export const LIST_VISIBLE_ROWS = 8;
+export const GRID_VISIBLE_ROWS = 3;
 /**
  * Approximate rendered row heights, used to size the scroll cap from the row
  * counts above. List rows are a name line plus a hint line with py-2 (~48px);
  * grid cards add the container's gap and a little breathing room (~56px).
  */
-const LIST_ROW_HEIGHT = 48;
-const GRID_CARD_HEIGHT = 56;
+export const LIST_ROW_HEIGHT = 48;
+export const GRID_CARD_HEIGHT = 56;
+/**
+ * Grid column count by panel width (spec §7.2): three columns at ≥ 480px,
+ * two below it. Exported so the caller — which owns the panel width — and the
+ * tests share one definition.
+ */
+export const GRID_WIDE_MIN_WIDTH = 480;
+export const GRID_WIDE_COLUMNS = 3;
+export const GRID_NARROW_COLUMNS = 2;
+
+/** The grid columns a panel of `panelWidth` should show. */
+export function gridColumnsForWidth(panelWidth: number): number {
+  return panelWidth >= GRID_WIDE_MIN_WIDTH
+    ? GRID_WIDE_COLUMNS
+    : GRID_NARROW_COLUMNS;
+}
 
 const CAPABILITIES: { key: PickerCapability; label: string }[] = [
   { key: "vision", label: "Vision" },
@@ -141,6 +159,7 @@ function ToolButton({
  * which is exactly how the reasoning menu keeps its top-layer placement.
  */
 export function ModelPickerMenu({
+  id,
   models,
   value,
   onSelect,
@@ -148,7 +167,14 @@ export function ModelPickerMenu({
   open,
   onClose,
   onViewChange,
+  filters,
+  onFiltersChange,
+  sort,
+  onSortChange,
+  gridColumns,
 }: {
+  /** The listbox id, so the caller's `aria-controls` points at the real list. */
+  id: string;
   models: ModelInfo[];
   value: string;
   onSelect: (value: string) => void;
@@ -161,16 +187,21 @@ export function ModelPickerMenu({
    * composer shell, and the width is the caller's positioning concern.
    */
   onViewChange?: (view: PickerView) => void;
+  /**
+   * Filter/sort state is owned by the caller (the switcher) so it survives the
+   * menu closing — spec §7.6/§8: transient intent that lasts for the session.
+   */
+  filters: PickerFilterState;
+  onFiltersChange: (filters: PickerFilterState) => void;
+  sort: PickerSort;
+  onSortChange: (sort: PickerSort) => void;
+  /** Columns for grid layout, derived by the caller from the panel width. */
+  gridColumns: number;
 }) {
-  const listId = useId();
   const liveId = useId();
   const searchRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
 
-  const [filters, setFilters] = useState<PickerFilterState>(
-    EMPTY_PICKER_FILTERS,
-  );
-  const [sort, setSort] = useState<PickerSort>("default");
   // Read synchronously in the initializer (the app's preference idiom) so the
   // first paint is already in the stored view rather than flashing the list.
   const [view, setView] = useState<PickerView>(() => readModelPickerView());
@@ -230,9 +261,22 @@ export function ModelPickerMenu({
   const toggleIn = <T,>(list: T[], item: T): T[] =>
     list.includes(item) ? list.filter((entry) => entry !== item) : [...list, item];
 
-  const clearFilters = () => {
-    setFilters(EMPTY_PICKER_FILTERS);
-    setSort("default");
+  /**
+   * Esc clears the query and filters, but **not** the sort: spec §7.7 says Esc
+   * clears "an active search or filter", and discarding a deliberately chosen
+   * order would be a silent extra.
+   */
+  const clearSearchAndFilters = () => {
+    onFiltersChange(EMPTY_PICKER_FILTERS);
+  };
+
+  /**
+   * The empty state's action resets everything, including the sort — the user
+   * asked to get back to the full list, so the narrowest reset is right here.
+   */
+  const resetAll = () => {
+    onFiltersChange(EMPTY_PICKER_FILTERS);
+    onSortChange("default");
   };
 
   const moveIntoOptions = () => {
@@ -252,7 +296,7 @@ export function ModelPickerMenu({
       // Esc clears first: with anything to clear the menu stays open.
       if (hasFilters) {
         event.preventDefault();
-        clearFilters();
+        clearSearchAndFilters();
         return;
       }
       onClose?.();
@@ -273,7 +317,7 @@ export function ModelPickerMenu({
     if (event.key === "Escape") {
       if (hasFilters) {
         event.preventDefault();
-        clearFilters();
+        clearSearchAndFilters();
         searchRef.current?.focus();
         return;
       }
@@ -291,7 +335,7 @@ export function ModelPickerMenu({
     if (event.key === "Escape") {
       if (hasFilters) {
         event.preventDefault();
-        clearFilters();
+        clearSearchAndFilters();
         searchRef.current?.focus();
         return;
       }
@@ -317,10 +361,10 @@ export function ModelPickerMenu({
             type="search"
             role="searchbox"
             aria-label="Search models"
-            aria-controls={listId}
+            aria-controls={id}
             value={filters.query}
             onChange={(event) =>
-              setFilters((current) => ({ ...current, query: event.target.value }))
+              onFiltersChange({ ...filters, query: event.target.value })
             }
             onKeyDown={handleSearchKeyDown}
             placeholder="Search models…"
@@ -373,10 +417,10 @@ export function ModelPickerMenu({
                   label={vendor}
                   pressed={filters.vendors.includes(vendor)}
                   onToggle={() =>
-                    setFilters((current) => ({
-                      ...current,
-                      vendors: toggleIn(current.vendors, vendor),
-                    }))
+                    onFiltersChange({
+                      ...filters,
+                      vendors: toggleIn(filters.vendors, vendor),
+                    })
                   }
                 />
               ))}
@@ -391,10 +435,10 @@ export function ModelPickerMenu({
                   label={connection.name}
                   pressed={filters.connections.includes(connection.slug)}
                   onToggle={() =>
-                    setFilters((current) => ({
-                      ...current,
-                      connections: toggleIn(current.connections, connection.slug),
-                    }))
+                    onFiltersChange({
+                      ...filters,
+                      connections: toggleIn(filters.connections, connection.slug),
+                    })
                   }
                 />
               ))}
@@ -411,10 +455,10 @@ export function ModelPickerMenu({
                   label={capability.label}
                   pressed={filters.capabilities.includes(capability.key)}
                   onToggle={() =>
-                    setFilters((current) => ({
-                      ...current,
-                      capabilities: toggleIn(current.capabilities, capability.key),
-                    }))
+                    onFiltersChange({
+                      ...filters,
+                      capabilities: toggleIn(filters.capabilities, capability.key),
+                    })
                   }
                 />
               ))}
@@ -429,11 +473,11 @@ export function ModelPickerMenu({
                   label={`≥ ${formatModelContext(threshold)}`}
                   pressed={filters.minContext === threshold}
                   onToggle={() =>
-                    setFilters((current) => ({
-                      ...current,
+                    onFiltersChange({
+                      ...filters,
                       minContext:
-                        current.minContext === threshold ? null : threshold,
-                    }))
+                        filters.minContext === threshold ? null : threshold,
+                    })
                   }
                 />
               ))}
@@ -450,7 +494,7 @@ export function ModelPickerMenu({
               key={entry.key}
               label={entry.label}
               pressed={sort === entry.key}
-              onToggle={() => setSort(entry.key)}
+              onToggle={() => onSortChange(entry.key)}
             />
           ))}
         </FilterGroup>
@@ -467,7 +511,7 @@ export function ModelPickerMenu({
           <span className="text-xs text-text-muted">No models match</span>
           <button
             type="button"
-            onClick={clearFilters}
+            onClick={resetAll}
             className="inline-flex h-7 cursor-pointer items-center rounded-lg border border-hairline bg-white/[0.04] px-2.5 text-[11px] font-medium text-text-muted transition duration-150 hover:bg-white/10 hover:text-text active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-ring"
           >
             Clear filters
@@ -476,14 +520,14 @@ export function ModelPickerMenu({
       ) : (
         <SelectOptionList
           ref={listRef}
-          id={listId}
+          id={id}
           ariaLabel="Model"
           value={value}
           options={options}
           onSelect={selectOption}
           onKeyDown={handleListKeyDown}
           layout={grid ? "grid" : "list"}
-          columns={GRID_COLUMNS}
+          columns={gridColumns}
           hoverSide="right"
           className="chat-scroll overflow-y-auto"
           style={{ maxHeight: cap }}

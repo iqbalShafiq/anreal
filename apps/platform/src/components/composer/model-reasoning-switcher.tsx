@@ -21,8 +21,13 @@ import {
   type SelectOption,
 } from "#/components/ui/select-list";
 import { readModelPickerView } from "#/lib/chat-preferences";
-import type { PickerView } from "#/lib/model-picker";
-import { ModelPickerMenu } from "./model-picker-menu";
+import {
+  EMPTY_PICKER_FILTERS,
+  type PickerFilterState,
+  type PickerSort,
+  type PickerView,
+} from "#/lib/model-picker";
+import { ModelPickerMenu, gridColumnsForWidth } from "./model-picker-menu";
 
 /** Used only to order the icon fill; the actual list comes from props. */
 const EFFORT_ORDER = ["minimal", "low", "medium", "high", "xhigh", "max"];
@@ -140,6 +145,16 @@ export function ModelReasoningSwitcher({
     readModelPickerView(),
   );
 
+  /**
+   * Filter and sort state live here, not in the menu, so they survive the menu
+   * unmounting on close — spec §7.6/§8: transient intent that lasts for the
+   * session. The menu is controlled by them and reports changes back. Search is
+   * part of the filter state, so it survives too.
+   */
+  const [pickerFilters, setPickerFilters] =
+    useState<PickerFilterState>(EMPTY_PICKER_FILTERS);
+  const [pickerSort, setPickerSort] = useState<PickerSort>("default");
+
   const updateMenuPosition = () => {
     const shell = rootRef.current;
     if (!shell) {
@@ -236,7 +251,6 @@ export function ModelReasoningSwitcher({
       ? createPortal(
           <div
             ref={menuRef}
-            id={openMenu === "model" ? modelListId : reasoningListId}
             style={{
               position: "fixed",
               top: menuPos.top,
@@ -253,9 +267,15 @@ export function ModelReasoningSwitcher({
           >
             {openMenu === "model" ? (
               <ModelPickerMenu
+                id={modelListId}
                 models={models}
                 value={model}
                 open
+                filters={pickerFilters}
+                onFiltersChange={setPickerFilters}
+                sort={pickerSort}
+                onSortChange={setPickerSort}
+                gridColumns={gridColumnsForWidth(menuPos.minWidth)}
                 onSelect={(selectedValue) => {
                   onModelChange(selectedValue);
                   setOpenMenu(null);
