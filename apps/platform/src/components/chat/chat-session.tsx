@@ -157,8 +157,8 @@ import {
   readSelectedModel,
   readSelectedReasoningEffort,
   readStoredSelectedModel,
+  resolveInitialModel,
 } from "#/lib/chat-preferences";
-import { resolveInitialModel } from "#/lib/model-role-labels";
 import { useUserSkills } from "#/hooks/use-user-skills";
 import { useUserMcpServers } from "#/hooks/use-user-mcp-servers";
 import { SkillsModal } from "#/components/skills/skills-modal";

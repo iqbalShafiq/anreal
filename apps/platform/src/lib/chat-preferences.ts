@@ -1,4 +1,4 @@
-import { DEFAULT_COMPLETION_MODEL, isKnownModel } from "#/lib/chat/models";
+import { DEFAULT_COMPLETION_MODEL } from "#/lib/chat/models";
 import type { ImageGenSettings, ModelInfo } from "#/lib/api";
 
 export const SELECTED_MODEL_KEY = "chat.selectedModel";
@@ -27,15 +27,31 @@ export function readStoredSelectedModel(): string | null {
 }
 
 /**
+ * The model a session should start on: a stored preference that the catalog
+ * still contains wins, then the first active model, then the app default.
+ * The input is explicit so the pure decision can be unit-tested without
+ * storage; `readSelectedModel` wires it to `localStorage`.
+ */
+export function resolveInitialModel(input: {
+  storedModelId: string | null;
+  models: readonly { modelId: string }[];
+}): string {
+  const { storedModelId, models } = input;
+  const inCatalog = (id: string | null): id is string =>
+    id !== null && models.some((model) => model.modelId === id);
+  if (inCatalog(storedModelId)) return storedModelId;
+  return models[0]?.modelId ?? DEFAULT_COMPLETION_MODEL;
+}
+
+/**
  * Stored model id if it exists in the catalog, else the first active model,
- * else the default.
+ * else the default. Delegates the decision to `resolveInitialModel`.
  */
 export function readSelectedModel(models: ModelInfo[]): string {
-  const stored = readStoredSelectedModel();
-  if (stored !== null && isKnownModel(models, stored)) {
-    return stored;
-  }
-  return models[0]?.modelId ?? DEFAULT_COMPLETION_MODEL;
+  return resolveInitialModel({
+    storedModelId: readStoredSelectedModel(),
+    models,
+  });
 }
 
 export function persistSelectedModel(model: string) {
