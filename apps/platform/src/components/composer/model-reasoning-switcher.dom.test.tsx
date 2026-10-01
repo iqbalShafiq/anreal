@@ -243,6 +243,35 @@ describe("ModelReasoningSwitcher model menu: panel width follows the view", () =
   });
 });
 
+describe("ModelReasoningSwitcher model menu: the action row meets the panel bottom", () => {
+  it("carries no bottom padding that would band the action row's hover", async () => {
+    renderSwitcher(() => {});
+    fireEvent.click(screen.getByRole("button", { name: "Model" }));
+    await flush();
+
+    // A `pb-1` here left a 4px strip below the action row the hover could not
+    // fill; it is gone, so the row's hover reaches the panel's bottom edge.
+    expect(panelElement().className).not.toContain("pb-");
+  });
+});
+
+describe("ModelReasoningSwitcher model menu: the panel is clamped to the space above", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("sets a max-height on the panel so it cannot cross the viewport top", async () => {
+    stubGeometry(240, 1200);
+    renderSwitcher();
+    fireEvent.click(screen.getByRole("button", { name: "Model" }));
+    await flush();
+
+    // Opens upward from `top = shellRect.top - 8`; the clamp is that anchor
+    // minus an 8px margin, so the panel can never extend past the viewport top.
+    expect(panelElement().style.maxHeight).toBe("584px"); // 600 - 8 - 8
+  });
+});
+
 describe("ModelReasoningSwitcher model menu: grid columns follow the panel width (I3)", () => {
   afterEach(() => {
     vi.restoreAllMocks();

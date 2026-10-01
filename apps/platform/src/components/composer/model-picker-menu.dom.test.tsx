@@ -393,6 +393,78 @@ describe("ModelPickerMenu: the list is inside the panel's card, not its own", ()
   });
 });
 
+describe("ModelPickerMenu: facet labels sit above their chips", () => {
+  // Two vendors so the Vendor facet discriminates and renders.
+  const models = [
+    catalogModel("openai/alpha", {
+      name: "Alpha",
+      provider: { slug: "openai", name: "OpenAI" },
+    }),
+    catalogModel("google/gemini", {
+      name: "Gemini",
+      provider: { slug: "google", name: "Google" },
+    }),
+  ];
+
+  /** The group whose label text matches, found by walking up from the label. */
+  function groupFor(labelText: string): HTMLElement {
+    const label = screen
+      .getAllByText(labelText)
+      .find((node) => node.className.includes("uppercase"));
+    if (!label) throw new Error(`no group label ${labelText}`);
+    return label.parentElement as HTMLElement;
+  }
+
+  it("stacks the label above a horizontal chip row", () => {
+    renderMenu(models);
+    fireEvent.click(screen.getByRole("button", { name: "Filter" }));
+
+    const group = groupFor("Vendor");
+    // The group is a column: the label is the first child, the chips the second.
+    expect(group.className).toContain("flex-col");
+    const label = group.firstElementChild as HTMLElement;
+    const chipsRow = group.lastElementChild as HTMLElement;
+    expect(label.textContent).toBe("Vendor");
+    expect(label.className).toContain("uppercase");
+    // The label is a bare span, not a flex item sharing a row with the chips.
+    expect(label.tagName).toBe("SPAN");
+    // The chips stay a horizontal wrapping row inside the group.
+    expect(chipsRow.className).toContain("flex-wrap");
+    expect(chipsRow.querySelector("button[aria-pressed]")).not.toBeNull();
+  });
+
+  it("gives the sort block the same stacked shape as the facets", () => {
+    renderMenu(models);
+    fireEvent.click(screen.getByRole("button", { name: "Sort" }));
+
+    const group = groupFor("Sort by");
+    const label = group.firstElementChild as HTMLElement;
+    const chipsRow = group.lastElementChild as HTMLElement;
+    expect(group.className).toContain("flex-col");
+    expect(label.textContent).toBe("Sort by");
+    expect(chipsRow.className).toContain("flex-wrap");
+  });
+
+  it("uses one spacing source for facets and the sort block", () => {
+    renderMenu(models);
+    fireEvent.click(screen.getByRole("button", { name: "Filter" }));
+    fireEvent.click(screen.getByRole("button", { name: "Sort" }));
+
+    // Both the facet groups and the sort group live in one column stack, so a
+    // single `gap-2` separates every group — including last-facet → sort.
+    const controls = groupFor("Vendor").parentElement as HTMLElement;
+    expect(controls.className).toContain("gap-2");
+    expect(controls.className).toContain("flex-col");
+    // The sort group is a direct child of that same stack.
+    expect(controls.contains(groupFor("Sort by"))).toBe(true);
+    // The group itself carries no marginal spacing of its own.
+    const group = groupFor("Vendor");
+    expect(group.className).not.toContain("pb-");
+    expect(group.className).not.toContain("mb-");
+    expect(group.className).not.toContain("mt-");
+  });
+});
+
 describe("ModelPickerMenu: live region", () => {
   it("announces the visible count in a visually hidden live region", () => {
     renderMenu([

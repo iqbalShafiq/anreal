@@ -355,9 +355,9 @@ export function ModelPickerMenu({
     : LIST_VISIBLE_ROWS * LIST_ROW_HEIGHT;
 
   return (
-    <div className="flex w-full min-w-0 flex-col">
+    <div className="flex min-h-0 w-full min-w-0 flex-1 flex-col">
       {/* Search row */}
-      <div className="flex items-center gap-1 px-2 pt-2">
+      <div className="flex shrink-0 items-center gap-1 px-2 pt-2">
         <span className="pointer-events-none flex min-w-0 flex-1 items-center gap-1.5 rounded-lg bg-white/[0.04] px-2 ring-1 ring-white/[0.08] focus-within:ring-2 focus-within:ring-accent-ring">
           <Search className="size-3.5 shrink-0 text-text-faint" strokeWidth={1.75} />
           <input
@@ -410,98 +410,113 @@ export function ModelPickerMenu({
       </div>
 
       {/* Inline filters, grouped by facet; a group that cannot discriminate
-          is not rendered at all. */}
-      {showFilters ? (
-        <div className="flex flex-col gap-2 px-2 pt-2">
-          {facets.vendors.length > 1 ? (
-            <FilterGroup label="Vendor">
-              {facets.vendors.map((vendor) => (
-                <FilterChip
-                  key={vendor}
-                  label={vendor}
-                  pressed={filters.vendors.includes(vendor)}
-                  onToggle={() =>
-                    onFiltersChange({
-                      ...filters,
-                      vendors: toggleIn(filters.vendors, vendor),
-                    })
-                  }
-                />
-              ))}
-            </FilterGroup>
-          ) : null}
+          is not rendered at all. The sort block is a sibling **inside** this
+          same stack, so every group — facets and sort alike — is separated by
+          this single `gap-2`: one source of spacing for the whole controls
+          area. The group owns no margin or padding of its own. */}
+      {showFilters || showSort ? (
+        <div className="flex shrink-0 flex-col gap-2 px-2 pt-2">
+          {showFilters
+            ? (
+                <>
+                  {facets.vendors.length > 1 ? (
+                    <FilterGroup label="Vendor">
+                      {facets.vendors.map((vendor) => (
+                        <FilterChip
+                          key={vendor}
+                          label={vendor}
+                          pressed={filters.vendors.includes(vendor)}
+                          onToggle={() =>
+                            onFiltersChange({
+                              ...filters,
+                              vendors: toggleIn(filters.vendors, vendor),
+                            })
+                          }
+                        />
+                      ))}
+                    </FilterGroup>
+                  ) : null}
 
-          {facets.connections.length > 1 ? (
-            <FilterGroup label="Connection">
-              {facets.connections.map((connection) => (
-                <FilterChip
-                  key={connection.slug}
-                  label={connection.name}
-                  pressed={filters.connections.includes(connection.slug)}
-                  onToggle={() =>
-                    onFiltersChange({
-                      ...filters,
-                      connections: toggleIn(filters.connections, connection.slug),
-                    })
-                  }
-                />
-              ))}
-            </FilterGroup>
-          ) : null}
+                  {facets.connections.length > 1 ? (
+                    <FilterGroup label="Connection">
+                      {facets.connections.map((connection) => (
+                        <FilterChip
+                          key={connection.slug}
+                          label={connection.name}
+                          pressed={filters.connections.includes(connection.slug)}
+                          onToggle={() =>
+                            onFiltersChange({
+                              ...filters,
+                              connections: toggleIn(
+                                filters.connections,
+                                connection.slug,
+                              ),
+                            })
+                          }
+                        />
+                      ))}
+                    </FilterGroup>
+                  ) : null}
 
-          {discriminantCapabilities.length > 0 ? (
-            <FilterGroup label="Capability">
-              {CAPABILITIES.filter((capability) =>
-                discriminantCapabilities.includes(capability.key),
-              ).map((capability) => (
-                <FilterChip
-                  key={capability.key}
-                  label={capability.label}
-                  pressed={filters.capabilities.includes(capability.key)}
-                  onToggle={() =>
-                    onFiltersChange({
-                      ...filters,
-                      capabilities: toggleIn(filters.capabilities, capability.key),
-                    })
-                  }
-                />
-              ))}
-            </FilterGroup>
-          ) : null}
+                  {discriminantCapabilities.length > 0 ? (
+                    <FilterGroup label="Capability">
+                      {CAPABILITIES.filter((capability) =>
+                        discriminantCapabilities.includes(capability.key),
+                      ).map((capability) => (
+                        <FilterChip
+                          key={capability.key}
+                          label={capability.label}
+                          pressed={filters.capabilities.includes(capability.key)}
+                          onToggle={() =>
+                            onFiltersChange({
+                              ...filters,
+                              capabilities: toggleIn(
+                                filters.capabilities,
+                                capability.key,
+                              ),
+                            })
+                          }
+                        />
+                      ))}
+                    </FilterGroup>
+                  ) : null}
 
-          {facets.contextThresholds.length > 0 ? (
-            <FilterGroup label="Context">
-              {facets.contextThresholds.map((threshold) => (
+                  {facets.contextThresholds.length > 0 ? (
+                    <FilterGroup label="Context">
+                      {facets.contextThresholds.map((threshold) => (
+                        <FilterChip
+                          key={threshold}
+                          label={`≥ ${formatModelContext(threshold)}`}
+                          pressed={filters.minContext === threshold}
+                          onToggle={() =>
+                            onFiltersChange({
+                              ...filters,
+                              minContext:
+                                filters.minContext === threshold ? null : threshold,
+                            })
+                          }
+                        />
+                      ))}
+                    </FilterGroup>
+                  ) : null}
+                </>
+              )
+            : null}
+
+          {/* Inline sorts: a segmented row of pressed buttons. */}
+          {showSort ? (
+            <FilterGroup label="Sort by">
+              {PICKER_SORTS.map((entry) => (
                 <FilterChip
-                  key={threshold}
-                  label={`≥ ${formatModelContext(threshold)}`}
-                  pressed={filters.minContext === threshold}
-                  onToggle={() =>
-                    onFiltersChange({
-                      ...filters,
-                      minContext:
-                        filters.minContext === threshold ? null : threshold,
-                    })
-                  }
+                  key={entry.key}
+                  label={entry.label}
+                  pressed={sort === entry.key}
+                  onToggle={() => onSortChange(entry.key)}
                 />
               ))}
             </FilterGroup>
           ) : null}
         </div>
-      ) : null}
-
-      {/* Inline sorts: a segmented row of pressed buttons. */}
-      {showSort ? (
-        <FilterGroup label="Sort by">
-          {PICKER_SORTS.map((entry) => (
-            <FilterChip
-              key={entry.key}
-              label={entry.label}
-              pressed={sort === entry.key}
-              onToggle={() => onSortChange(entry.key)}
-            />
-          ))}
-        </FilterGroup>
       ) : null}
 
       {/* The live region announces the count; no visible count exists. */}
@@ -517,7 +532,7 @@ export function ModelPickerMenu({
         // them at the empty state keeps the relationship resolvable.
         <div
           id={id}
-          className="flex flex-col items-center gap-2 px-3 py-6 text-center"
+          className="chat-scroll flex min-h-0 flex-1 flex-col items-center gap-2 overflow-y-auto px-3 py-6 text-center"
         >
           <span className="text-xs text-text-muted">No models match</span>
           <button
@@ -547,7 +562,7 @@ export function ModelPickerMenu({
           // their own surface and rounding, so they stay inset like the search
           // field. Space above the first row is kept; space below is the action
           // row's job (there is none).
-          className={`chat-scroll overflow-y-auto pt-1 ${grid ? "px-2" : ""}`}
+          className={`chat-scroll min-h-0 flex-1 overflow-y-auto pt-1 ${grid ? "px-2" : ""}`}
           style={{ maxHeight: cap }}
         />
       )}
@@ -559,7 +574,7 @@ export function ModelPickerMenu({
           type="button"
           onClick={() => onAddModel()}
           onKeyDown={handleOptionKeyDown}
-          className="flex w-full cursor-pointer items-start gap-2 border-t border-hairline px-3 py-2 text-left transition duration-150 hover:bg-white/[0.06] focus-visible:bg-white/[0.08] focus-visible:outline-none"
+          className="flex w-full shrink-0 cursor-pointer items-start gap-2 border-t border-hairline px-3 py-2 text-left transition duration-150 hover:bg-white/[0.06] focus-visible:bg-white/[0.08] focus-visible:outline-none"
         >
           <span className="mt-0.5 shrink-0 text-text-muted">
             <Plus className="size-3.5" strokeWidth={1.75} />
@@ -573,14 +588,19 @@ export function ModelPickerMenu({
   );
 }
 
-/** One labelled chip row. The label is presentational, the chips are the controls. */
+/**
+ * One labelled group: the label sits **above** its chips, and the chips stay a
+ * horizontal wrapping row (the user explicitly asked for both). The label keeps
+ * its original treatment; only the arrangement changed. Shared by the filter
+ * facets and the sort block, so one shape serves both.
+ */
 function FilterGroup({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="flex min-w-0 flex-wrap items-center gap-1 px-2 pb-1">
-      <span className="mr-0.5 shrink-0 text-[10px] font-medium uppercase tracking-wider text-text-faint">
+    <div className="flex flex-col gap-1">
+      <span className="text-[10px] font-medium uppercase tracking-wider text-text-faint">
         {label}
       </span>
-      {children}
+      <div className="flex min-w-0 flex-wrap items-center gap-1">{children}</div>
     </div>
   );
 }

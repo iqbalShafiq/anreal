@@ -128,6 +128,7 @@ export function ModelReasoningSwitcher({
     top: number;
     left: number;
     minWidth: number;
+    maxHeight: number;
   } | null>(null);
 
   const selectedModel = modelById(models, model) ?? models[0] ?? null;
@@ -171,10 +172,24 @@ export function ModelReasoningSwitcher({
         ? Math.min(560, window.innerWidth - 16)
         : Math.max(184, shellRect.width);
     const maxLeft = window.innerWidth - minWidth - 8;
+    /**
+     * Open upward from the shell at `top`, so the space the panel may occupy is
+     * everything above that anchor: `top` px, minus an 8px viewport margin. The
+     * panel is anchored to the composer, which sits low, and the controls area
+     * (filters + sort) can grow past that space; without this clamp the panel's
+     * top crossed the viewport edge and its top rows/controls were unreachable.
+     * This caps the panel's height (the option list, being the only shrinkable
+     * row of its flex column, then scrolls within what is left); it does not
+     * change the list's own `maxHeight` cap, which stays the smaller of the two
+     * and is still the value the menu passes down.
+     */
+    const top = shellRect.top - 8;
+    const maxHeight = Math.max(0, top - 8);
     setMenuPos({
-      top: shellRect.top - 8,
+      top,
       left: Math.max(8, Math.min(shellRect.left, maxLeft)),
       minWidth,
+      maxHeight,
     });
   };
 
@@ -256,12 +271,13 @@ export function ModelReasoningSwitcher({
               top: menuPos.top,
               left: menuPos.left,
               minWidth: menuPos.minWidth,
+              maxHeight: openMenu === "model" ? menuPos.maxHeight : undefined,
               transform: "translateY(-100%)",
               zIndex: 80,
             }}
             className={
               openMenu === "model"
-                ? "chat-scroll overflow-hidden rounded-xl border border-white/[0.08] bg-canvas-elevated pb-1 text-text shadow-[0_12px_40px_-12px_rgba(0,0,0,0.75)] animate-fade-in"
+                ? "flex flex-col chat-scroll overflow-hidden rounded-xl border border-white/[0.08] bg-canvas-elevated text-text shadow-[0_12px_40px_-12px_rgba(0,0,0,0.75)] animate-fade-in"
                 : ""
             }
           >
