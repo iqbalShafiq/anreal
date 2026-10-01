@@ -134,7 +134,7 @@ function makeProviderModelRow(overrides: Record<string, unknown> = {}) {
     sortOrder: 0,
     id: "pm_1",
     connectionId: "pc_1",
-    connection: { slug: "openrouter", label: "My OpenRouter" },
+    connection: { slug: "openrouter", label: "My OpenRouter", kind: "compatible" },
     ...overrides,
   };
 }
@@ -199,7 +199,7 @@ describe("listModels merging", () => {
     );
   });
 
-  it("hides connection image models but keeps catalog image models", async () => {
+  it("includes a connection image model on an image-capable kind", async () => {
     vi.mocked(prisma.chatModel.findMany).mockResolvedValue([
       makeModelRow({ modelId: "openai/gpt-image-1", outputType: "image" }),
     ] as never);
@@ -207,6 +207,11 @@ describe("listModels merging", () => {
       makeProviderModelRow({
         slug: "openrouter/gpt-image-1",
         outputType: "image",
+        connection: {
+          slug: "openrouter",
+          label: "My OpenRouter",
+          kind: "compatible",
+        },
       }),
     ] as never);
 
@@ -214,18 +219,142 @@ describe("listModels merging", () => {
 
     expect(result.models.map((model) => model.modelId)).toEqual([
       "openai/gpt-image-1",
+      "openrouter/gpt-image-1",
     ]);
+    expect(result.models[1]).toMatchObject({
+      modelId: "openrouter/gpt-image-1",
+      source: "connection",
+      connectionId: "pc_1",
+      outputType: "image",
+    });
   });
 
-  it("hides connection image models even without an outputType filter", async () => {
+  it("includes a connection image model even without an outputType filter", async () => {
     vi.mocked(prisma.providerModel.findMany).mockResolvedValue([
-      makeProviderModelRow({ slug: "gw/mixed", outputType: "image" }),
+      makeProviderModelRow({
+        slug: "gw/mixed-image",
+        outputType: "image",
+        connection: { slug: "gw", label: "Gateway", kind: "compatible" },
+      }),
       makeProviderModelRow({ slug: "gw/text", outputType: "text" }),
     ] as never);
 
     const result = await listMerged({ userId: "u_1" });
 
-    expect(result.models.map((model) => model.modelId)).toEqual(["gw/text"]);
+    expect(result.models.map((model) => model.modelId)).toEqual([
+      "gw/mixed-image",
+      "gw/text",
+    ]);
+  });
+
+  it("keeps a connection text model unaffected", async () => {
+    vi.mocked(prisma.providerModel.findMany).mockResolvedValue([
+      makeProviderModelRow(),
+    ] as never);
+
+    const result = await listMerged({ userId: "u_1" });
+
+    expect(result.models).toHaveLength(1);
+    expect(result.models[0]).toMatchObject({
+      modelId: "openrouter/openai-gpt-5.6-luna",
+      outputType: "text",
+      source: "connection",
+      connectionId: "pc_1",
+    });
+  });
+
+  it("drops an image row on a kind with no image endpoint, even when inserted directly", async () => {
+    // Defence in depth: the save path refuses this combination, but a row that
+    // predates that rule (or was inserted directly) must never surface. Which
+    // kinds are image-capable comes from PROVIDER_KIND_META[kind].imageStyle.
+    vi.mocked(prisma.providerModel.findMany).mockResolvedValue([
+      makeProviderModelRow({
+        slug: "openai/native-image",
+        outputType: "image",
+        connection: { slug: "openai", label: "OpenAI", kind: "openai" },
+      }),
+      makeProviderModelRow({
+        slug: "anthropic/native-image",
+        outputType: "image",
+        connection: {
+          slug: "anthropic",
+          label: "Anthropic",
+          kind: "anthropic",
+        },
+      }),
+      makeProviderModelRow({
+        slug: "mistral/native-image",
+        outputType: "image",
+        connection: { slug: "mistral", label: "Mistral", kind: "mistral" },
+      }),
+      makeProviderModelRow({
+        slug: "compatible/real-image",
+        outputType: "image",
+        connection: {
+          slug: "compatible",
+          label: "Gateway",
+          kind: "compatible",
+        },
+      }),
+    ] as never);
+
+    const result = await listMerged({ outputType: "image", userId: "u_1" });
+
+    expect(result.models.map((model) => model.modelId)).toEqual([
+      "compatible/real-image",
+    ]);
+  });
+
+  it("drops an image row on an unknown connection kind", async () => {
+    vi.mocked(prisma.providerModel.findMany).mockResolvedValue([
+      makeProviderModelRow({
+        slug: "mystery/image",
+        outputType: "image",
+        connection: {
+          slug: "mystery",
+          label: "Mystery",
+          kind: "not-a-known-kind",
+        },
+      }),
+    ] as never);
+
+    const result = await listMerged({ outputType: "image", userId: "u_1" });
+
+    expect(result.models).toEqual([]);
+  });
+
+  it("preserves catalog-first ordering and per-scope order", async () => {
+    vi.mocked(prisma.chatModel.findMany).mockResolvedValue([
+      makeModelRow({ modelId: "catalog/a", outputType: "image" }),
+      makeModelRow({ modelId: "catalog/b", outputType: "image" }),
+    ] as never);
+    vi.mocked(prisma.providerModel.findMany).mockResolvedValue([
+      makeProviderModelRow({
+        slug: "conn/one",
+        outputType: "image",
+        connection: { slug: "conn", label: "Conn", kind: "compatible" },
+      }),
+      makeProviderModelRow({
+        slug: "conn/two",
+        outputType: "text",
+        connection: { slug: "conn", label: "Conn", kind: "compatible" },
+      }),
+      makeProviderModelRow({
+        slug: "conn/three",
+        outputType: "image",
+        connection: { slug: "conn", label: "Conn", kind: "grok" },
+      }),
+    ] as never);
+
+    const result = await listMerged({ userId: "u_1" });
+
+    expect(result.models.map((model) => model.modelId)).toEqual([
+      "catalog/a",
+      "catalog/b",
+      "conn/one",
+      "conn/two",
+      "conn/three",
+    ]);
   });
 });
 
@@ -260,5 +389,35 @@ describe("findActiveModel scoping", () => {
 
   it("returns null when no scope owns the id", async () => {
     expect(await findActiveModel("nobody/owns-this", "u_1")).toBeNull();
+  });
+
+  it("resolves a connection image model on an image-capable kind", async () => {
+    vi.mocked(prisma.providerModel.findFirst).mockResolvedValue(
+      makeProviderModelRow({
+        slug: "gw/image",
+        outputType: "image",
+        connection: { slug: "gw", label: "Gateway", kind: "compatible" },
+      }) as never,
+    );
+
+    const result = await findActiveModel("gw/image", "u_1");
+
+    expect(result).toMatchObject({
+      modelId: "gw/image",
+      outputType: "image",
+      source: "connection",
+    });
+  });
+
+  it("refuses an image model on a kind with no image endpoint", async () => {
+    vi.mocked(prisma.providerModel.findFirst).mockResolvedValue(
+      makeProviderModelRow({
+        slug: "openai/image",
+        outputType: "image",
+        connection: { slug: "openai", label: "OpenAI", kind: "openai" },
+      }) as never,
+    );
+
+    expect(await findActiveModel("openai/image", "u_1")).toBeNull();
   });
 });

@@ -1,7 +1,30 @@
+import {
+  PROVIDER_KIND_META,
+  type ProviderKind,
+} from "@anreal/agent";
+
 import type { Prisma } from "../../generated/prisma/client.js";
 import { prisma } from "../../utils/prisma.js";
 
 type Decimal = Prisma.Decimal;
+
+/**
+ * A connection image model is only offered when its connection's kind actually
+ * speaks an image endpoint. `PROVIDER_KIND_META[kind].imageStyle` is the
+ * authority for that — never a kind list, which would drift. The save path
+ * (`provider-connections/service.ts`) already refuses to register an image
+ * model on a `"none"` kind, so this is defence in depth: it also protects
+ * against a row that predates that rule or was written directly. An unknown
+ * kind is treated as image-incapable.
+ */
+function isImageAccessible(row: {
+  outputType: string;
+  connection: { kind: string };
+}): boolean {
+  if (row.outputType !== "image") return true;
+  const meta = PROVIDER_KIND_META[row.connection.kind as ProviderKind];
+  return meta !== undefined && meta.imageStyle !== "none";
+}
 
 export type ModelInfo = {
   modelId: string;
@@ -231,7 +254,9 @@ export async function listModels(input?: {
             connection: { isActive: true },
             ...(outputType ? { outputType } : {}),
           },
-          include: { connection: { select: { slug: true, label: true } } },
+          include: {
+            connection: { select: { slug: true, label: true, kind: true } },
+          },
           orderBy: [{ sortOrder: "asc" }, { slug: "asc" }],
         })
       : Promise.resolve([]),
@@ -245,11 +270,10 @@ export async function listModels(input?: {
   return {
     models: [
       ...catalogRows.map(toModelInfo),
-      // Connection image models are hidden until image generation resolves a
-      // connection's credential at run time (Phase D): the global catalog is
-      // the only source of image models today.
+      // A connection image model joins the merged catalog only when its
+      // connection's kind can actually generate images (see `isImageAccessible`).
       ...connectionRows
-        .filter((row) => row.outputType !== "image")
+        .filter(isImageAccessible)
         .map(toConnectionModelInfo),
     ],
     reasoningEfforts: reasoningEfforts.map((row) => ({
@@ -282,7 +306,10 @@ export async function findActiveModel(
       isActive: true,
       connection: { isActive: true },
     },
-    include: { connection: { select: { slug: true, label: true } } },
+    include: {
+      connection: { select: { slug: true, label: true, kind: true } },
+    },
   });
-  return connection ? toConnectionModelInfo(connection) : null;
+  if (!connection || !isImageAccessible(connection)) return null;
+  return toConnectionModelInfo(connection);
 }
