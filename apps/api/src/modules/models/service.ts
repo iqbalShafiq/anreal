@@ -33,6 +33,11 @@ export type ModelInfo = {
   name: string;
   hint: string | null;
   description: string | null;
+  /**
+   * Who made the model, declared by the user on a BYOK row. Filter facet only
+   * — never routing. Catalog rows have no such column and project null.
+   */
+  vendorLabel: string | null;
   iconSvg: string;
   provider: { slug: string; name: string };
   contextWindowTokens: number;
@@ -107,6 +112,7 @@ function toModelInfo(row: {
     name: row.name || row.label,
     hint: row.hint,
     description: row.description,
+    vendorLabel: null,
     iconSvg: row.iconSvg,
     provider: row.provider,
     contextWindowTokens: row.contextWindowTokens,
@@ -144,6 +150,7 @@ function toConnectionModelInfo(row: {
   label: string;
   hint: string | null;
   description: string | null;
+  vendorLabel: string | null;
   iconSvg: string;
   outputType: string;
   contextWindowTokens: number | null;
@@ -175,6 +182,7 @@ function toConnectionModelInfo(row: {
     name: row.name || row.label,
     hint: row.hint,
     description: row.description,
+    vendorLabel: row.vendorLabel,
     iconSvg: row.iconSvg,
     provider: { slug: row.connection.slug, name: row.connection.label },
     contextWindowTokens: row.contextWindowTokens ?? 0,

@@ -123,6 +123,7 @@ function makeProviderModelRow(overrides: Record<string, unknown> = {}) {
     label: "GPT 5.6",
     hint: null,
     description: null,
+    vendorLabel: null,
     iconSvg: "",
     outputType: "text",
     contextWindowTokens: 1_000_000,
@@ -261,6 +262,26 @@ describe("listModels merging", () => {
       source: "connection",
       connectionId: "pc_1",
     });
+  });
+
+  it("projects a stored vendorLabel onto a connection model", async () => {
+    vi.mocked(prisma.providerModel.findMany).mockResolvedValue([
+      makeProviderModelRow({ vendorLabel: "OpenAI" }),
+    ] as never);
+
+    const result = await listMerged({ userId: "u_1" });
+
+    expect(result.models[0]?.vendorLabel).toBe("OpenAI");
+  });
+
+  it("projects null vendorLabel for a catalog model", async () => {
+    vi.mocked(prisma.chatModel.findMany).mockResolvedValue([
+      makeModelRow(),
+    ] as never);
+
+    const result = await listMerged({ userId: "u_1" });
+
+    expect(result.models[0]?.vendorLabel).toBeNull();
   });
 
   it("drops an image row on a kind with no image endpoint, even when inserted directly", async () => {

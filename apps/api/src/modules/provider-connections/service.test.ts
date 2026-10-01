@@ -24,6 +24,7 @@ import {
   encodeProviderCredentials,
 } from "./credentials.js";
 import { SLUG_MAX } from "../../lib/provider-slug.js";
+import { MODEL_NAME_MAX } from "./service.js";
 
 const OK_CONNECTION = {
   kind: "compatible",
@@ -549,6 +550,45 @@ describe("validateModelInput", () => {
       ),
     ).toThrow(/context/i);
   });
+
+  it("trims a declared vendorLabel", () => {
+    const value = validateModelInput(
+      { upstreamId: "x", vendorLabel: "  OpenAI  " },
+      meta,
+    );
+    expect(value.vendorLabel).toBe("OpenAI");
+  });
+
+  it("normalises a blank vendorLabel to null", () => {
+    const value = validateModelInput({ upstreamId: "x", vendorLabel: "" }, meta);
+    expect(value.vendorLabel).toBeNull();
+  });
+
+  it("rejects a non-text vendorLabel, naming the field", () => {
+    expect(() =>
+      validateModelInput({ upstreamId: "x", vendorLabel: 42 }, meta),
+    ).toThrow(/vendorLabel/i);
+  });
+
+  it("leaves vendorLabel null when the field is omitted", () => {
+    const value = validateModelInput({ upstreamId: "x" }, meta);
+    expect(value.vendorLabel).toBeNull();
+  });
+
+  it("rejects a vendorLabel longer than the model name bound", () => {
+    expect(() =>
+      validateModelInput(
+        { upstreamId: "x", vendorLabel: "a".repeat(MODEL_NAME_MAX + 1) },
+        meta,
+      ),
+    ).toThrow(new RegExp(`at most ${MODEL_NAME_MAX}`));
+  });
+
+  it("accepts a vendorLabel exactly at the model name bound", () => {
+    const vendorLabel = "a".repeat(MODEL_NAME_MAX);
+    const value = validateModelInput({ upstreamId: "x", vendorLabel }, meta);
+    expect(value.vendorLabel).toBe(vendorLabel);
+  });
 });
 
 function makeDb(overrides: Record<string, unknown> = {}) {
@@ -625,6 +665,7 @@ describe("toPublicModel", () => {
       label: "Model",
       hint: null,
       description: null,
+      vendorLabel: null,
       iconSvg: "",
       outputType: "text",
       contextWindowTokens: null,
@@ -652,6 +693,16 @@ describe("toPublicModel", () => {
   it("projects null imageCapabilities for a text model", () => {
     const projected = toPublicModel(row());
     expect(projected.imageCapabilities).toBeNull();
+  });
+
+  it("projects a declared vendorLabel", () => {
+    const projected = toPublicModel(row({ vendorLabel: "OpenAI" }));
+    expect(projected.vendorLabel).toBe("OpenAI");
+  });
+
+  it("projects null vendorLabel for a model that has none", () => {
+    const projected = toPublicModel(row());
+    expect(projected.vendorLabel).toBeNull();
   });
 });
 
@@ -1319,6 +1370,80 @@ describe("createConnectionModel", () => {
     });
   });
 
+  it("persists a trimmed vendorLabel", async () => {
+    const db = makeDb({
+      providerConnection: {
+        count: vi.fn(async () => 1),
+        findFirst: vi.fn(async () => ({
+          id: "pc_1",
+          userId: "u_1",
+          kind: "compatible",
+          slug: "gw",
+          baseUrl: "https://gw.example/v1",
+          api: "chat",
+          credentialsRef: encodeProviderCredentials({ apiKey: "sk-stored" }),
+        })),
+      },
+      providerModel: {
+        count: vi.fn(async () => 0),
+        findMany: vi.fn(async () => []),
+        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({
+          id: "pm_1",
+          ...data,
+        })),
+      },
+    });
+
+    await createConnectionModel(db, "u_1", "pc_1", {
+      upstreamId: "gpt-5.5",
+      vendorLabel: "  OpenAI  ",
+    });
+
+    const call = (
+      db as never as { providerModel: { create: ReturnType<typeof vi.fn> } }
+    ).providerModel.create.mock.calls[0]?.[0] as {
+      data: { vendorLabel: string | null };
+    };
+    expect(call.data.vendorLabel).toBe("OpenAI");
+  });
+
+  it("persists null for a blank vendorLabel", async () => {
+    const db = makeDb({
+      providerConnection: {
+        count: vi.fn(async () => 1),
+        findFirst: vi.fn(async () => ({
+          id: "pc_1",
+          userId: "u_1",
+          kind: "compatible",
+          slug: "gw",
+          baseUrl: "https://gw.example/v1",
+          api: "chat",
+          credentialsRef: encodeProviderCredentials({ apiKey: "sk-stored" }),
+        })),
+      },
+      providerModel: {
+        count: vi.fn(async () => 0),
+        findMany: vi.fn(async () => []),
+        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({
+          id: "pm_1",
+          ...data,
+        })),
+      },
+    });
+
+    await createConnectionModel(db, "u_1", "pc_1", {
+      upstreamId: "gpt-5.5",
+      vendorLabel: "",
+    });
+
+    const call = (
+      db as never as { providerModel: { create: ReturnType<typeof vi.fn> } }
+    ).providerModel.create.mock.calls[0]?.[0] as {
+      data: { vendorLabel: string | null };
+    };
+    expect(call.data.vendorLabel).toBeNull();
+  });
+
   it("enforces the per-user model cap", async () => {
     const db = makeDb({
       providerConnection: {
@@ -1426,6 +1551,38 @@ describe("updateConnectionModel", () => {
     await expect(
       updateConnectionModel(db, "u_1", "pc_1", "pm_other", { name: "X" }),
     ).rejects.toThrow(/not found/i);
+  });
+
+  it("persists a supplied vendorLabel on update", async () => {
+    const db = dbWithModel();
+
+    await updateConnectionModel(db, "u_1", "pc_1", "pm_1", {
+      upstreamId: "model-x",
+      vendorLabel: "OpenCode Zen",
+    });
+
+    const call = (
+      db as never as { providerModel: { update: ReturnType<typeof vi.fn> } }
+    ).providerModel.update.mock.calls[0]?.[0] as {
+      data: { vendorLabel: string | null };
+    };
+    expect(call.data.vendorLabel).toBe("OpenCode Zen");
+  });
+
+  it("clears the stored vendorLabel when a blank value is sent", async () => {
+    const db = dbWithModel();
+
+    await updateConnectionModel(db, "u_1", "pc_1", "pm_1", {
+      upstreamId: "model-x",
+      vendorLabel: "   ",
+    });
+
+    const call = (
+      db as never as { providerModel: { update: ReturnType<typeof vi.fn> } }
+    ).providerModel.update.mock.calls[0]?.[0] as {
+      data: { vendorLabel: string | null };
+    };
+    expect(call.data.vendorLabel).toBeNull();
   });
 });
 

@@ -63,6 +63,7 @@ const modelCreateSchema = z
       .max(MODEL_DESCRIPTION_MAX + 10)
       .nullable()
       .optional(),
+    vendorLabel: z.string().max(MODEL_NAME_MAX + 10).nullable().optional(),
     iconSvg: z.string().max(ICON_SVG_MAX).optional(),
     outputType: z.enum(["text", "image"]).optional(),
     // Shape is validated by parseImageCapabilities, which owns the rules.

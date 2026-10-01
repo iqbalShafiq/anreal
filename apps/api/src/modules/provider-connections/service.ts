@@ -209,6 +209,8 @@ export type ProviderModelInput = {
   label?: unknown;
   hint?: unknown;
   description?: unknown;
+  /** Who made the model, as declared by the user. Filter facet only. */
+  vendorLabel?: unknown;
   iconSvg?: unknown;
   outputType?: unknown;
   imageCapabilities?: unknown;
@@ -224,6 +226,8 @@ export type ValidatedModelInput = {
   label: string;
   hint: string | null;
   description: string | null;
+  /** Declared vendor. A trimmed empty string normalises to null. */
+  vendorLabel: string | null;
   iconSvg: string;
   outputType: "text" | "image";
   /** The parsed ImageCapabilitySet for an image model; null for a text model. */
@@ -583,6 +587,14 @@ export function validateModelInput(
       input.description,
       MODEL_DESCRIPTION_MAX,
     ),
+    // Reuses the model name's bound: a vendor is short display text, and the
+    // helper already turns a trimmed empty string into null ("cleared" and
+    // "never set" are the same state for this filter facet).
+    vendorLabel: optionalBoundedText(
+      "vendorLabel",
+      input.vendorLabel,
+      MODEL_NAME_MAX,
+    ),
     iconSvg:
       typeof input.iconSvg === "string" && input.iconSvg.length <= ICON_SVG_MAX
         ? input.iconSvg
@@ -819,6 +831,7 @@ type ModelRow = {
   label: string;
   hint: string | null;
   description: string | null;
+  vendorLabel: string | null;
   iconSvg: string;
   outputType: string;
   contextWindowTokens: number | null;
@@ -886,6 +899,7 @@ export function toPublicModel(row: ModelRow) {
     label: row.label,
     hint: row.hint,
     description: row.description,
+    vendorLabel: row.vendorLabel,
     iconSvg: row.iconSvg,
     outputType: row.outputType === "image" ? "image" : "text",
     contextWindowTokens: row.contextWindowTokens,
@@ -1161,6 +1175,7 @@ export async function createConnectionModel(
       label: value.label,
       hint: value.hint,
       description: value.description,
+      vendorLabel: value.vendorLabel,
       iconSvg: value.iconSvg,
       outputType: value.outputType,
       imageCapabilities: value.imageCapabilities,
@@ -1209,6 +1224,7 @@ export async function updateConnectionModel(
       label: value.label,
       hint: value.hint,
       description: value.description,
+      vendorLabel: value.vendorLabel,
       iconSvg: value.iconSvg,
       outputType: value.outputType,
       imageCapabilities: value.imageCapabilities,

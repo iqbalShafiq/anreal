@@ -631,6 +631,8 @@ model ProviderModel {
   label               String
   hint                String?
   description         String?
+  /// Who made the model, declared by the user. Filter facet only - never routing.
+  vendorLabel         String?
   iconSvg             String             @default("")
   /// "text" | "image"
   outputType          String             @default("text")
