@@ -317,6 +317,50 @@ describe("ModelPickerMenu: scroll cap and the action row", () => {
   });
 });
 
+describe("ModelPickerMenu: the list is inside the panel's card, not its own", () => {
+  const models = [catalogModel("openai/alpha", { name: "Alpha" })];
+
+  it("renders the option list without card chrome", () => {
+    renderMenu(models);
+    const list = optionList();
+
+    for (const token of [
+      "rounded-xl",
+      "border-white/[0.08]",
+      "bg-canvas-elevated",
+      "shadow-[0_12px_40px_-12px_rgba(0,0,0,0.75)]",
+      "animate-fade-in",
+    ]) {
+      expect(list.className).not.toContain(token);
+    }
+  });
+
+  it("insets the list to the search field's left edge, with a gap above the first row", () => {
+    renderMenu(models);
+    const list = optionList();
+    const search = screen.getByRole("searchbox", { name: "Search models" });
+    // The search field's own wrapper carries the px-2 inset.
+    const searchWrapper = search.parentElement as HTMLElement;
+
+    // The list is inset horizontally like the search row...
+    expect(list.className).toContain("px-2");
+    // ...and left-aligned with it: both declare the same left padding token.
+    expect(searchWrapper.className).toContain("px-2");
+    // ...and has breathing room under the search.
+    expect(list.className).toContain("pt-1");
+  });
+
+  it("keeps the inset in grid mode too", () => {
+    localStorage.setItem(MODEL_PICKER_VIEW_KEY, "grid");
+    renderMenu(models);
+    const list = optionList();
+
+    expect(list.className).toContain("grid");
+    expect(list.className).toContain("px-2");
+    expect(list.className).not.toContain("bg-canvas-elevated");
+  });
+});
+
 describe("ModelPickerMenu: live region", () => {
   it("announces the visible count in a visually hidden live region", () => {
     renderMenu([

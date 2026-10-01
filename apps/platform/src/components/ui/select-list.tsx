@@ -36,6 +36,14 @@ export type SelectOptionListProps = {
   layout?: "list" | "grid";
   /** Grid columns. Ignored in list layout. Defaults to 1. */
   columns?: number;
+  /**
+   * When true, the list is embedded in a panel that already provides the
+   * popover chrome (border, surface, shadow, rounding, entry animation), so it
+   * draws none of that itself — otherwise the panel would render a card inside
+   * a card. The default keeps the full card treatment every existing caller
+   * renders.
+   */
+  chromeless?: boolean;
 };
 
 /**
@@ -57,6 +65,7 @@ export function SelectOptionList({
   hoverSide = "top",
   layout = "list",
   columns = 1,
+  chromeless = false,
 }: SelectOptionListProps) {
   const isGrid = layout === "grid";
   const columnCount = Math.max(1, Math.floor(columns) || 1);
@@ -111,6 +120,19 @@ export function SelectOptionList({
     }
   };
 
+  /**
+   * Chromeless drops the card treatment so the list does not draw a second
+   * border/surface/shadow inside a panel that already provides them, and leaves
+   * padding to the caller so a chromeless grid does not fight the caller's
+   * inset. The default branch is kept literally as it was — `Select` depends on
+   * it byte-for-byte.
+   */
+  const containerClass = chromeless
+    ? `${isGrid ? "grid gap-1 " : ""}${className}`
+    : `chat-scroll overflow-hidden rounded-xl border border-white/[0.08] bg-canvas-elevated text-text shadow-[0_12px_40px_-12px_rgba(0,0,0,0.75)] animate-fade-in ${
+        isGrid ? "grid gap-1 p-1 " : ""
+      }${className}`;
+
   return (
     <ul
       ref={ref}
@@ -128,9 +150,7 @@ export function SelectOptionList({
       data-layout={isGrid ? "grid" : undefined}
       data-columns={isGrid ? String(columnCount) : undefined}
       onKeyDown={handleKeyDown}
-      className={`chat-scroll overflow-hidden rounded-xl border border-white/[0.08] bg-canvas-elevated text-text shadow-[0_12px_40px_-12px_rgba(0,0,0,0.75)] animate-fade-in ${
-        isGrid ? "grid gap-1 p-1 " : ""
-      }${className}`}
+      className={containerClass}
     >
       {options.map((opt) => {
         const isSelected = opt.value === value;

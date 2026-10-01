@@ -529,7 +529,8 @@ export function ModelPickerMenu({
           layout={grid ? "grid" : "list"}
           columns={gridColumns}
           hoverSide="right"
-          className="chat-scroll overflow-y-auto"
+          chromeless
+          className="chat-scroll overflow-y-auto px-2 pt-1"
           style={{ maxHeight: cap }}
         />
       )}

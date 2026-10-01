@@ -210,3 +210,70 @@ describe("SelectOptionList: scroll cap", () => {
     expect(ref.current?.getAttribute("role")).toBe("listbox");
   });
 });
+
+describe("SelectOptionList: chromeless", () => {
+  /** The card treatment the default render draws. */
+  const CARD_TOKENS = [
+    "rounded-xl",
+    "border",
+    "border-white/[0.08]",
+    "bg-canvas-elevated",
+    "shadow-[0_12px_40px_-12px_rgba(0,0,0,0.75)]",
+    "animate-fade-in",
+  ];
+
+  it("keeps every card class when the opt-out is not passed (Select's render)", () => {
+    const { list } = setup({
+      id: "l",
+      ariaLabel: "Options",
+      value: "0",
+      options: OPTIONS,
+      onSelect: vi.fn(),
+    });
+
+    for (const token of CARD_TOKENS) {
+      expect(list.className).toContain(token);
+    }
+    // And byte-for-byte, the pin the earlier round established.
+    expect(list.className).toBe(BASE_LIST_CLASS);
+  });
+
+  it("draws no chrome when chromeless, keeping only the caller's classes", () => {
+    const { list } = setup({
+      id: "l",
+      ariaLabel: "Options",
+      value: "0",
+      options: OPTIONS,
+      onSelect: vi.fn(),
+      chromeless: true,
+      className: "chat-scroll overflow-y-auto px-2 pt-1",
+    });
+
+    for (const token of CARD_TOKENS) {
+      expect(list.className).not.toContain(token);
+    }
+    expect(list.className).toContain("overflow-y-auto");
+    expect(list.className).toContain("px-2");
+    expect(list.className).toContain("pt-1");
+  });
+
+  it("keeps the grid layout classes while dropping the chrome", () => {
+    const { list } = setup({
+      id: "l",
+      ariaLabel: "Options",
+      value: "0",
+      options: OPTIONS,
+      onSelect: vi.fn(),
+      layout: "grid",
+      columns: 3,
+      chromeless: true,
+      className: "px-2 pt-1",
+    });
+
+    expect(list.className).toContain("grid");
+    expect(list.className).toContain("gap-1");
+    expect(list.className).not.toContain("bg-canvas-elevated");
+    expect(list.className).not.toContain("animate-fade-in");
+    expect(list.style.gridTemplateColumns).toContain("repeat(3");
+  });
+});
