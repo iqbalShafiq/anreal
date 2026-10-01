@@ -1058,6 +1058,11 @@ export async function resolveRecipeImageTarget(
       modelId: row.upstreamId,
       apiKey: credentials.apiKey,
       baseUrl: row.connection.baseUrl,
+      // Mirrors the completion path (resolveRecipeCompletionModel): a gateway
+      // that authenticates by custom header must authenticate image requests
+      // the same way. The factory forwards them only to the kinds whose client
+      // options declare a `headers` field.
+      headers: credentials.headers ?? null,
       ...(options.fetchFn ? { fetchFn: options.fetchFn } : {}),
     });
   } catch (error) {

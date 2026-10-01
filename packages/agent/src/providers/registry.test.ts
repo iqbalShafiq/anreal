@@ -350,6 +350,104 @@ describe("createImageGenerationModelFor", () => {
       expect.objectContaining({ method: "POST" }),
     );
   });
+
+  it("forwards connection headers to the OpenRouter-shaped instance on the wire", async () => {
+    const seenFetch = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        new Response("{}"),
+    );
+    const model = createImageGenerationModelFor({
+      kind: "compatible",
+      modelId: "my-gateway/flux-pro",
+      apiKey: "sk-test",
+      baseUrl: "https://gw.example/v1",
+      headers: { "X-Api-Key": "secret-header" },
+      fetchFn: seenFetch,
+    });
+
+    await expect(
+      model?.imageGeneration({ prompt: "a cat", width: 512, height: 512 }),
+    ).rejects.toThrow(/no usable images/i);
+    expect(
+      (seenFetch.mock.calls[0]![1] as RequestInit).headers,
+    ).toMatchObject({
+      Authorization: "Bearer sk-test",
+      "X-Api-Key": "secret-header",
+    });
+  });
+
+  it("forwards connection headers to the Grok client, whose image path uses the same SDK", () => {
+    mocks.client.mockClear();
+
+    createImageGenerationModelFor({
+      kind: "grok",
+      modelId: "grok-imagine-image",
+      apiKey: "xai-test",
+      headers: { "X-Api-Key": "secret-header" },
+      fetchFn,
+    });
+
+    // GrokManagedClientOptions declares `headers` (dist/index.d.ts:21) and the
+    // client passes them to the OpenAI SDK as `defaultHeaders`
+    // (dist/index.js:545-551), which `imageGenerationModel` reuses via
+    // `this.sdk` (dist/index.js:576).
+    expect(mocks.client).toHaveBeenCalledWith(
+      expect.objectContaining({ headers: { "X-Api-Key": "secret-header" } }),
+    );
+  });
+
+  it("never invents a header seam for Gemini, whose client options cannot express one", () => {
+    mocks.client.mockClear();
+
+    createImageGenerationModelFor({
+      kind: "gemini",
+      modelId: "gemini-3.1-flash-image",
+      apiKey: "AIza-test",
+      headers: { "X-Api-Key": "secret-header" },
+      fetchFn,
+    });
+
+    // GeminiApiClientOptions is `{ apiKey, vertexAi?: never, client?: never }`
+    // (dist/index.d.ts:36-40): there is no headers field, so passing one would
+    // be an option the adapter silently ignores.
+    const options = mocks.client.mock.calls[0]![0] as Record<string, unknown>;
+    expect(options).not.toHaveProperty("headers");
+    expect(options).toEqual({ apiKey: "AIza-test" });
+  });
+
+  it("omits headers entirely when the connection has none", async () => {
+    mocks.client.mockClear();
+    const seenFetch = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        new Response("{}"),
+    );
+
+    const model = createImageGenerationModelFor({
+      kind: "compatible",
+      modelId: "my-gateway/flux-pro",
+      apiKey: "sk-test",
+      baseUrl: "https://gw.example/v1",
+      fetchFn: seenFetch,
+    });
+
+    await expect(
+      model?.imageGeneration({ prompt: "a cat", width: 512, height: 512 }),
+    ).rejects.toThrow(/no usable images/i);
+    expect((seenFetch.mock.calls[0]![1] as RequestInit).headers).toEqual({
+      Authorization: "Bearer sk-test",
+      "Content-Type": "application/json",
+    });
+
+    createImageGenerationModelFor({
+      kind: "grok",
+      modelId: "grok-imagine-image",
+      apiKey: "xai-test",
+      fetchFn,
+    });
+    expect(mocks.client).toHaveBeenLastCalledWith(
+      expect.not.objectContaining({ headers: expect.anything() }),
+    );
+  });
 });
 
 import {

@@ -450,6 +450,97 @@ describe("resolveRecipeImageTarget", () => {
   });
 });
 
+describe("connection headers reach a BYOK image request", () => {
+  /** A row whose connection credential carries custom gateway headers. */
+  function rowWithHeaders(headers: Record<string, string> | null) {
+    return imageRow({
+      connection: {
+        kind: "compatible",
+        baseUrl: "https://gw.example/v1",
+        credentialsRef: encodeProviderCredentials({
+          apiKey: "sk-byok",
+          headers,
+        }),
+      },
+    });
+  }
+
+  /** Drive the real tool + real adapter and return the headers the fake saw. */
+  async function wireHeaders(headers: Record<string, string> | null) {
+    const seen = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
+      return new Response("{}");
+    });
+    const target = await resolveRecipeImageTarget(
+      imageRecipe({ imageGenSettings: { modelId: SLUG } }),
+      fakeImageDb(rowWithHeaders(headers)),
+      { fetchFn: seen },
+    );
+    const tools = createImageGenerationTools({
+      model: target!.model,
+      store: {
+        saveGeneratedImage: async () => ({
+          id: "rec-1",
+          mediaType: "image/png",
+          width: 1024,
+          height: 1024,
+          modelId: SLUG,
+          prompt: "a cat",
+        }),
+      },
+      enabled: true,
+      hasGrant: () => true,
+      takeToolOverride: () => null,
+      userId: USER_ID,
+      sessionId: "session-1",
+      projectId: null,
+      resolveReference: async () => null,
+      capabilities: () => target!.capabilities,
+      imageProviderOptions: target!.imageProviderOptions,
+      defaultSettings: { modelId: SLUG, aspectRatio: "1:1" },
+    });
+
+    await tools[0]!.call({ prompt: "a cat" });
+    return (seen.mock.calls[0]![1] as unknown as RequestInit).headers;
+  }
+
+  it("sends the connection's custom headers on the wire", async () => {
+    // The user's gateway authenticates with a custom header, exactly as the
+    // completion path already forwards (registry.ts:152). Before the fix the
+    // image request went out unauthenticated.
+    await expect(wireHeaders({ "X-Api-Key": "secret-header" })).resolves.toEqual({
+      Authorization: "Bearer sk-byok",
+      "Content-Type": "application/json",
+      "X-Api-Key": "secret-header",
+    });
+  });
+
+  it("lets a custom header override a default of the same name", async () => {
+    await expect(
+      wireHeaders({ Authorization: "Custom abc123", "X-Gateway": "acme" }),
+    ).resolves.toEqual({
+      Authorization: "Custom abc123",
+      "Content-Type": "application/json",
+      "X-Gateway": "acme",
+    });
+  });
+
+  it("still sends the connection key when no custom Authorization is declared", async () => {
+    await expect(wireHeaders({ "X-Gateway": "acme" })).resolves.toMatchObject({
+      Authorization: "Bearer sk-byok",
+      "X-Gateway": "acme",
+    });
+  });
+
+  it("sends exactly the two defaults when the connection declares no headers", async () => {
+    // The majority case, and the regression pin: no custom headers must behave
+    // exactly as before.
+    await expect(wireHeaders(null)).resolves.toEqual({
+      Authorization: "Bearer sk-byok",
+      "Content-Type": "application/json",
+    });
+  });
+});
+
 describe("selectRunImageModel", () => {
   it("builds exactly today's model from the env pair when no BYOK target exists", () => {
     const model = selectRunImageModel({

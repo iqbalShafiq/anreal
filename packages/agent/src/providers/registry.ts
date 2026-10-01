@@ -244,6 +244,12 @@ export type ImageTarget = {
   modelId: string;
   apiKey: string;
   baseUrl?: string | null;
+  /**
+   * Connection headers for a gateway that authenticates beyond the key. Only
+   * the kinds whose client options declare a `headers` field receive them —
+   * see the per-kind notes in `createImageGenerationModelFor`.
+   */
+  headers?: Record<string, string> | null;
   /** Injected for tests and for callers that proxy requests. */
   fetchFn?: typeof fetch;
 };
@@ -272,7 +278,7 @@ export type ImageTarget = {
 export function createImageGenerationModelFor(
   target: ImageTarget,
 ): ImageGenerationModel<unknown> | null {
-  const { kind, modelId, apiKey, baseUrl, fetchFn } = target;
+  const { kind, modelId, apiKey, baseUrl, headers, fetchFn } = target;
 
   switch (PROVIDER_KIND_META[kind].imageStyle) {
     case "openrouter-images": {
@@ -287,6 +293,7 @@ export function createImageGenerationModelFor(
         apiKey,
         baseUrl,
         defaultModel: modelId,
+        ...(headers ? { headers } : {}),
         ...(fetchFn ? { fetchFn } : {}),
       });
     }
@@ -303,6 +310,12 @@ export function createImageGenerationModelFor(
       // originally proposed could not be built. Registering one is therefore
       // accepted, and at generation time it is sent through `generateContent`
       // as a wrong request rather than failing early.
+      //
+      // NO HEADER SEAM: `GeminiApiClientOptions` is
+      // `{ apiKey; vertexAi?: never; client?: never }` (dist/index.d.ts:36-40),
+      // with no `headers`/`httpOptions`, and the client builds the Google SDK
+      // itself. Passing `headers` here would be an option the adapter silently
+      // ignores, so it is deliberately dropped rather than forwarded.
       return new GeminiClient({ apiKey }).imageGenerationModel({
         api: "generateContent",
         modelId,
@@ -311,10 +324,15 @@ export function createImageGenerationModelFor(
     case "grok-native": {
       // Grok carries the fetch on the client options, which is the seam its
       // image model reads (GrokClientOptions.fetch → this.fetchFn →
-      // GrokImageGenerationModel, dist/index.js:552-576).
+      // GrokImageGenerationModel, dist/index.js:552-576). It also declares
+      // `headers` (GrokManagedClientOptions, dist/index.d.ts:18-25), which the
+      // client passes to the OpenAI SDK as `defaultHeaders`
+      // (dist/index.js:545-551) — and `imageGenerationModel` reuses that same
+      // `this.sdk` (dist/index.js:576), so the headers reach image requests.
       return new GrokClient({
         apiKey,
         ...(baseUrl ? { baseUrl } : {}),
+        ...(headers ? { headers } : {}),
         ...(fetchFn ? { fetch: fetchFn } : {}),
       }).imageGenerationModel({ modelId });
     }
