@@ -147,6 +147,7 @@ export function ModelPickerMenu({
   onAddModel,
   open,
   onClose,
+  onViewChange,
 }: {
   models: ModelInfo[];
   value: string;
@@ -154,6 +155,12 @@ export function ModelPickerMenu({
   onAddModel?: () => void;
   open: boolean;
   onClose?: () => void;
+  /**
+   * Notified whenever the view mode changes (including the initial stored
+   * value) so the caller can size the panel: grid wants a wider panel than the
+   * composer shell, and the width is the caller's positioning concern.
+   */
+  onViewChange?: (view: PickerView) => void;
 }) {
   const listId = useId();
   const liveId = useId();
@@ -175,6 +182,13 @@ export function ModelPickerMenu({
     if (!open) return;
     searchRef.current?.focus();
   }, [open]);
+
+  // Report the view to the caller — on mount (the stored value) and on every
+  // toggle — so the panel width can follow it.
+  useEffect(() => {
+    onViewChange?.(view);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- notify on view only
+  }, [view]);
 
   const facets = useMemo(() => pickerFacets(models), [models]);
   /**

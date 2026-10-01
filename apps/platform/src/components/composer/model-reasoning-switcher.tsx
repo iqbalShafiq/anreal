@@ -20,6 +20,8 @@ import {
   SelectOptionList,
   type SelectOption,
 } from "#/components/ui/select-list";
+import { readModelPickerView } from "#/lib/chat-preferences";
+import type { PickerView } from "#/lib/model-picker";
 import { ModelPickerMenu } from "./model-picker-menu";
 
 /** Used only to order the icon fill; the actual list comes from props. */
@@ -128,6 +130,16 @@ export function ModelReasoningSwitcher({
   const selectedReasoningLabel =
     reasoningEffort === null ? "None" : reasoningLabel(reasoningEfforts, reasoningEffort);
 
+  /**
+   * The view mode the picker menu is currently in. The menu owns the state (it
+   * also persists it); it reports back so the panel can be sized here, where
+   * the positioning lives. Seeded from storage so the very first open is
+   * already the right width rather than resizing a frame later.
+   */
+  const [pickerView, setPickerView] = useState<PickerView>(() =>
+    readModelPickerView(),
+  );
+
   const updateMenuPosition = () => {
     const shell = rootRef.current;
     if (!shell) {
@@ -136,7 +148,13 @@ export function ModelReasoningSwitcher({
     }
     const shellRect = shell.getBoundingClientRect();
     // Open upward from the shared shell (composer sits at bottom of viewport).
-    const minWidth = Math.max(184, shellRect.width);
+    // The list hugs the shell; the grid is wider (spec §7.2) so the cards earn
+    // their extra columns, capped to the viewport. The existing left clamp
+    // below keeps either width inside the viewport — no second clamp.
+    const minWidth =
+      pickerView === "grid"
+        ? Math.min(560, window.innerWidth - 16)
+        : Math.max(184, shellRect.width);
     const maxLeft = window.innerWidth - minWidth - 8;
     setMenuPos({
       top: shellRect.top - 8,
@@ -159,8 +177,8 @@ export function ModelReasoningSwitcher({
       window.removeEventListener("resize", onReposition);
       window.removeEventListener("scroll", onReposition, true);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- position from openMenu + refs
-  }, [openMenu]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- position from openMenu + view + refs
+  }, [openMenu, pickerView]);
 
   useEffect(() => {
     if (!openMenu) return;
@@ -244,6 +262,7 @@ export function ModelReasoningSwitcher({
                 }}
                 onAddModel={onAddModel}
                 onClose={() => setOpenMenu(null)}
+                onViewChange={setPickerView}
               />
             ) : (
               <SelectOptionList
