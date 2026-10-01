@@ -221,6 +221,10 @@ export function ModelPickerMenu({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- notify on view only
   }, [view]);
 
+  // Deliberately derived from the full catalog, not the currently filtered set
+  // (spec: facets come from the catalog). A capability chip can therefore be
+  // offered that, combined with an active query, empties the list — the empty
+  // state explains that rather than the chip hiding itself.
   const facets = useMemo(() => pickerFacets(models), [models]);
   /**
    * A capability discriminates only if selecting it would change the list:
@@ -507,7 +511,14 @@ export function ModelPickerMenu({
 
       {/* Options. Only the options scroll; the action sits below, outside. */}
       {visibleModels.length === 0 ? (
-        <div className="flex flex-col items-center gap-2 px-3 py-6 text-center">
+        // The id lives here too, not only on the listbox: with no matches the
+        // listbox unmounts, and the search input's and trigger's `aria-controls`
+        // would otherwise reference an id absent from the document. Pointing
+        // them at the empty state keeps the relationship resolvable.
+        <div
+          id={id}
+          className="flex flex-col items-center gap-2 px-3 py-6 text-center"
+        >
           <span className="text-xs text-text-muted">No models match</span>
           <button
             type="button"

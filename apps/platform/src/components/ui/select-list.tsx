@@ -41,7 +41,10 @@ export type SelectOptionListProps = {
    * popover chrome (border, surface, shadow, rounding, entry animation), so it
    * draws none of that itself — otherwise the panel would render a card inside
    * a card. The default keeps the full card treatment every existing caller
-   * renders.
+   * renders. Full-bleed rows (the default here) require the embedding panel to
+   * carry `overflow-hidden` and its rounding to clip a corner row's highlight;
+   * a chromeless caller with a padded, non-clipping panel would square a corner
+   * silently.
    */
   chromeless?: boolean;
 };

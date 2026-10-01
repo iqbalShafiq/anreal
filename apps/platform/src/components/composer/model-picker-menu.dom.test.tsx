@@ -190,6 +190,20 @@ describe("ModelPickerMenu: search", () => {
     expect(optionValues()).toEqual(["openai/alpha", "openai/beta"]);
     expect((search() as HTMLInputElement).value).toBe("");
   });
+
+  it("keeps the search's aria-controls resolvable in the empty state", () => {
+    renderMenu(models);
+    fireEvent.change(search(), { target: { value: "zzz" } });
+
+    // The listbox unmounts, so the id must live on the empty state instead —
+    // otherwise the input's aria-controls points at an id not in the document.
+    const controls = search().getAttribute("aria-controls");
+    expect(controls).toBeTruthy();
+    const target = document.getElementById(controls as string);
+    expect(target).not.toBeNull();
+    // The id resolves to the empty-state container the message sits in.
+    expect(target?.textContent).toContain("No models match");
+  });
 });
 
 describe("ModelPickerMenu: filters", () => {
