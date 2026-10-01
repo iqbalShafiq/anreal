@@ -40,7 +40,11 @@ import {
 } from "@anreal/agent";
 
 import { encodeProviderCredentials } from "../provider-connections/credentials.js";
-import { CHAT_AGENT_RECIPE_VERSION, parseChatAgentRecipe } from "./run-recipe.js";
+import {
+  CHAT_AGENT_RECIPE_VERSION,
+  parseChatAgentRecipe,
+  type ChatAgentRecipe,
+} from "./run-recipe.js";
 import { createNativeStaticContext } from "./memory-policy.js";
 import { formatContextSnippetBlock } from "./context-snippets.js";
 import { VIEW_IMAGE_TOOL_DEFINITIONS } from "./vision-helper.js";
@@ -50,12 +54,17 @@ import {
   reconstructChatRunInput,
   resolveRecipeImageTarget,
   resolveChatAgentRecipe,
+  selectImageTargetSource,
   selectRunImageModel,
   type ByokImageTarget,
   type FrozenImageModelCapability,
+  type ImageTargetSourceInput,
   type RecipeImageDb,
   type RecipeImageModelRow,
 } from "./build-run-input.js";
+
+/** The shared provider env pair shape (what `imageGenerationConfig()` returns). */
+type ImageConfig = { apiKey: string; baseUrl: string } | null;
 
 const USER_ID = "user-1";
 const SLUG = "my-gateway/Flux Pro Max";
@@ -244,11 +253,27 @@ afterEach(() => {
 });
 
 describe("resolveRecipeImageTarget", () => {
-  it("returns nothing when the session did not pin a BYOK image model", async () => {
+  it("falls back to the user's BYOK model when the session pinned nothing", async () => {
+    // Build-time availability is true whenever the user owns a BYOK image
+    // model, so the worker MUST resolve one even with no pin, or a correctly
+    // configured user gets a dead run. The fallback is the shared predicate's
+    // branch 3.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const db = fakeImageDb(imageRow());
-    const target = await resolveRecipeImageTarget(imageRecipe(), db);
+    const target = await resolveRecipeImageTarget(imageRecipe(), db, {
+      envConfig: null,
+    });
+    expect(target).not.toBeNull();
+    expect(target!.modelId).toBe(SLUG);
+    warn.mockRestore();
+  });
+
+  it("returns nothing when the session pinned nothing and the user owns no BYOK model", async () => {
+    const db = fakeImageDb(null);
+    const target = await resolveRecipeImageTarget(imageRecipe(), db, {
+      envConfig: null,
+    });
     expect(target).toBeNull();
-    expect(db.providerModel.findFirst).not.toHaveBeenCalled();
   });
 
   it("returns nothing, and never throws, when the model row is gone", async () => {
@@ -693,16 +718,146 @@ describe("run reconstruction with a BYOK image target", () => {
   });
 });
 
+describe("the Critical: pinned catalog id, no env pair, one BYOK model", () => {
+  const runtimeWithRealResolver = (db: RecipeImageDb, fetchFn: typeof fetch) => ({
+    createAgent: (() => ({}) as never) as never,
+    createCompletionModel: (() => ({}) as never) as never,
+    createMemoryStore: () =>
+      ({
+        load: async () => [],
+        append: async () => undefined,
+        clear: async () => undefined,
+      }) as never,
+    // Drive the REAL resolver (and therefore the REAL shared predicate) against
+    // a fake db; ignore the worker's real prisma handle.
+    resolveRecipeImageTarget: ((
+      recipe: ChatAgentRecipe,
+      _db: RecipeImageDb,
+      options?: { fetchFn?: typeof fetch; envConfig?: ImageConfig },
+    ) =>
+      resolveRecipeImageTarget(recipe, db, {
+        ...options,
+        envConfig: null,
+        fetchFn,
+      })) as never,
+  });
+
+  it("freezes true at build time and reconstructs a working run with no throw", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // No env pair anywhere.
+    vi.stubEnv("OPENAI_API_KEY", "");
+    vi.stubEnv("OPENAI_BASE_URL", "");
+    const fakeDb = fakeImageDb(imageRow());
+
+    // Build: the client's default pin is a seeded catalog id, not an owned slug.
+    const recipe = await resolveChatAgentRecipe({
+      sessionId: "session-1",
+      userId: USER_ID,
+      model: "openai/gpt-5.6-luna",
+      reasoningEffort: null,
+      traceId: "trace-1",
+      consumeSingleUseContext: false,
+      imageGenSettings: { modelId: "openai/gpt-5-image-mini" },
+      dependencies: {
+        resolveActiveDocuments: async () => [],
+        listActiveImages: async () => [],
+        getActiveSnippet: async () => null,
+        webSearchConfig: () => null,
+        imageGenerationConfig: () => null,
+        loadImageModelCapabilities: async () => [],
+        imageTargetSource: (selectionInput: ImageTargetSourceInput) =>
+          selectImageTargetSource({ db: fakeDb, ...selectionInput }),
+        profilingEnabled: () => false,
+        loadProfileData: async () => null,
+        context7Requested: () => false,
+        context7ToolDefinitions: async () => [],
+        resolveUserEnhancements: async () => ({ userSkills: [], userMcp: [] }),
+        deepResearchLimits: () => ({
+          maxTurns: 8,
+          maxSearches: 12,
+          maxDurationMs: 360_000,
+        }),
+        findActiveModel: async () => ({
+          modelId: "openai/gpt-5.6-luna",
+          reasoningEfforts: [],
+          contextWindowTokens: 1_000_000,
+          maxInputTokens: null,
+          maxOutputTokens: null,
+          inputModalities: ["text"],
+          outputType: "text",
+          connectionId: null,
+        }),
+        prisma: {
+          chatSession: { findFirst: async () => ({ projectId: null }) },
+          project: { findFirst: async () => null },
+        },
+      } as never,
+    });
+
+    // Build time froze true because the shared predicate selected the BYOK
+    // fallback, and the seeded pinned id was preserved verbatim in the recipe.
+    expect(recipe.capabilities.imageGenerationAvailable).toBe(true);
+    expect(recipe.imageGenSettings?.modelId).toBe("openai/gpt-5-image-mini");
+
+    // Worker: the REAL resolver runs against the same fake db and must land on
+    // the BYOK fallback instead of throwing the frozen-capability error.
+    const seen = vi.fn(async () => new Response("{}"));
+    const reconstructed = await reconstructChatRunInput({
+      recipe,
+      runtime: runtimeWithRealResolver(fakeDb, seen as never),
+    });
+    expect(reconstructed.imageGenerationAvailable).toBe(true);
+    expect(reconstructed.tools.map((tool) => tool.name)).toContain("generate_image");
+    warn.mockRestore();
+  });
+
+  it("addresses the wire with the stored upstreamId, not the slug", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "");
+    vi.stubEnv("OPENAI_BASE_URL", "");
+    const seen = vi.fn(async () => new Response("{}"));
+    const target = await resolveRecipeImageTarget(
+      // The pinned catalog id does not resolve as an owned slug.
+      imageRecipe({ imageGenSettings: { modelId: "openai/gpt-5-image-mini" } }),
+      fakeImageDb(imageRow({ slug: "a-other/lowest", upstreamId: UPSTREAM_ID })),
+      { envConfig: null, fetchFn: seen as never },
+    );
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(target).not.toBeNull();
+    expect(target!.modelId).toBe("a-other/lowest");
+    // The rule every path in this phase carries: the wire id is upstreamId.
+    expect(target!.upstreamId).toBe(UPSTREAM_ID);
+    expect(target!.model.modelId).toBe(UPSTREAM_ID);
+    warn.mockRestore();
+  });
+});
+
 describe("build-time image availability", () => {
-  function resolverDependencies(byok: boolean) {
+  function resolverDependencies(byok: boolean, imageConfig: ImageConfig = null) {
     return {
       resolveActiveDocuments: async () => [],
       listActiveImages: async () => [],
       getActiveSnippet: async () => null,
       webSearchConfig: () => null,
-      imageGenerationConfig: () => null,
-      loadImageModelCapabilities: async () => [],
-      byokImageAvailability: async () => byok,
+      imageGenerationConfig: () => imageConfig,
+      // The env-only path needs a non-empty frozen catalog (its own guard); the
+      // BYOK path carries its own capability source, so an empty catalog is
+      // fine there.
+      loadImageModelCapabilities: async () =>
+        imageConfig === null
+          ? []
+          : [
+              {
+                modelId: "openai/gpt-image-1",
+                capabilities: { nMax: 2, resolutions: ["1K"] as const },
+              } satisfies FrozenImageModelCapability,
+            ],
+      // Drive the REAL shared predicate against a fake db, so build time and
+      // worker time are decided by the same function, not by a stub.
+      imageTargetSource: (selectionInput: ImageTargetSourceInput) =>
+        selectImageTargetSource({
+          db: byok ? fakeImageDb(imageRow()) : fakeImageDb(null),
+          ...selectionInput,
+        }),
       profilingEnabled: () => false,
       loadProfileData: async () => null,
       context7Requested: () => false,
@@ -716,16 +871,21 @@ describe("build-time image availability", () => {
     };
   }
 
-  it("is true when the env pair is absent but the user has a BYOK image model", async () => {
-    const recipe = await resolveChatAgentRecipe({
+  function resolveWith(input: {
+    byok: boolean;
+    imageConfig: ImageConfig;
+    imageGenSettings: unknown;
+  }) {
+    return resolveChatAgentRecipe({
       sessionId: "session-1",
       userId: USER_ID,
       model: "openai/gpt-5.6-luna",
       reasoningEffort: null,
       traceId: "trace-1",
       consumeSingleUseContext: false,
+      imageGenSettings: input.imageGenSettings,
       dependencies: {
-        ...resolverDependencies(true),
+        ...resolverDependencies(input.byok, input.imageConfig),
         findActiveModel: async () => ({
           modelId: "openai/gpt-5.6-luna",
           reasoningEfforts: [],
@@ -741,37 +901,178 @@ describe("build-time image availability", () => {
           project: { findFirst: async () => null },
         },
       } as never,
+    });
+  }
+
+  it("is true when the env pair is absent but the user has a BYOK image model", async () => {
+    const recipe = await resolveWith({
+      byok: true,
+      imageConfig: null,
+      imageGenSettings: { modelId: SLUG },
+    });
+    expect(recipe.capabilities.imageGenerationAvailable).toBe(true);
+  });
+
+  it("is true for the Critical case: a pinned seeded catalog id with a BYOK model and no env pair", async () => {
+    // The client default pins a seeded catalog id, not an owned slug. Build
+    // time must still freeze true because the shared predicate falls back to
+    // the owned BYOK model — exactly what the worker will resolve.
+    const recipe = await resolveWith({
+      byok: true,
+      imageConfig: null,
+      imageGenSettings: { modelId: "openai/gpt-5-image-mini" },
     });
     expect(recipe.capabilities.imageGenerationAvailable).toBe(true);
   });
 
   it("is false when neither the env pair nor a BYOK image model exists", async () => {
-    const recipe = await resolveChatAgentRecipe({
-      sessionId: "session-1",
-      userId: USER_ID,
-      model: "openai/gpt-5.6-luna",
-      reasoningEffort: null,
-      traceId: "trace-1",
-      consumeSingleUseContext: false,
-      dependencies: {
-        ...resolverDependencies(false),
-        findActiveModel: async () => ({
-          modelId: "openai/gpt-5.6-luna",
-          reasoningEfforts: [],
-          contextWindowTokens: 1_000_000,
-          maxInputTokens: null,
-          maxOutputTokens: null,
-          inputModalities: ["text"],
-          outputType: "text",
-          connectionId: null,
-        }),
-        prisma: {
-          chatSession: { findFirst: async () => ({ projectId: null }) },
-          project: { findFirst: async () => null },
-        },
-      } as never,
+    const recipe = await resolveWith({
+      byok: false,
+      imageConfig: null,
+      imageGenSettings: { modelId: SLUG },
     });
     expect(recipe.capabilities.imageGenerationAvailable).toBe(false);
+  });
+
+  it("is true from the env pair alone, with no BYOK model (unchanged)", async () => {
+    const recipe = await resolveWith({
+      byok: false,
+      imageConfig: { apiKey: "sk-shared", baseUrl: "https://shared.example/v1" },
+      imageGenSettings: { modelId: SLUG },
+    });
+    expect(recipe.capabilities.imageGenerationAvailable).toBe(true);
+  });
+});
+
+describe("the one shared image-target predicate", () => {
+  /**
+   * A fake db that honours the `where.slug` filter and the `orderBy: { slug:
+   * "asc" }` fallback clause, so determinism can be observed rather than
+   * assumed. `calls` records every argument the predicate passed.
+   */
+  function orderedDb(rows: RecipeImageModelRow[]) {
+    const calls: unknown[] = [];
+    const sorted = [...rows].sort((a, b) => a.slug.localeCompare(b.slug));
+    return {
+      calls,
+      providerModel: {
+        findFirst: vi.fn(async (args: unknown) => {
+          calls.push(args);
+          const where = (args as { where?: { slug?: string; connection?: { kind?: { in?: string[] } } } })
+            .where;
+          const kindFilter = where?.connection?.kind?.in;
+          const candidates = kindFilter
+            ? sorted.filter((row) =>
+                kindFilter.includes((row.connection?.kind ?? "") as string),
+              )
+            : sorted;
+          if (where?.slug !== undefined) {
+            return candidates.find((row) => row.slug === where.slug) ?? null;
+          }
+          return candidates[0] ?? null;
+        }),
+      },
+    };
+  }
+
+  it("prefers a pinned slug that resolves as an owned BYOK model over the fallback", async () => {
+    const db = orderedDb([
+      imageRow({ slug: "a-gateway/lowest" }),
+      imageRow({ slug: "z-pinned/model" }),
+    ]);
+    const selection = await selectImageTargetSource({
+      db,
+      userId: USER_ID,
+      pinnedSlug: "z-pinned/model",
+      envConfig: null,
+    });
+    expect(selection).toEqual({ source: "byok", row: expect.objectContaining({ slug: "z-pinned/model" }) });
+  });
+
+  it("falls back deterministically to the lowest slug when the pin does not resolve", async () => {
+    const rows = [
+      imageRow({ slug: "m-gateway/mid" }),
+      imageRow({ slug: "a-gateway/lowest" }),
+      imageRow({ slug: "z-gateway/high" }),
+    ];
+    const first = await selectImageTargetSource({
+      db: orderedDb(rows),
+      userId: USER_ID,
+      pinnedSlug: "openai/gpt-5-image-mini",
+      envConfig: null,
+    });
+    const second = await selectImageTargetSource({
+      db: orderedDb(rows),
+      userId: USER_ID,
+      pinnedSlug: "openai/gpt-5-image-mini",
+      envConfig: null,
+    });
+    expect(first?.source).toBe("byok");
+    expect((first as { row: RecipeImageModelRow }).row.slug).toBe("a-gateway/lowest");
+    // Repeated resolutions pick the same model, not database-default ordering.
+    expect((second as { row: RecipeImageModelRow }).row.slug).toBe(
+      (first as { row: RecipeImageModelRow }).row.slug,
+    );
+    // The determinism comes from the explicit orderBy, not luck.
+    const fallbackCall = orderedDb(rows);
+    await selectImageTargetSource({
+      db: fallbackCall,
+      userId: USER_ID,
+      pinnedSlug: "openai/gpt-5-image-mini",
+      envConfig: null,
+    });
+    // The LAST read is the fallback; only it carries the explicit orderBy.
+    expect(fallbackCall.calls.at(-1)).toMatchObject({ orderBy: { slug: "asc" } });
+  });
+
+  it("warns with the unresolvable pinned slug, and never leaks a credential", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await selectImageTargetSource({
+      db: orderedDb([imageRow()]),
+      userId: USER_ID,
+      pinnedSlug: "openai/gpt-5-image-mini",
+      envConfig: null,
+    });
+    expect(warn).toHaveBeenCalledTimes(1);
+    const [message, meta] = warn.mock.calls[0]!;
+    expect(String(message)).toMatch(/did not resolve/i);
+    expect((meta as { pinnedSlug?: string }).pinnedSlug).toBe(
+      "openai/gpt-5-image-mini",
+    );
+    // Only slugs leave this call — never the credential reference.
+    expect(JSON.stringify(meta)).not.toContain(CONNECTION_REF);
+    warn.mockRestore();
+  });
+
+  it("prefers the env pair over the BYOK fallback", async () => {
+    const selection = await selectImageTargetSource({
+      db: orderedDb([imageRow()]),
+      userId: USER_ID,
+      pinnedSlug: "openai/gpt-5-image-mini",
+      envConfig: { apiKey: "sk-shared", baseUrl: "https://shared.example/v1" },
+    });
+    expect(selection).toEqual({ source: "env" });
+  });
+
+  it("returns null when nothing resolves and warns rather than throws on a read failure", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const brokenDb: RecipeImageDb = {
+      providerModel: {
+        findFirst: vi.fn(async () => {
+          throw new Error("db down");
+        }),
+      },
+    };
+    await expect(
+      selectImageTargetSource({
+        db: brokenDb,
+        userId: USER_ID,
+        pinnedSlug: SLUG,
+        envConfig: null,
+      }),
+    ).resolves.toBeNull();
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
   });
 });
 

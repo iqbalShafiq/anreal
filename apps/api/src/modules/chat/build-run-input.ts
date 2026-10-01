@@ -783,8 +783,13 @@ export type ChatAgentRecipeResolverDependencies = {
   webSearchConfig?: typeof webSearchConfig;
   imageGenerationConfig?: typeof imageGenerationConfig;
   loadImageModelCapabilities?: () => Promise<FrozenImageModelCapability[]>;
-  /** Whether the user has a BYOK image model; drives build-time availability. */
-  byokImageAvailability?: (userId: string) => Promise<boolean>;
+  /**
+   * The shared image-target predicate; drives build-time availability with the
+   * same branches the worker resolves the run's target with.
+   */
+  imageTargetSource?: (
+    input: ImageTargetSourceInput,
+  ) => Promise<ImageTargetSelection | null>;
   profilingEnabled?: () => boolean;
   loadProfileData?: typeof loadProfileData;
   deepResearchLimits?: typeof deepResearchLimits;
@@ -943,16 +948,32 @@ function connectionCanGenerateImages(kind: string): boolean {
   return meta !== undefined && meta.imageStyle !== "none";
 }
 
-/** The where-clause every BYOK image read shares, so the two paths agree. */
-function ownedImageModelWhere(userId: string, slug?: string) {
+/**
+ * The where-clause every BYOK image read shares, so the two paths agree. The
+ * optional `kinds` narrows to the image-capable connection kinds (derived from
+ * `PROVIDER_KIND_META`, never a retyped list) so the fallback read cannot
+ * select a row whose connection has no image endpoint.
+ */
+function ownedImageModelWhere(
+  userId: string,
+  options: { slug?: string; kinds?: readonly string[] } = {},
+) {
   return {
     userId,
     isActive: true,
     outputType: "image",
-    connection: { isActive: true },
-    ...(slug !== undefined ? { slug } : {}),
+    connection: {
+      isActive: true,
+      ...(options.kinds ? { kind: { in: [...options.kinds] } } : {}),
+    },
+    ...(options.slug !== undefined ? { slug: options.slug } : {}),
   };
 }
+
+/** The connection kinds that can generate images, derived from the meta. */
+const IMAGE_CAPABLE_KINDS: readonly string[] = (
+  Object.keys(PROVIDER_KIND_META) as ProviderKind[]
+).filter((kind) => connectionCanGenerateImages(kind));
 
 /**
  * The image option builder for a kind: the structural keys the tool validated
@@ -989,48 +1010,140 @@ export function imageProviderOptionsForKind(
   });
 }
 
+/** The inputs the shared image-target predicate reads. */
+export type ImageTargetSourceInput = {
+  userId: string;
+  /** The session's pinned image model id, or null/undefined when none. */
+  pinnedSlug: string | null | undefined;
+  /** The shared provider env pair, read once by the caller, or null. */
+  envConfig: { apiKey: string; baseUrl: string } | null;
+};
+
+/** Which image source a run uses, decided by the one shared predicate. */
+export type ImageTargetSelection =
+  | { source: "byok"; row: RecipeImageModelRow }
+  | { source: "env" };
+
+/** A BYOK image read that never throws: a failure is "no row", with a warning. */
+async function readOwnedImageRow(
+  db: RecipeImageDb,
+  args: unknown,
+): Promise<RecipeImageModelRow | null> {
+  try {
+    return (await db.providerModel.findFirst(args)) as RecipeImageModelRow | null;
+  } catch (error) {
+    console.warn("[chat] BYOK image-model lookup failed", { error });
+    return null;
+  }
+}
+
 /**
- * Resolve the session's pinned BYOK image model at worker time. The recipe
- * freezes only *whether* image generation is available; which target is used is
- * decided here, exactly as the compactor's role is (no recipe change).
+ * The **single** predicate build-time availability and worker-time target
+ * resolution share, so a recipe that froze `imageGenerationAvailable: true`
+ * always describes a run this worker can build an image target for — the two
+ * reads cannot disagree about what "available" means.
+ *
+ * Branches, in order:
+ * 1. the pinned `imageGenSettings.modelId` resolves as an owned, active BYOK
+ *    image model on an image-capable connection → that model;
+ * 2. else the shared env pair exists → the env target (the pre-BYOK path,
+ *    unchanged: a user with the env pair and no BYOK model is unaffected);
+ * 3. else the user owns any active BYOK image model → the deterministic
+ *    fallback: the **lowest-slug** owned image model (an explicit `orderBy`,
+ *    never database-default ordering), warning with the pinned slug that did
+ *    not resolve. This is the branch that removes the dead run where build time
+ *    froze `true` (user-scoped "owns any BYOK model") but the worker could not
+ *    resolve the pinned catalog id as an owned slug;
+ * 4. else → `null`.
+ *
+ * Never throws: a read failure is treated as "no such row" with a warning, and
+ * the returned row is re-checked for an image-capable connection in JS even
+ * though the query already narrows by kind. Both callers share that contract:
+ * the build-time resolver reads only the *source* (JSON, no credentials), and
+ * the worker builds the model from the returned row.
+ */
+export async function selectImageTargetSource(
+  input: ImageTargetSourceInput & { db: RecipeImageDb },
+): Promise<ImageTargetSelection | null> {
+  const { db, userId, pinnedSlug, envConfig } = input;
+  const includeConnection = {
+    connection: { select: { kind: true, baseUrl: true, credentialsRef: true } },
+  };
+
+  if (pinnedSlug) {
+    const pinned = await readOwnedImageRow(db, {
+      where: ownedImageModelWhere(userId, { slug: pinnedSlug }),
+      include: includeConnection,
+    });
+    if (pinned?.connection && connectionCanGenerateImages(pinned.connection.kind)) {
+      return { source: "byok", row: pinned };
+    }
+  }
+
+  // The env pair wins over the BYOK fallback, exactly as the worker's
+  // `selectRunImageModel` ordering does; the no-BYOK path stays byte-identical.
+  if (envConfig) return { source: "env" };
+
+  // Deterministic fallback: the lowest slug, chosen by an explicit orderBy so
+  // database-default ordering can never decide which model a run uses.
+  const fallback = await readOwnedImageRow(db, {
+    where: ownedImageModelWhere(userId, { kinds: IMAGE_CAPABLE_KINDS }),
+    include: includeConnection,
+    orderBy: { slug: "asc" },
+  });
+  if (
+    !fallback ||
+    !fallback.connection ||
+    !connectionCanGenerateImages(fallback.connection.kind)
+  ) {
+    return null;
+  }
+  console.warn(
+    "[chat] pinned BYOK image model did not resolve; using the user's image model instead",
+    { pinnedSlug: pinnedSlug ?? null, fallbackSlug: fallback.slug },
+  );
+  return { source: "byok", row: fallback };
+}
+
+/**
+ * Resolve the run's BYOK image target at worker time, using the same predicate
+ * as build-time availability (`selectImageTargetSource`). The recipe freezes
+ * only *whether* image generation is available; which target is used is decided
+ * here, exactly as the compactor's role is (no recipe change).
  *
  * Returns `null` — never throws — on any missing row, an undecodable credential
  * reference, or an invalid capability declaration, so a model or connection
  * deleted mid-run degrades to the shared env path instead of killing the run.
+ * The env branch and "nothing to resolve" both return `null` here: the worker's
+ * `selectRunImageModel` owns building the shared-key model.
  */
 export async function resolveRecipeImageTarget(
   recipe: ChatAgentRecipe,
   db: RecipeImageDb,
-  options: { fetchFn?: typeof fetch } = {},
+  options: {
+    fetchFn?: typeof fetch;
+    /** The env pair read once by `reconstructChatRunInput`; defaults to a read. */
+    envConfig?: { apiKey: string; baseUrl: string } | null;
+  } = {},
 ): Promise<ByokImageTarget | null> {
-  const slug = recipe.imageGenSettings?.modelId;
-  if (!slug) return null;
+  const envConfig =
+    "envConfig" in options ? options.envConfig ?? null : imageGenerationConfig();
+  const selection = await selectImageTargetSource({
+    db,
+    userId: recipe.identity.userId,
+    pinnedSlug: recipe.imageGenSettings?.modelId ?? null,
+    envConfig,
+  });
+  if (selection?.source !== "byok") return null;
 
-  let row: RecipeImageModelRow | null;
-  try {
-    row = (await db.providerModel.findFirst({
-      where: ownedImageModelWhere(recipe.identity.userId, slug),
-      include: {
-        connection: {
-          select: { kind: true, baseUrl: true, credentialsRef: true },
-        },
-      },
-    })) as RecipeImageModelRow | null;
-  } catch (error) {
-    console.warn("[chat] BYOK image-model lookup failed; using the shared key", {
-      slug,
-      error,
-    });
-    return null;
-  }
-  if (!row || !row.connection || !connectionCanGenerateImages(row.connection.kind)) {
-    return null;
-  }
+  const row = selection.row;
+  const connection = row.connection;
+  if (!connection) return null;
+  const kind = connection.kind as ProviderKind;
 
-  const kind = row.connection.kind as ProviderKind;
   let credentials;
   try {
-    credentials = decodeProviderCredentials(row.connection.credentialsRef);
+    credentials = decodeProviderCredentials(connection.credentialsRef);
   } catch (error) {
     console.warn(
       "[chat] BYOK image-model credentials could not be decoded; using the shared key",
@@ -1057,7 +1170,7 @@ export async function resolveRecipeImageTarget(
       // The stored upstream id, never parsed back out of the sanitized slug.
       modelId: row.upstreamId,
       apiKey: credentials.apiKey,
-      baseUrl: row.connection.baseUrl,
+      baseUrl: connection.baseUrl,
       // Mirrors the completion path (resolveRecipeCompletionModel): a gateway
       // that authenticates by custom header must authenticate image requests
       // the same way. The factory forwards them only to the kinds whose client
@@ -1082,32 +1195,6 @@ export async function resolveRecipeImageTarget(
     capabilities,
     imageProviderOptions: imageProviderOptionsForKind(kind, row.upstreamId),
   };
-}
-
-/**
- * Whether the user has any active BYOK image model on an image-capable
- * connection. This is the build-time availability read; it shares the
- * resolver's where-clause (`ownedImageModelWhere`) so the two cannot disagree.
- * A read failure is treated as "none" rather than failing the recipe.
- */
-export async function hasByokImageModel(
-  db: RecipeImageDb,
-  userId: string,
-): Promise<boolean> {
-  try {
-    const row = (await db.providerModel.findFirst({
-      where: ownedImageModelWhere(userId),
-      include: { connection: { select: { kind: true } } },
-    })) as { connection: { kind: string } | null } | null;
-    return (
-      row !== null &&
-      row.connection !== null &&
-      connectionCanGenerateImages(row.connection.kind)
-    );
-  } catch (error) {
-    console.warn("[chat] BYOK image-model availability read failed", { error });
-    return false;
-  }
 }
 
 /**
@@ -1305,9 +1392,10 @@ export async function resolveChatAgentRecipe(
     dependencies?.imageGenerationConfig ?? imageGenerationConfig;
   const readImageModelCapabilities =
     dependencies?.loadImageModelCapabilities ?? loadImageModelCapabilities;
-  const readByokImageAvailability =
-    dependencies?.byokImageAvailability ??
-    ((userId: string) => hasByokImageModel(prisma as RecipeImageDb, userId));
+  const readImageTargetSource =
+    dependencies?.imageTargetSource ??
+    ((selectionInput: ImageTargetSourceInput) =>
+      selectImageTargetSource({ db: prisma as RecipeImageDb, ...selectionInput }));
   // Keep profile policy resolution data-only. profileConfig() also creates a
   // completion-model handle for the profile worker, which does not belong in
   // the authenticated recipe resolver.
@@ -1452,11 +1540,25 @@ export async function resolveChatAgentRecipe(
   }
 
   const imageConfig = readImageGenerationConfig();
+  // Parse the image settings once, here, so the availability read and the
+  // recipe carry exactly one pinned slug. (The request route already validated
+  // this shape; parsing early keeps a single source for the pin.)
+  const imageGenSettings =
+    input.imageGenSettings === null || input.imageGenSettings === undefined
+      ? null
+      : chatAgentImageGenSettingsSchema.parse(input.imageGenSettings);
   // A user with a BYOK image model can generate even without the shared env
-  // pair. The read path is shared with the worker-time resolver so the two
-  // cannot disagree about what "available" means.
-  const byokImageAvailable = await readByokImageAvailability(input.userId);
-  const imageGenerationAvailable = imageConfig !== null || byokImageAvailable;
+  // pair. Availability comes from the SAME predicate the worker uses to resolve
+  // the run's target (`selectImageTargetSource`), so a frozen `true` always
+  // means the worker can build a target — they cannot disagree about the pinned
+  // slug. A user with the env pair and no BYOK model is unaffected.
+  const imageTargetSource = await readImageTargetSource({
+    userId: input.userId,
+    pinnedSlug: imageGenSettings?.modelId ?? null,
+    envConfig: imageConfig,
+  });
+  const byokImageAvailable = imageTargetSource?.source === "byok";
+  const imageGenerationAvailable = imageTargetSource !== null;
   const imageModelCapabilities = imageGenerationAvailable
     ? await readImageModelCapabilities()
     : [];
@@ -1635,10 +1737,7 @@ export async function resolveChatAgentRecipe(
     },
     userSkills: userEnhancements.userSkills,
     userMcp: userEnhancements.userMcp,
-    imageGenSettings:
-      input.imageGenSettings === null || input.imageGenSettings === undefined
-        ? null
-        : chatAgentImageGenSettingsSchema.parse(input.imageGenSettings),
+    imageGenSettings,
     budgets: {
       maxTurns: 20,
       deepResearchMaxTurns: limits.maxTurns,
@@ -1720,8 +1819,10 @@ export async function reconstructChatRunInput(input: {
   // a model/connection row deleted after the recipe was frozen degrades here.
   const resolveImageTarget =
     runtime?.resolveRecipeImageTarget ?? resolveRecipeImageTarget;
+  // Pass the env pair already read above, so the shared predicate sees the same
+  // value the guard below does (one env read per run).
   const byokImageTarget = recipe.capabilities.imageGenerationAvailable
-    ? await resolveImageTarget(recipe, prisma)
+    ? await resolveImageTarget(recipe, prisma, { envConfig: resolvedImageConfig })
     : null;
 
   if (recipe.capabilities.webSearchAvailable && !resolvedWebConfig) {
