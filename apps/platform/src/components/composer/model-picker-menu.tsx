@@ -530,7 +530,13 @@ export function ModelPickerMenu({
           columns={gridColumns}
           hoverSide="right"
           chromeless
-          className="chat-scroll overflow-y-auto px-2 pt-1"
+          // Full-bleed in list mode: the rows span the panel edge to edge so the
+          // selected/hover highlight runs to both edges rather than sitting as
+          // an inset square box inside the rounded panel. Grid cards carry
+          // their own surface and rounding, so they stay inset like the search
+          // field. Space above the first row is kept; space below is the action
+          // row's job (there is none).
+          className={`chat-scroll overflow-y-auto pt-1 ${grid ? "px-2" : ""}`}
           style={{ maxHeight: cap }}
         />
       )}
@@ -542,7 +548,7 @@ export function ModelPickerMenu({
           type="button"
           onClick={() => onAddModel()}
           onKeyDown={handleOptionKeyDown}
-          className="mt-1 flex w-full cursor-pointer items-start gap-2 border-t border-hairline px-3 py-2 text-left transition duration-150 hover:bg-white/[0.06] focus-visible:bg-white/[0.08] focus-visible:outline-none"
+          className="flex w-full cursor-pointer items-start gap-2 border-t border-hairline px-3 py-2 text-left transition duration-150 hover:bg-white/[0.06] focus-visible:bg-white/[0.08] focus-visible:outline-none"
         >
           <span className="mt-0.5 shrink-0 text-text-muted">
             <Plus className="size-3.5" strokeWidth={1.75} />

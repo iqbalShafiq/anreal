@@ -335,29 +335,47 @@ describe("ModelPickerMenu: the list is inside the panel's card, not its own", ()
     }
   });
 
-  it("insets the list to the search field's left edge, with a gap above the first row", () => {
+  it("is full-bleed in list mode so the row highlight runs to both edges", () => {
     renderMenu(models);
     const list = optionList();
-    const search = screen.getByRole("searchbox", { name: "Search models" });
-    // The search field's own wrapper carries the px-2 inset.
-    const searchWrapper = search.parentElement as HTMLElement;
 
-    // The list is inset horizontally like the search row...
-    expect(list.className).toContain("px-2");
-    // ...and left-aligned with it: both declare the same left padding token.
-    expect(searchWrapper.className).toContain("px-2");
-    // ...and has breathing room under the search.
-    expect(list.className).toContain("pt-1");
+    // No horizontal inset: rows span the panel and their highlight reaches
+    // both edges instead of sitting as an inset square inside a rounded panel.
+    expect(list.className).not.toContain("px-");
   });
 
-  it("keeps the inset in grid mode too", () => {
+  it("keeps the grid inset so cards do not touch the panel edge", () => {
     localStorage.setItem(MODEL_PICKER_VIEW_KEY, "grid");
     renderMenu(models);
     const list = optionList();
+    const search = screen.getByRole("searchbox", { name: "Search models" });
+    const searchWrapper = search.parentElement as HTMLElement;
 
     expect(list.className).toContain("grid");
+    // Cards carry their own surface, so the grid stays inset like the field.
     expect(list.className).toContain("px-2");
+    expect(searchWrapper.className).toContain("px-2");
     expect(list.className).not.toContain("bg-canvas-elevated");
+  });
+
+  it("keeps breathing room above the first row", () => {
+    renderMenu(models);
+    expect(optionList().className).toContain("pt-1");
+  });
+
+  it("puts no gap below the last row, so it meets the action divider", () => {
+    const onAddModel = vi.fn();
+    renderMenu(models, { onAddModel });
+
+    const list = optionList();
+    const addButton = screen.getByText("Add a model…").closest("button")!;
+
+    // No bottom spacing on the list...
+    expect(list.className).not.toContain("pb-");
+    // ...and no top margin on the action row, so its border-t sits flush under
+    // the last row (a selected last row's highlight meets the divider).
+    expect(addButton.className).not.toContain("mt-");
+    expect(addButton.className).toContain("border-t");
   });
 });
 
