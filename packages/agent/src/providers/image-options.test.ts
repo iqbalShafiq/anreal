@@ -47,21 +47,29 @@ describe("normalizedImageOptionsToProviderOptions", () => {
   });
 
   describe("gemini-native (gemini)", () => {
-    it("nests the aspect ratio under config.imageConfig", () => {
-      // Spec §5.7: Gemini providerOptions are { config: { imageConfig: { aspectRatio } } }.
+    it("returns {} for any input, including a full settings object", () => {
+      // The Gemini adapter spreads providerOptions and then overwrites
+      // `config.imageConfig.aspectRatio` and `model` (dist/index.js:1281-1300),
+      // so nothing this layer produces can reach Gemini's wire. Emitting keys
+      // would misrepresent that.
       expect(
         normalizedImageOptionsToProviderOptions("gemini", {
           aspectRatio: "9:16",
-        }),
-      ).toEqual({ config: { imageConfig: { aspectRatio: "9:16" } } });
-    });
-
-    it("does not leak quality, background or n into a native shape", () => {
-      expect(
-        normalizedImageOptionsToProviderOptions("gemini", {
           quality: "high",
           background: "transparent",
           n: 3,
+        }),
+      ).toEqual({});
+    });
+
+    it("returns {} when no settings were supplied", () => {
+      expect(normalizedImageOptionsToProviderOptions("gemini", {})).toEqual({});
+    });
+
+    it("returns {} even for an unrecognised aspect ratio", () => {
+      expect(
+        normalizedImageOptionsToProviderOptions("gemini", {
+          aspectRatio: "banana",
         }),
       ).toEqual({});
     });
@@ -117,8 +125,8 @@ describe("normalizedImageOptionsToProviderOptions", () => {
         {},
       );
       expect(normalizedImageOptionsToProviderOptions("grok", {})).toEqual({});
-      // Gemini also emits nothing when there is no ratio to carry; a nested
-      // empty imageConfig would be a key the caller never asked for.
+      // Gemini mirrors Grok: both native adapters overwrite anything this layer
+      // could pass, so an empty settings object yields nothing for either.
       expect(normalizedImageOptionsToProviderOptions("gemini", {})).toEqual({});
     });
 
@@ -140,12 +148,17 @@ describe("normalizedImageOptionsToProviderOptions", () => {
       ).toBe(false);
     });
 
-    it("emits no keys for gemini when no ratio was given", () => {
-      // quality has no native Gemini equivalent, and with no ratio there is
-      // nothing to nest: the whole object is empty rather than an empty shell.
-      expect(
-        normalizedImageOptionsToProviderOptions("gemini", { quality: "high" }),
-      ).toEqual({});
+    it("emits no keys for the native kinds regardless of input", () => {
+      // A partial settings object is still nothing to pass to either native
+      // adapter, mirroring the full-object cases above.
+      for (const kind of ["grok", "gemini"] as const) {
+        expect(
+          normalizedImageOptionsToProviderOptions(kind, { quality: "high" }),
+        ).toEqual({});
+        expect(
+          normalizedImageOptionsToProviderOptions(kind, { background: "opaque" }),
+        ).toEqual({});
+      }
     });
   });
 
