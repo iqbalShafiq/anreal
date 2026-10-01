@@ -1129,6 +1129,25 @@ export function subscribeModelsCache(listener: () => void): () => void {
   };
 }
 
+/**
+ * Normalise one row from an older or newer server before it reaches the
+ * picker. `source` and `connectionId` already had this treatment; `vendorLabel`
+ * joins them because `vendorOf` reads `.length` on it and an `undefined` from a
+ * pre-`vendorLabel` deploy would throw.
+ */
+export function normalizeModelRow(model: ModelInfo): ModelInfo {
+  return {
+    ...model,
+    // Rows that predate the source field are treated as catalog entries so a
+    // mixed deploy does not drop models from the picker.
+    source: model.source === "connection" ? "connection" : "catalog",
+    connectionId:
+      typeof model.connectionId === "string" ? model.connectionId : null,
+    vendorLabel:
+      typeof model.vendorLabel === "string" ? model.vendorLabel : null,
+  };
+}
+
 export async function listModels(input?: {
   force?: boolean;
 }): Promise<ModelCatalog> {
@@ -1157,14 +1176,7 @@ export async function listModels(input?: {
           typeof model.label === "string" &&
           model.outputType !== "image",
       )
-      // Rows that predate the source field are treated as catalog entries so
-      // a mixed deploy does not drop models from the picker.
-      .map((model) => ({
-        ...model,
-        source: model.source === "connection" ? "connection" : "catalog",
-        connectionId:
-          typeof model.connectionId === "string" ? model.connectionId : null,
-      })),
+      .map(normalizeModelRow),
     reasoningEfforts: Array.isArray(
       (data as ModelCatalog).reasoningEfforts,
     )
