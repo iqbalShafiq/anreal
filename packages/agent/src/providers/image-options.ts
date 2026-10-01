@@ -72,40 +72,46 @@ function openRouterImageOptions(
 
 /**
  * Gemini native image generation (`config.imageConfig.aspectRatio`, spec §5.7).
- * Gemini derives its own ratio from width/height, so the app's ratio is passed
- * through explicitly to preserve the user's choice; quality/background/n have
- * no native Gemini equivalent and are omitted.
+ * Round-trips the app's ratio so the user's choice survives; `quality`,
+ * `background` and `n` have no native Gemini equivalent and are omitted.
+ *
+ * An absent ratio emits no key at all — not a nested empty `imageConfig` — so
+ * the caller's contract holds: an input the caller did not supply produces no
+ * key in the output.
  */
 function geminiImageOptions(
   settings: NormalizedImageOptions,
 ): Record<string, unknown> {
+  if (settings.aspectRatio === undefined) return {};
   return {
-    config: {
-      imageConfig: {
-        ...(settings.aspectRatio !== undefined
-          ? { aspectRatio: settings.aspectRatio }
-          : {}),
-      },
-    },
+    config: { imageConfig: { aspectRatio: settings.aspectRatio } },
   };
 }
 
 /**
  * Grok native image generation (spec §5.7: "width/height → aspect ratio").
  *
- * @anvia/grok@1.1.7 spreads `providerOptions` into its `images.generate` params
- * (dist/index.js:144-153) and appends its own `aspect_ratio` derived from
- * width/height. Passing the app's ratio through under that same key preserves
- * the user's exact ratio (e.g. `19.5:9`), which Grok's derivation would
- * otherwise collapse to `auto`; quality/background/n are not accepted and are
- * omitted.
+ * Always returns `{}`. @anvia/grok@1.1.7 spreads `providerOptions` **first**
+ * and then writes its own literal keys over the top
+ * (dist/index.js:144-153), so anything this layer passes is clobbered:
+ *
+ *   const params = {
+ *     ...providerOptions,                                   // ours — clobbered
+ *     model: this.modelId,                                  // clobbers ours
+ *     prompt: request.prompt,
+ *     n: 1,                                                 // clobbers, and pins 1
+ *     response_format: "b64_json",                          // clobbers ours
+ *     aspect_ratio: aspectRatio(request.width, request.height) // clobbers ours
+ *   };
+ *
+ * Grok derives the ratio itself from `request.width`/`request.height`, which
+ * the tool already supplies (tools/image-generation.ts:579-581), mapping it
+ * through `SUPPORTED_ASPECT_RATIOS` and collapsing anything unsupported to
+ * "auto" (dist/index.js:190-211). Emitting a key the adapter overwrites would
+ * falsely suggest this layer controls Grok's ratio, so it emits nothing.
  */
 function grokImageOptions(
-  settings: NormalizedImageOptions,
+  _settings: NormalizedImageOptions,
 ): Record<string, unknown> {
-  return {
-    ...(settings.aspectRatio !== undefined
-      ? { aspect_ratio: settings.aspectRatio }
-      : {}),
-  };
+  return {};
 }

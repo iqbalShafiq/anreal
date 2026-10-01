@@ -63,29 +63,33 @@ describe("normalizedImageOptionsToProviderOptions", () => {
           background: "transparent",
           n: 3,
         }),
-      ).toEqual({ config: { imageConfig: {} } });
+      ).toEqual({});
     });
   });
 
   describe("grok-native (grok)", () => {
-    it("round-trips the app aspect ratio as Grok's aspect_ratio key", () => {
-      // Spec §5.7: "width/height → aspect ratio". @anvia/grok@1.1.7 spreads
-      // providerOptions into images.generate params (dist/index.js:144-153)
-      // and derives its own `aspect_ratio` from width/height; passing the app
-      // ratio through preserves the user's choice instead of the derived "auto".
+    it("returns {} for any input, including a full settings object", () => {
+      // The Grok adapter spreads providerOptions first and then overwrites
+      // `aspect_ratio` (dist/index.js:144-153), so nothing this layer produces
+      // can reach Grok's wire. Emitting keys would misrepresent that.
       expect(
         normalizedImageOptionsToProviderOptions("grok", {
           aspectRatio: "19.5:9",
-        }),
-      ).toEqual({ aspect_ratio: "19.5:9" });
-    });
-
-    it("does not leak quality, background or n into a native shape", () => {
-      expect(
-        normalizedImageOptionsToProviderOptions("grok", {
           quality: "high",
           background: "transparent",
           n: 2,
+        }),
+      ).toEqual({});
+    });
+
+    it("returns {} when no settings were supplied", () => {
+      expect(normalizedImageOptionsToProviderOptions("grok", {})).toEqual({});
+    });
+
+    it("returns {} even for an unrecognised aspect ratio", () => {
+      expect(
+        normalizedImageOptionsToProviderOptions("grok", {
+          aspectRatio: "banana",
         }),
       ).toEqual({});
     });
@@ -113,12 +117,9 @@ describe("normalizedImageOptionsToProviderOptions", () => {
         {},
       );
       expect(normalizedImageOptionsToProviderOptions("grok", {})).toEqual({});
-      // Gemini still declares its native container, but with an empty
-      // imageConfig: the adapter derives the ratio from width/height, so no
-      // aspectRatio key is present for the app to have omitted.
-      expect(
-        normalizedImageOptionsToProviderOptions("gemini", {}),
-      ).toEqual({ config: { imageConfig: {} } });
+      // Gemini also emits nothing when there is no ratio to carry; a nested
+      // empty imageConfig would be a key the caller never asked for.
+      expect(normalizedImageOptionsToProviderOptions("gemini", {})).toEqual({});
     });
 
     it("omits an absent quality rather than emitting undefined", () => {
@@ -139,13 +140,12 @@ describe("normalizedImageOptionsToProviderOptions", () => {
       ).toBe(false);
     });
 
-    it("emits no aspectRatio for gemini when none was given", () => {
-      const result = normalizedImageOptionsToProviderOptions("gemini", {
-        quality: "high",
-      });
-      const config = result.config as { imageConfig: Record<string, unknown> };
-
-      expect("aspectRatio" in config.imageConfig).toBe(false);
+    it("emits no keys for gemini when no ratio was given", () => {
+      // quality has no native Gemini equivalent, and with no ratio there is
+      // nothing to nest: the whole object is empty rather than an empty shell.
+      expect(
+        normalizedImageOptionsToProviderOptions("gemini", { quality: "high" }),
+      ).toEqual({});
     });
   });
 
