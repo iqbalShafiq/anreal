@@ -34,7 +34,12 @@ type ListPos = {
   width: number;
   /** Open above the trigger (composer / bottom-of-viewport). */
   openUp: boolean;
+  /** Clamped to the room actually available, so the list never runs off-screen. */
+  maxHeight: number;
 };
+
+/** Matches the listbox's preferred height cap (16rem). */
+const LIST_MAX_HEIGHT = 256;
 
 export function Select({
   value,
@@ -118,39 +123,30 @@ export function Select({
 
       const gap = 6;
       // Match max-h-[16rem] on the list — used only to pick open direction.
-      const estimatedListH = Math.min(options.length * 44 + 8, 16 * 16);
-      // Inside a dialog the list is clipped by its overflow-hidden box, so
-      // measure space against the dialog — not the viewport.
-      const targetRect = dialogPortal?.getBoundingClientRect() ?? null;
-      const containerBottom = targetRect ? targetRect.bottom : window.innerHeight;
-      const containerRight = targetRect ? targetRect.right : window.innerWidth;
-      const spaceBelow = containerBottom - rect.bottom - gap;
-      const spaceAbove = rect.top - (targetRect ? targetRect.top : 0) - gap;
+      const estimatedListH = Math.min(options.length * 44 + 8, LIST_MAX_HEIGHT);
+      // The list is `fixed`, so the viewport is what constrains it — not the
+      // dialog box. Measuring against the dialog is what used to clip the menu
+      // at the modal edge (`.settings-dialog` is `overflow: hidden`), hiding
+      // options a taller menu had room to show.
+      const spaceBelow = window.innerHeight - rect.bottom - gap;
+      const spaceAbove = rect.top - gap;
       const openUp =
         spaceBelow < Math.min(estimatedListH, 160) && spaceAbove > spaceBelow;
 
       const width = Math.max(rect.width, 200);
-      const maxLeft = containerRight - width - 8;
+      const maxLeft = window.innerWidth - width - 8;
       const leftViewport = Math.max(8, Math.min(rect.left, maxLeft));
-
-      if (dialogPortal && targetRect) {
-        // Coords relative to the dialog box (list is portaled into it).
-        setListPos({
-          top: openUp
-            ? rect.top - gap - targetRect.top
-            : rect.bottom + gap - targetRect.top,
-          left: leftViewport - targetRect.left,
-          width,
-          openUp,
-        });
-        return;
-      }
 
       setListPos({
         top: openUp ? rect.top - gap : rect.bottom + gap,
         left: leftViewport,
         width,
         openUp,
+        // Scroll rather than overflow: a menu near an edge stays fully usable.
+        maxHeight: Math.max(
+          80,
+          Math.min(LIST_MAX_HEIGHT, openUp ? spaceAbove : spaceBelow),
+        ),
       });
     };
 
@@ -237,10 +233,12 @@ export function Select({
       ? createPortal(
           <div
             // Inside a native <dialog> (top layer) a body-portaled menu hides
-            // behind the modal, so the list lives in the dialog instead — and
-            // must be `absolute` (dialog box is the containing block), not
-            // `fixed` (viewport), or dialog-relative coords land off-target.
-            className={`${dialogPortal ? "absolute" : "fixed"} z-[90]`}
+            // behind the modal, so the list lives in the dialog instead. It is
+            // `fixed` so the dialog's `overflow: hidden` cannot clip it, which
+            // holds because the dialog has no transform at rest — its open
+            // animation fills `backwards`, so nothing persists to become the
+            // containing block for a fixed child.
+            className="fixed z-[90]"
             style={{
               top: listPos.top,
               left: listPos.left,
@@ -260,7 +258,8 @@ export function Select({
               }}
               onKeyDown={handleListKeyDown}
               hoverSide={hoverSide}
-              className="max-h-[16rem] overflow-y-auto"
+              className="overflow-y-auto"
+              style={{ maxHeight: listPos.maxHeight }}
             />
           </div>,
           portalTarget,
