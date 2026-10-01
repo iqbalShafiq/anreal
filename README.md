@@ -402,7 +402,7 @@ Katalog model ada di tabel `chat_model` (diseed oleh `pnpm --filter @anreal/api 
 
 ## BYOK provider connections
 
-Selain katalog model yang di-seed, tiap user bisa membawa **API key provider sendiri** (BYOK). Saat ini BYOK mencakup **model chat/teks**: user mendaftarkan provider **connection** beserta model chat di atasnya, dan model-model itu ikut muncul di pemilih model composer. **Image generation lewat BYOK belum tersedia** — itu fase berikutnya; pemilih model image tetap memakai model katalog dari key server bersama (`OPENAI_*`).
+Selain katalog model yang di-seed, tiap user bisa membawa **API key provider sendiri** (BYOK). BYOK mencakup **model chat/teks** dan **model image**: user mendaftarkan provider **connection** beserta model di atasnya, dan model-model itu ikut muncul di pemilih model composer. Model chat muncul di picker chat; model image muncul di picker model image dan, saat dipilih, dipakai **menggantikan key server bersama**. Kalau user belum punya satu pun model image BYOK, tidak ada yang berubah: generation image tetap dilayani key `OPENAI_*` bersama.
 
 **Menambah model.** Menu model di composer juga punya baris **"Add a model…"** yang membuka form **Settings → Providers** yang sama — hanya ada satu form, bukan dua — sehingga model bisa ditambahkan dari composer maupun dari Settings → Providers. Model yang ditambahkan dari salah satu tempat itu bisa dipakai untuk chat maupun kelima peran background (memory compaction, profile summary, site builder, vision helper, scheduled chat). Satu pengecualian: peran **Image understanding** hanya menerima model yang mendeklarasikan image input — model text-only tidak akan muncul di picker-nya (lihat catatan di bawah).
 
@@ -418,9 +418,23 @@ Selain katalog model yang di-seed, tiap user bisa membawa **API key provider sen
 
 **Provider kind.** Ada enam: `openai`, `anthropic`, `gemini`, `grok`, `mistral`, dan `compatible` (endpoint apa pun yang OpenAI-compatible — OpenRouter, DeepSeek, Groq, Together, Fireworks, Ollama, vLLM, LM Studio, termasuk shim OpenAI-compat Anthropic/Gemini). Kind `compatible` wajib mengisi base URL. Reasoning effort bersifat adapter-neutral; kosakata per model adalah gabungan `none | minimal | low | medium | high | xhigh | max`.
 
-**Catatan image (rencana).** Ketika BYOK image generation nanti diimplementasikan (Phase D), jalurnya akan lewat kind `compatible`, yang berbicara `POST /images` ala OpenRouter. Kind `openai` native direncanakan **tidak** ikut menawarkan model image: API images native OpenAI punya parameter berbeda dan tidak punya `input_references`, sedangkan alur `edit_image` aplikasi mengirim reference image dan membutuhkannya. Karena itu `compatible` adalah satu-satunya jalur image yang cocok.
+**Model image.** Model image hanya bisa didaftarkan di atas kind yang punya endpoint image: `compatible` (OpenAI-compatible, berbicara `POST /images` ala OpenRouter), `gemini`, dan `grok`. Connection native `openai`, `anthropic`, dan `mistral` tidak bisa membawa model image — alasannya tetap seperti sebelumnya: API images native OpenAI punya parameter berbeda dan tidak punya `input_references`, sedangkan alur `edit_image` aplikasi mengirim reference image dan membutuhkannya.
 
-**Model per peran.** Setiap peran background — memory compaction, profile summarization, site builder, vision helper, dan scheduled chat — bisa diarahkan ke model pilihannya sendiri. Detailnya di subsection **Model per peran** di bawah. Lewat katalog gabungan yang bisa dipilih per peran adalah model chat/teks; model image tetap berasal dari katalog seed.
+**Kapabilitas image divalidasi saat disimpan.** `imageCapabilities` dideklarasikan saat save dan diperiksa terhadap apa yang benar-benar bisa dipenuhi kind itu, sehingga provider tidak pernah menerima request yang akan ditolaknya karena alasan yang sudah dideklarasikan. Bedanya antar kind besar:
+
+- `compatible` memenuhi `sizes`, `quality`, `background`, dan `n` — dengan `n` dibatasi execution limit tool.
+- `gemini` dan `grok` **tidak memenuhi kontrol opsional apa pun**: `quality`, `background`, dan `sizes` ditolak, dan `n` dipatok `1`, karena kedua adapter menurunkan bentuk image dari dimensi piksel, bukan dari opsi yang dikirim.
+- `gemini` dan `grok` juga menolak aspect ratio yang tidak bisa dinyatakan sebagai rasio gcd-reduced — jadi `21:9`, `19.5:9`, dan `9:19.5` tidak bisa dideklarasikan untuk keduanya.
+
+**Batasan yang jujur.** Tiga hal yang akan ditemui user:
+
+1. Connection **Gemini** tidak bisa membawa custom header — klien Gemini tidak punya seam untuk itu — sehingga gateway Gemini yang autentikasi lewat custom header tidak bisa mengautentikasi request image-nya.
+2. Untuk **Gemini**, keluarga **Imagen** (API `generateImages`) **tidak didukung** di versi ini: aplikasi mendorong image Gemini lewat `generateContent` saja. Tidak ada yang menolak id Imagen saat save, tetapi mendaftarkannya menghasilkan request yang dibawa shapes API yang salah — jadi id Imagen tidak didukung.
+3. Custom header Grok sampai ke request, tetapi lewat provider SDK, bukan lewat option wire-level yang dikendalikan aplikasi.
+
+Editor model di Settings → Providers menawarkan output type `image` hanya untuk kind yang mendukungnya, dan kapabilitas image **dikirim ulang penuh di setiap save** — save yang menghilangkannya akan mengosongkannya.
+
+**Model per peran.** Setiap peran background — memory compaction, profile summarization, site builder, vision helper, dan scheduled chat — bisa diarahkan ke model pilihannya sendiri. Detailnya di subsection **Model per peran** di bawah. Yang bisa dipilih per peran lewat katalog gabungan adalah model chat/teks; model image dipilih di picker image-nya sendiri.
 
 **Menguji connection.** `POST /api/providers/test` memvalidasi credential ke provider **tanpa menyimpan apa pun**; endpoint menerima `connectionId` opsional sehingga field key yang dibiarkan kosong akan memakai credential yang tersimpan. Test yang gagal mengembalikan pesan yang mudah dibaca dan bebas credential.
 
