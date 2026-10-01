@@ -1,5 +1,6 @@
 import {
   ASPECT_SIZES,
+  IMAGEN_4_GENERATE,
   MAX_MODEL_IMAGES,
   PROVIDER_KIND_META,
   PROVIDER_KINDS,
@@ -468,6 +469,21 @@ export function validateModelInput(
     fail(
       "outputType",
       "This provider kind has no image endpoint; connect an OpenAI-compatible gateway to use image models",
+    );
+  }
+
+  // Ruling A: Gemini image generation is driven through `generateContent` only.
+  // `IMAGEN_4_GENERATE` is the one Imagen id `@anvia/gemini` exposes as a
+  // runtime value; its contract is `generateImages`, so registering it on a
+  // `gemini` connection (the only kind whose style is `gemini-native`, hence
+  // the check on the style rather than a retyped kind list) would produce a
+  // wrong-shaped request at generation time instead of failing here. The rest
+  // of the Imagen family is type-only and cannot be guarded; the factory's
+  // comment records that limitation.
+  if (meta.imageStyle === "gemini-native" && upstreamId === IMAGEN_4_GENERATE) {
+    fail(
+      "upstreamId",
+      `Gemini image generation uses generateContent models; ${IMAGEN_4_GENERATE} uses the Imagen (generateImages) contract, which this app does not support. Register a Gemini image model such as gemini-3.1-flash-image instead.`,
     );
   }
 

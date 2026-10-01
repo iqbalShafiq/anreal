@@ -11,7 +11,11 @@ import {
   ANTHROPIC_REASONING_EFFORTS,
   AnthropicClient,
 } from "@anvia/anthropic";
-import { GEMINI_REASONING_EFFORTS, GeminiClient } from "@anvia/gemini";
+import {
+  GEMINI_REASONING_EFFORTS,
+  GeminiClient,
+  IMAGEN_4_GENERATE,
+} from "@anvia/gemini";
 import { GROK_REASONING_EFFORTS, GrokClient } from "@anvia/grok";
 import { MistralClient } from "@anvia/mistral";
 import { OPENAI_REASONING_EFFORTS, OpenAIClient } from "@anvia/openai";
@@ -31,6 +35,16 @@ export type ProviderKind = (typeof PROVIDER_KINDS)[number];
 /** Re-exported so consumers depend on this package, not on @anvia/core directly. */
 export type { ModelContextLimits } from "@anvia/core/completion";
 export type { StreamingCompletionModel } from "@anvia/core/completion";
+
+/**
+ * The one Imagen id `@anvia/gemini` exposes as a **runtime value** (the rest of
+ * its image-id families are type-only). This app drives Gemini images through
+ * `generateContent` only, so an Imagen id routed there is a wrong-shaped
+ * request; the save path uses this constant to reject that one id (§ ruling A).
+ * Re-exported through this package so `apps/api` can guard it without adding a
+ * direct dependency on `@anvia/gemini`.
+ */
+export { IMAGEN_4_GENERATE };
 
 /**
  * Which image endpoint shape a kind speaks. Image generation is not one axis:
@@ -304,12 +318,14 @@ export function createImageGenerationModelFor(
       // different contract, so routing an Imagen id here would be a wrong
       // request rather than a degraded one.
       //
-      // Imagen-family ids are NOT supported in v1, and note that **nothing
-      // rejects them at save time**: the known-id sets in `@anvia/gemini` are
-      // type-only with no runtime value, so the save-path guard Ruling A
-      // originally proposed could not be built. Registering one is therefore
-      // accepted, and at generation time it is sent through `generateContent`
-      // as a wrong request rather than failing early.
+      // The one known Imagen constant, `IMAGEN_4_GENERATE`, **is** guarded: it
+      // is a runtime value re-exported by this package, and the save path
+      // (`apps/api` → `validateModelInput`) rejects it for a `gemini` kind with
+      // a field-level message. The rest of the Imagen family is type-only with
+      // no runtime value, so the full family could not be guarded; an
+      // unlisted Imagen id that is registered still reaches this branch and is
+      // sent through `generateContent` as a wrong request rather than failing
+      // early.
       //
       // NO HEADER SEAM: `GeminiApiClientOptions` is
       // `{ apiKey; vertexAi?: never; client?: never }` (dist/index.d.ts:36-40),

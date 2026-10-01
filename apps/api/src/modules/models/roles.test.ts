@@ -276,6 +276,66 @@ describe("setRoleAssignment", () => {
     ).rejects.toThrow(/image/i);
   });
 
+  it("rejects an image model for every non-vision role", async () => {
+    for (const role of [
+      "memoryCompaction",
+      "profileSummary",
+      "siteBuilder",
+      "scheduledChat",
+    ] as const) {
+      vi.mocked(findActiveModel).mockResolvedValue({
+        modelId: "my-gw/flux-pro",
+        connectionId: "pc_1",
+        source: "connection",
+        outputType: "image",
+        inputModalities: ["text"],
+      } as never);
+
+      await expect(
+        setRoleAssignment(makeDb(), USER, role, "my-gw/flux-pro"),
+      ).rejects.toThrow(/text task/i);
+    }
+  });
+
+  it("still accepts an image-capable model for the vision helper", async () => {
+    vi.mocked(findActiveModel).mockResolvedValue({
+      modelId: "my-gw/gpt-vision",
+      connectionId: "pc_1",
+      source: "connection",
+      outputType: "text",
+      inputModalities: ["text", "image"],
+    } as never);
+    const db = makeDb({
+      providerModel: { findFirst: vi.fn(async () => ({ id: "pm_1" })) },
+    });
+
+    await expect(
+      setRoleAssignment(db, USER, "visionHelper", "my-gw/gpt-vision"),
+    ).resolves.toMatchObject({ role: "visionHelper", modelId: "my-gw/gpt-vision" });
+  });
+
+  it("accepts a text model for every role, as before", async () => {
+    for (const role of [
+      "memoryCompaction",
+      "profileSummary",
+      "siteBuilder",
+      "visionHelper",
+      "scheduledChat",
+    ] as const) {
+      vi.mocked(findActiveModel).mockResolvedValue({
+        modelId: "openai/gpt-6-luna",
+        connectionId: null,
+        source: "catalog",
+        outputType: "text",
+        inputModalities: ["text", "image"],
+      } as never);
+
+      await expect(
+        setRoleAssignment(makeDb(), USER, role, "openai/gpt-6-luna"),
+      ).resolves.toMatchObject({ role, modelId: "openai/gpt-6-luna" });
+    }
+  });
+
   it("rejects an unknown role key", async () => {
     await expect(
       setRoleAssignment(makeDb(), USER, "nope" as never, null),

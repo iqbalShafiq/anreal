@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { MAX_MODEL_IMAGES } from "@anreal/agent";
+import { IMAGEN_4_GENERATE, MAX_MODEL_IMAGES } from "@anreal/agent";
 import {
   ProviderInputError,
   createConnection,
@@ -184,6 +184,52 @@ describe("validateModelInput", () => {
     );
     expect(value.outputType).toBe("image");
     expect(value.reasoningEfforts).toEqual([]);
+  });
+
+  it("rejects the Imagen id on a gemini-native kind, naming the limitation", () => {
+    // Ruling A: Gemini images go through generateContent; IMAGEN_4_GENERATE is
+    // the one Imagen id with a runtime value, so it is the one the save path
+    // can reject before the user hits a wrong-shaped request at generation.
+    expect(() =>
+      validateModelInput(
+        {
+          upstreamId: IMAGEN_4_GENERATE,
+          outputType: "image",
+          imageCapabilities: {
+            n: { min: 1, max: 1 },
+            aspectRatios: ["1:1"],
+            resolutions: ["1K"],
+          },
+        },
+        { imageStyle: "gemini-native" },
+      ),
+    ).toThrow(/generateImages|Imagen/i);
+  });
+
+  it("still accepts the Gemini generateContent image ids", () => {
+    const value = validateModelInput(
+      {
+        upstreamId: "gemini-3.1-flash-image",
+        outputType: "image",
+        imageCapabilities: {
+          n: { min: 1, max: 1 },
+          aspectRatios: ["1:1"],
+          resolutions: ["1K"],
+        },
+      },
+      { imageStyle: "gemini-native" },
+    );
+    expect(value.outputType).toBe("image");
+  });
+
+  it("leaves the Imagen id alone on a kind that is not gemini", () => {
+    // The guard is scoped to the gemini style; an OpenAI-compatible gateway may
+    // legitimately register the id and route it to its own endpoint.
+    const value = validateModelInput(
+      { upstreamId: IMAGEN_4_GENERATE, outputType: "image" },
+      { imageStyle: "openrouter-images" },
+    );
+    expect(value.upstreamId).toBe(IMAGEN_4_GENERATE);
   });
 
   it("rejects imageCapabilities on a text model, naming the field", () => {

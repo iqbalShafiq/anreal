@@ -227,6 +227,18 @@ export async function setRoleAssignment(
       },
     ]);
   }
+  // Every other role runs a text task, so an image-output model would run with
+  // no explanation of why it misbehaves. The vision helper is the only role
+  // where an image-capable model is right — and it is validated on the input
+  // axis (`inputModalities`) just above, a different concern from this one.
+  if (role !== "visionHelper" && info.outputType === "image") {
+    throw new RoleInputError([
+      {
+        path: "modelId",
+        message: "This role runs a text task and cannot use an image model",
+      },
+    ]);
+  }
 
   let catalogModelId: string | null = null;
   let providerModelId: string | null = null;
