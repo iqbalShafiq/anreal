@@ -9,6 +9,7 @@ import {
 } from "#/components/ui/key-value-list-field";
 import { ManagementRow } from "#/components/ui/management-row";
 import { ProviderModelEditor } from "#/components/settings/provider-model-editor";
+import { useModels } from "#/hooks/use-models";
 import { Select } from "#/components/ui/select";
 import {
   useProviderConnections,
@@ -18,6 +19,7 @@ import {
   listProviderKinds,
   listProviderModels,
   testProviderConnection,
+  type ModelInfo,
   type ProviderConnection,
   type ProviderConnectionInput,
   type ProviderKindInfo,
@@ -64,6 +66,8 @@ function kindLabel(kinds: ProviderKindInfo[], kind: string): string {
  */
 export function ProvidersSection({ active }: { active: boolean }) {
   const connections = useProviderConnections(active);
+  // The merged catalog, read only to offer the vendors other models declare.
+  const { models } = useModels();
   const [kinds, setKinds] = useState<ProviderKindInfo[] | null>(null);
   const [kindsError, setKindsError] = useState<string | null>(null);
   const [effortVocabulary, setEffortVocabulary] = useState<string[]>([]);
@@ -182,6 +186,7 @@ export function ProvidersSection({ active }: { active: boolean }) {
           }
           kinds={kinds ?? []}
           effortVocabulary={effortVocabulary}
+          models={models}
           saving={connections.saving}
           onTest={runTest}
           onSave={async (input) => {
@@ -277,6 +282,7 @@ function ProviderConnectionEditor({
   initial,
   kinds,
   effortVocabulary,
+  models,
   saving,
   onTest,
   onSave,
@@ -285,6 +291,7 @@ function ProviderConnectionEditor({
   initial: ProviderConnection | null;
   kinds: ProviderKindInfo[];
   effortVocabulary: string[];
+  models: ModelInfo[];
   saving: boolean;
   onTest: (
     input: ProviderConnectionInput,
@@ -580,6 +587,7 @@ function ProviderConnectionEditor({
           connection={initial}
           kinds={kinds}
           effortVocabulary={effortVocabulary}
+          catalogModels={models}
         />
       ) : null}
 
@@ -604,10 +612,12 @@ function ConnectionModels({
   connection,
   kinds,
   effortVocabulary,
+  catalogModels,
 }: {
   connection: ProviderConnection;
   kinds: ProviderKindInfo[];
   effortVocabulary: string[];
+  catalogModels: ModelInfo[];
 }) {
   const models = useProviderModels(connection.id, true);
   const [editingModelId, setEditingModelId] = useState<
@@ -653,6 +663,7 @@ function ConnectionModels({
             null
           }
           effortVocabulary={effortVocabulary}
+          models={catalogModels}
           initial={
             editingModelId
               ? rows.find((model) => model.id === editingModelId) ?? null

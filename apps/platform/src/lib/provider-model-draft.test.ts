@@ -15,6 +15,7 @@ import {
   modelSavePayload,
   reasoningEffortsForOutputType,
   slugPreview,
+  vendorSuggestion,
   type ImageCapabilityLimits,
 } from "./provider-model-draft";
 
@@ -484,5 +485,93 @@ describe("modelSavePayload", () => {
       imageCapabilities: null,
     });
     expect(payload).not.toHaveProperty("imageCapabilities");
+  });
+});
+
+describe("vendorSuggestion", () => {
+  const known = ["openai", "google"];
+
+  it("suggests a known vendor from the upstream id's prefix", () => {
+    expect(vendorSuggestion("openai/gpt-5.6-luna", known)).toBe("openai");
+  });
+
+  it("never suggests a gateway's own name", () => {
+    // `opencode` is a gateway, not a vendor: OpenRouter prefixes the vendor
+    // (`openai/gpt-4o`) while OpenCode Zen prefixes itself (`opencode/gpt-5.5`).
+    // The prefix must match a *known vendor* or no suggestion is made — the
+    // vendor is declared, never derived. Do not "fix" this to return "opencode".
+    expect(vendorSuggestion("opencode/gpt-5.5", known)).toBeNull();
+  });
+
+  it("makes no suggestion when the id has no prefix", () => {
+    expect(vendorSuggestion("gpt-5.5", known)).toBeNull();
+  });
+
+  it("matches the prefix case-insensitively", () => {
+    expect(vendorSuggestion("OpenAI/gpt-5.6-luna", known)).toBe("openai");
+  });
+
+  it("makes no suggestion when no vendors are known", () => {
+    expect(vendorSuggestion("openai/gpt-5.6-luna", [])).toBeNull();
+  });
+
+  it("makes no suggestion for a trailing-slash id with an empty prefix", () => {
+    expect(vendorSuggestion("/gpt-5.6", known)).toBeNull();
+  });
+});
+
+describe("modelSavePayload — vendorLabel", () => {
+  const base = {
+    upstreamId: "openai/gpt-5.6-luna",
+    name: "GPT 5.6 Luna",
+    iconSvg: "",
+    contextWindowTokens: 4096,
+    maxInputTokens: null,
+    maxOutputTokens: null,
+  };
+
+  it("carries a declared vendorLabel on a text row", () => {
+    const payload = modelSavePayload({
+      ...base,
+      outputType: "text",
+      reasoningEfforts: [],
+      imageCapabilities: null,
+      vendorLabel: "OpenAI",
+    });
+    expect(payload.vendorLabel).toBe("OpenAI");
+  });
+
+  it("carries a declared vendorLabel on an image row", () => {
+    // A vendor is a property of the model, not of its output type.
+    const payload = modelSavePayload({
+      ...base,
+      outputType: "image",
+      reasoningEfforts: [],
+      imageCapabilities: null,
+      vendorLabel: "OpenAI",
+    });
+    expect(payload.vendorLabel).toBe("OpenAI");
+  });
+
+  it("omits vendorLabel when the user cleared it", () => {
+    const payload = modelSavePayload({
+      ...base,
+      outputType: "text",
+      reasoningEfforts: [],
+      imageCapabilities: null,
+      vendorLabel: "",
+    });
+    expect(payload).not.toHaveProperty("vendorLabel");
+  });
+
+  it("omits vendorLabel when it was never set", () => {
+    const payload = modelSavePayload({
+      ...base,
+      outputType: "text",
+      reasoningEfforts: [],
+      imageCapabilities: null,
+      vendorLabel: null,
+    });
+    expect(payload).not.toHaveProperty("vendorLabel");
   });
 });

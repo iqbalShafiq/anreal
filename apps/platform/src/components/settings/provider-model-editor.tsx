@@ -11,6 +11,7 @@ import {
   modelOutputType,
   modelSavePayload,
   slugPreview,
+  vendorSuggestion,
   type ImageCapabilityDraft,
   type ImageCapabilityLimits,
   type ImageStyle,
@@ -18,6 +19,7 @@ import {
 import {
   prefillProviderModel,
   type ListedProviderModel,
+  type ModelInfo,
   type ProviderModelInput,
   type ProviderModelRow,
 } from "#/lib/api";
@@ -37,6 +39,30 @@ function parseLimit(value: string): number | null | "invalid" {
 }
 
 /**
+ * The vendor names the catalog already files BYOK rows under: each one is a
+ * `vendorLabel` some other model declared, so it stands in for the vendors a
+ * user may be choosing between. Empty/whitespace labels are dropped, duplicates
+ * are collapsed case-insensitively, and the labels keep their declared casing.
+ * These are suggestions only — the vendor is never derived without the user.
+ */
+function declaredVendors(models: ModelInfo[]): string[] {
+  const byKey = new Map<string, string>();
+  for (const model of models) {
+    const label = model.vendorLabel?.trim() ?? "";
+    const key = label.toLowerCase();
+    if (key.length > 0 && !byKey.has(key)) byKey.set(key, label);
+  }
+  return [...byKey.values()];
+}
+
+/** A compact list of vendor names for the field's helper line. */
+function formatVendorExamples(vendors: string[]): string {
+  const shown = vendors.slice(0, 4);
+  const rest = vendors.length - shown.length;
+  return rest > 0 ? `${shown.join(", ")}, and ${rest} more` : shown.join(", ");
+}
+
+/**
  * Registers or edits one model on a saved connection. Two ways in: pick one of
  * the provider's own models (discovery) or type an upstream id by hand. Either
  * way the server's prefill fills the display name, limits, and reasoning set,
@@ -48,6 +74,7 @@ export function ProviderModelEditor({
   imageStyle,
   imageLimits,
   effortVocabulary,
+  models,
   initial,
   saving,
   onSave,
@@ -59,6 +86,8 @@ export function ProviderModelEditor({
   imageStyle: ImageStyle;
   imageLimits: ImageCapabilityLimits | null;
   effortVocabulary: string[];
+  /** The merged catalog, read only for the vendors other models declare. */
+  models: ModelInfo[];
   initial: ProviderModelRow | null;
   saving: boolean;
   onSave: (input: ProviderModelInput) => Promise<void>;
@@ -89,6 +118,12 @@ export function ProviderModelEditor({
   );
   const [providerReported, setProviderReported] = useState(true);
   const [iconSvg, setIconSvg] = useState(initial?.iconSvg ?? "");
+  const [vendorLabel, setVendorLabel] = useState(initial?.vendorLabel ?? "");
+  // Once the user edits the vendor by hand the suggestion stops overwriting it.
+  const [vendorTouched, setVendorTouched] = useState(false);
+  // The vendor names other BYOK rows have declared; the suggestion below is
+  // only ever drawn from these, so a gateway's own name is never proposed.
+  const [knownVendors, setKnownVendors] = useState<string[]>([]);
   const [discovered, setDiscovered] = useState<ListedProviderModel[] | null>(
     null,
   );
@@ -167,6 +202,36 @@ export function ProviderModelEditor({
     );
   };
 
+  // Seed the vendor suggestion source from the catalog. This preference order
+  // keeps a vendor the user has already declared winning over the current
+  // catalog, so reopening the editor does not lose a name that is not yet there.
+  useEffect(() => {
+    const fromCatalog = declaredVendors(models);
+    const current = vendorLabel.trim();
+    const already = fromCatalog.some(
+      (vendor) => vendor.toLowerCase() === current.toLowerCase(),
+    );
+    if (current.length > 0 && !already) {
+      setKnownVendors([current, ...fromCatalog]);
+    } else {
+      setKnownVendors(fromCatalog);
+    }
+  }, [models, vendorLabel]);
+
+  // Offer — never apply — a vendor drawn from the upstream id's prefix. The
+  // suggestion is shown as a button; only an explicit click writes the field.
+  // Once the user has edited the vendor the offer is withdrawn, so a value they
+  // have already overridden (or cleared) is never re-applied.
+  const offeredVendor =
+    vendorTouched || vendorLabel.trim().length > 0
+      ? null
+      : vendorSuggestion(upstreamId, knownVendors);
+  const vendorDatalistId = "provider-model-vendor-options";
+  const vendorHelper =
+    knownVendors.length > 0
+      ? `Optional. Which vendor made this model, e.g. ${formatVendorExamples(knownVendors)}. A label for filtering in the picker only — it does not affect routing.`
+      : "Optional. Which vendor made this model. A label for filtering in the picker only — it does not affect routing.";
+
   const submit = async () => {
     setErrors({});
     if (upstreamId.trim().length === 0) {
@@ -208,6 +273,7 @@ export function ProviderModelEditor({
           maxOutputTokens: output,
           reasoningEfforts,
           imageCapabilities: capabilities,
+          vendorLabel,
         }),
       );
     } catch (error) {
@@ -353,6 +419,46 @@ export function ProviderModelEditor({
         helper="Shown in the model picker. Defaults to the id."
         disabled={busy}
       />
+
+      <div className="flex flex-col gap-1.5">
+        <FormTextField
+          label="Vendor"
+          value={vendorLabel}
+          onChange={(event) => {
+            setVendorTouched(true);
+            setVendorLabel(event.target.value);
+          }}
+          placeholder="OpenAI"
+          helper={vendorHelper}
+          list={knownVendors.length > 0 ? vendorDatalistId : undefined}
+          optional
+          disabled={busy}
+        />
+        {knownVendors.length > 0 ? (
+          <datalist id={vendorDatalistId}>
+            {knownVendors.map((vendor) => (
+              <option key={vendor} value={vendor} />
+            ))}
+          </datalist>
+        ) : null}
+        {offeredVendor ? (
+          <div className="flex items-center justify-end">
+            <button
+              type="button"
+              onClick={() => {
+                // An explicit click is the user declaring the vendor; this is
+                // the one way the suggestion becomes the value.
+                setVendorTouched(true);
+                setVendorLabel(offeredVendor);
+              }}
+              disabled={busy}
+              className="shrink-0 cursor-pointer rounded-md border border-hairline px-2 py-0.5 text-[11px] text-text-muted transition duration-150 ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-white/[0.06] hover:text-text disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Suggested: {offeredVendor}
+            </button>
+          </div>
+        ) : null}
+      </div>
       <div className="grid grid-cols-3 gap-2">
         <FormTextField
           label="Context"

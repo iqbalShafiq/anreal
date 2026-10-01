@@ -107,6 +107,29 @@ export function deriveConnectionSlug(label: string): string {
 }
 
 /**
+ * The vendor an upstream id's prefix names, when that prefix is one of the
+ * vendors the catalog already knows — otherwise `null`. This is only ever a
+ * suggestion the editor offers; the vendor is declared by the user, never
+ * derived, because the prefix cannot be trusted: OpenRouter prefixes the vendor
+ * (`openai/gpt-4o`) while OpenCode Zen prefixes itself (`opencode/gpt-5.5`,
+ * with a bare `gpt-5.5` as the id). A gateway's own name must never become a
+ * vendor, so a prefix outside `knownVendors` — including `opencode` — yields no
+ * suggestion. Matched case-insensitively and returned in the catalog's casing.
+ */
+export function vendorSuggestion(
+  upstreamId: string,
+  knownVendors: readonly string[],
+): string | null {
+  const slash = upstreamId.indexOf("/");
+  if (slash <= 0) return null;
+  const prefix = upstreamId.slice(0, slash).trim().toLowerCase();
+  if (prefix.length === 0) return null;
+  return (
+    knownVendors.find((vendor) => vendor.toLowerCase() === prefix) ?? null
+  );
+}
+
+/**
  * Client-side slug check so a typo fails in the form, not mid-save. The server
  * stays authoritative for reserved namespaces; this only enforces the shape.
  */
@@ -397,7 +420,10 @@ export function imageCapabilityPayload(
  * pinned by a test: a partial PATCH that omits `imageCapabilities` writes
  * `null`, so an image row always carries the whole capability set (when it has
  * one), even on a save where the user changed nothing. A text row never carries
- * the field at all.
+ * the field at all. `vendorLabel` gets the same full-resend treatment — the
+ * update path replaces it on every PATCH, so an omitted field silently clears
+ * the stored vendor — but it is a property of the model, not its output type,
+ * so it is sent for text and image rows alike.
  */
 export function modelSavePayload(input: {
   upstreamId: string;
@@ -409,9 +435,11 @@ export function modelSavePayload(input: {
   maxOutputTokens: number | null;
   reasoningEfforts: string[];
   imageCapabilities: ImageModelCapabilities | null;
+  vendorLabel?: string | null;
 }): ProviderModelInput {
   const trimmedName = input.name.trim();
   const trimmedIcon = input.iconSvg.trim();
+  const trimmedVendor = (input.vendorLabel ?? "").trim();
   const isImage = input.outputType === "image";
   return {
     upstreamId: input.upstreamId,
@@ -427,6 +455,7 @@ export function modelSavePayload(input: {
       input.outputType,
       input.reasoningEfforts,
     ),
+    ...(trimmedVendor.length > 0 ? { vendorLabel: trimmedVendor } : {}),
     ...(isImage && input.imageCapabilities
       ? { imageCapabilities: input.imageCapabilities }
       : {}),

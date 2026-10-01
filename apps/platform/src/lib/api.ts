@@ -2268,6 +2268,11 @@ export type ProviderModelRow = {
   label: string;
   hint: string | null;
   description: string | null;
+  /**
+   * Who made the model, declared for a BYOK row and `null` when undeclared.
+   * A filter facet only — never consulted by the run path.
+   */
+  vendorLabel: string | null;
   iconSvg: string;
   outputType: "text" | "image";
   contextWindowTokens: number | null;
@@ -2311,6 +2316,13 @@ export type ProviderModelInput = {
   label?: string;
   hint?: string | null;
   description?: string | null;
+  /**
+   * Who made the model, declared by the user for a BYOK row. A filter facet
+   * only — never consulted by the run path. Sent in full on every save: the
+   * update path replaces it on each PATCH, so an omitted field clears the
+   * stored vendor.
+   */
+  vendorLabel?: string;
   iconSvg?: string;
   outputType?: "text" | "image";
   /**
