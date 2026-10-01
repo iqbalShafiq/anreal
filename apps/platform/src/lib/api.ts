@@ -1052,6 +1052,11 @@ export type ModelInfo = {
   description: string | null;
   iconSvg: string;
   provider: { slug: string; name: string };
+  /**
+   * Who made the model, declared for BYOK rows and `null` for catalog rows.
+   * A filter facet only — never consulted by the run path.
+   */
+  vendorLabel: string | null;
   contextWindowTokens: number;
   maxInputTokens: number | null;
   maxOutputTokens: number | null;

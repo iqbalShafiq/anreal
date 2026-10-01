@@ -1,10 +1,12 @@
 import { DEFAULT_COMPLETION_MODEL } from "#/lib/chat/models";
 import type { ImageGenSettings, ModelInfo } from "#/lib/api";
+import type { PickerView } from "#/lib/model-picker";
 
 export const SELECTED_MODEL_KEY = "chat.selectedModel";
 export const SELECTED_REASONING_EFFORT_KEY = "chat.selectedReasoningEffort";
 export const IMAGE_GEN_ENABLED_KEY = "chat.imageGenerationEnabled";
 export const IMAGE_GEN_SETTINGS_KEY = "chat.imageGenSettings";
+export const MODEL_PICKER_VIEW_KEY = "chat.modelPickerView";
 
 export const DEFAULT_IMAGE_GEN_SETTINGS: ImageGenSettings = {
   modelId: "openai/gpt-5-image-mini",
@@ -152,6 +154,31 @@ export function readImageGenSettings(): ImageGenSettings {
 export function persistImageGenSettings(settings: ImageGenSettings) {
   try {
     localStorage.setItem(IMAGE_GEN_SETTINGS_KEY, JSON.stringify(settings));
+  } catch {
+    // ignore storage access errors
+  }
+}
+
+/**
+ * The picker's display preference: "list" unless the user explicitly chose
+ * "grid". Any other stored value (a future mode, a corrupted write) is not a
+ * view this build can render, so it degrades to the default rather than
+ * throwing or rendering nothing.
+ */
+export function readModelPickerView(): PickerView {
+  try {
+    return localStorage.getItem(MODEL_PICKER_VIEW_KEY) === "grid"
+      ? "grid"
+      : "list";
+  } catch {
+    // ignore storage access errors
+    return "list";
+  }
+}
+
+export function persistModelPickerView(view: PickerView) {
+  try {
+    localStorage.setItem(MODEL_PICKER_VIEW_KEY, view);
   } catch {
     // ignore storage access errors
   }

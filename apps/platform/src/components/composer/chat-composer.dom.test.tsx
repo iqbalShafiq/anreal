@@ -67,6 +67,7 @@ const model = {
   description: null,
   iconSvg: "",
   provider: { slug: "deepseek", name: "DeepSeek" },
+  vendorLabel: null,
   contextWindowTokens: 128_000,
   maxInputTokens: null,
   maxOutputTokens: null,

@@ -6,6 +6,9 @@ import { ModelReasoningSwitcher } from "./model-reasoning-switcher";
 
 afterEach(cleanup);
 
+/** Let the switcher's deferred document listeners attach. */
+const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
 const model: ModelInfo = {
   modelId: "custom-gateway/my-model",
   label: "My Model",
@@ -14,6 +17,7 @@ const model: ModelInfo = {
   description: null,
   iconSvg: "",
   provider: { slug: "custom-gateway", name: "Custom Gateway" },
+  vendorLabel: null,
   contextWindowTokens: 128_000,
   maxInputTokens: null,
   maxOutputTokens: null,
@@ -73,5 +77,32 @@ describe("ModelReasoningSwitcher add-model entry", () => {
     renderSwitcher(undefined);
     fireEvent.click(screen.getByRole("button", { name: "Model" }));
     expect(screen.queryByText("Add a model…")).toBeNull();
+  });
+});
+
+describe("ModelReasoningSwitcher model menu: Esc clears before it closes", () => {
+  it("keeps the menu open on Esc while a query can be cleared", async () => {
+    renderSwitcher();
+    fireEvent.click(screen.getByRole("button", { name: "Model" }));
+    await flush();
+
+    const search = screen.getByRole("searchbox", { name: "Search models" });
+    fireEvent.change(search, { target: { value: "my" } });
+    fireEvent.keyDown(search, { key: "Escape" });
+
+    // Esc cleared the query; the menu is still open.
+    expect((search as HTMLInputElement).value).toBe("");
+    expect(screen.getByRole("searchbox", { name: "Search models" })).toBeTruthy();
+  });
+
+  it("closes on Esc once there is nothing to clear", async () => {
+    renderSwitcher();
+    fireEvent.click(screen.getByRole("button", { name: "Model" }));
+    await flush();
+
+    const search = screen.getByRole("searchbox", { name: "Search models" });
+    fireEvent.keyDown(search, { key: "Escape" });
+
+    expect(screen.queryByRole("searchbox", { name: "Search models" })).toBeNull();
   });
 });

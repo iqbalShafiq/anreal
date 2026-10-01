@@ -1,4 +1,4 @@
-import { ChevronDown, Cpu, Plus } from "lucide-react";
+import { ChevronDown, Cpu } from "lucide-react";
 import {
   useEffect,
   useId,
@@ -20,23 +20,17 @@ import {
   SelectOptionList,
   type SelectOption,
 } from "#/components/ui/select-list";
+import { ModelPickerMenu } from "./model-picker-menu";
 
 /** Used only to order the icon fill; the actual list comes from props. */
 const EFFORT_ORDER = ["minimal", "low", "medium", "high", "xhigh", "max"];
 
 /**
- * Sentinel value for the "Add a model…" row. A real provider model id is
- * always `<connection-slug>/<model-slug>` (see PROVIDER_MODEL_SLUG_RE in
- * apps/api/src/lib/provider-slug.ts): it starts with `[a-z0-9]` and contains
- * exactly one `/`. A `__`-prefixed value with no slash can never collide.
- */
-const ADD_MODEL_VALUE = "__add_model__";
-
-/**
  * Hover detail for a model option: input modality tags (icons only), max
- * context window, and input/output prices.
+ * context window, and input/output prices. Exported so the picker menu's grid
+ * cards can carry the same hover card as the list rows.
  */
-function ModelDetail({ model }: { model: ModelInfo }) {
+export function ModelDetail({ model }: { model: ModelInfo }) {
   const priceIn = formatModelPrice(model.prices.input);
   const priceOut = formatModelPrice(model.prices.output);
   return (
@@ -120,7 +114,7 @@ export function ModelReasoningSwitcher({
   const rootRef = useRef<HTMLDivElement>(null);
   const modelTriggerRef = useRef<HTMLButtonElement>(null);
   const reasoningTriggerRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLUListElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const modelListId = useId();
   const reasoningListId = useId();
   const [menuPos, setMenuPos] = useState<{
@@ -177,6 +171,9 @@ export function ModelReasoningSwitcher({
       setOpenMenu(null);
     };
     const onKeyDown = (event: KeyboardEvent) => {
+      // The model picker's menu may have consumed Escape (clearing an active
+      // query/filter keeps the menu open); respect that before closing.
+      if (event.defaultPrevented) return;
       if (event.key === "Escape") setOpenMenu(null);
     };
     // Defer so the opening click does not immediately close.
@@ -200,23 +197,6 @@ export function ModelReasoningSwitcher({
     setOpenMenu((current) => (current === menu ? null : menu));
   };
 
-  const modelOptions: SelectOption[] = models.map((m) => ({
-    value: m.modelId,
-    label: m.name,
-    hint: m.hint ?? undefined,
-    icon: (
-      <ModelIcon svg={m.iconSvg} className="size-3.5 shrink-0 opacity-70" />
-    ),
-    detail: <ModelDetail model={m} />,
-  }));
-  if (onAddModel) {
-    modelOptions.push({
-      value: ADD_MODEL_VALUE,
-      label: "Add a model…",
-      icon: <Plus className="size-3.5 shrink-0 opacity-70" strokeWidth={1.75} />,
-    });
-  }
-
   const reasoningOptions: SelectOption[] =
     supportedEfforts.length === 0
       ? [{ value: "", label: "None", disabled: true }]
@@ -236,11 +216,9 @@ export function ModelReasoningSwitcher({
   const menu =
     openMenu && menuPos
       ? createPortal(
-          <SelectOptionList
+          <div
             ref={menuRef}
             id={openMenu === "model" ? modelListId : reasoningListId}
-            ariaLabel={openMenu === "model" ? "Model" : "Reasoning effort"}
-            value={openMenu === "model" ? model : (reasoningEffort ?? "")}
             style={{
               position: "fixed",
               top: menuPos.top,
@@ -249,24 +227,38 @@ export function ModelReasoningSwitcher({
               transform: "translateY(-100%)",
               zIndex: 80,
             }}
-            options={openMenu === "model" ? modelOptions : reasoningOptions}
-            hoverSide={openMenu === "model" ? "right" : "top"}
-            onSelect={(selectedValue) => {
-              if (openMenu === "model") {
-                // The add-model sentinel is an action, not a selection: it must
-                // not change the model or trigger the reasoning-effort
-                // resolution that runs on a real model change.
-                if (selectedValue === ADD_MODEL_VALUE) {
-                  onAddModel?.();
-                } else {
+            className={
+              openMenu === "model"
+                ? "chat-scroll overflow-hidden rounded-xl border border-white/[0.08] bg-canvas-elevated pb-1 text-text shadow-[0_12px_40px_-12px_rgba(0,0,0,0.75)] animate-fade-in"
+                : ""
+            }
+          >
+            {openMenu === "model" ? (
+              <ModelPickerMenu
+                models={models}
+                value={model}
+                open
+                onSelect={(selectedValue) => {
                   onModelChange(selectedValue);
-                }
-              } else {
-                onReasoningChange(selectedValue === "" ? null : selectedValue);
-              }
-              setOpenMenu(null);
-            }}
-          />,
+                  setOpenMenu(null);
+                }}
+                onAddModel={onAddModel}
+                onClose={() => setOpenMenu(null)}
+              />
+            ) : (
+              <SelectOptionList
+                id={reasoningListId}
+                ariaLabel="Reasoning effort"
+                value={reasoningEffort ?? ""}
+                options={reasoningOptions}
+                hoverSide="top"
+                onSelect={(selectedValue) => {
+                  onReasoningChange(selectedValue === "" ? null : selectedValue);
+                  setOpenMenu(null);
+                }}
+              />
+            )}
+          </div>,
           document.body,
         )
       : null;

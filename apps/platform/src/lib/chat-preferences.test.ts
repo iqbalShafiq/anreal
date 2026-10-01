@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ModelInfo } from "./api";
 import {
+  MODEL_PICKER_VIEW_KEY,
   SELECTED_MODEL_KEY,
+  persistModelPickerView,
+  readModelPickerView,
   readSelectedModel,
   readStoredSelectedModel,
   resolveInitialModel,
@@ -101,5 +104,48 @@ describe("readSelectedModel", () => {
     createStorage({ [SELECTED_MODEL_KEY]: "openai/pruned-model" });
 
     expect(readSelectedModel(catalog)).toBe("openai/gpt-6-luna");
+  });
+});
+
+describe("model picker view preference", () => {
+  it("round-trips the stored view", () => {
+    createStorage();
+
+    persistModelPickerView("grid");
+
+    expect(readModelPickerView()).toBe("grid");
+    expect(localStorage.getItem(MODEL_PICKER_VIEW_KEY)).toBe("grid");
+  });
+
+  it("defaults to list when nothing is stored", () => {
+    createStorage();
+
+    expect(readModelPickerView()).toBe("list");
+  });
+
+  it("falls back to list for an unknown stored value", () => {
+    createStorage({ [MODEL_PICKER_VIEW_KEY]: "carousel" });
+
+    expect(readModelPickerView()).toBe("list");
+  });
+
+  it("swallows a storage read throw and returns list", () => {
+    vi.stubGlobal("localStorage", {
+      getItem: () => {
+        throw new Error("blocked");
+      },
+    });
+
+    expect(readModelPickerView()).toBe("list");
+  });
+
+  it("swallows a storage write throw", () => {
+    vi.stubGlobal("localStorage", {
+      setItem: () => {
+        throw new Error("blocked");
+      },
+    });
+
+    expect(() => persistModelPickerView("grid")).not.toThrow();
   });
 });
