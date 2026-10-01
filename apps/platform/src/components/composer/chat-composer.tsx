@@ -603,7 +603,11 @@ export function ChatComposer({
               onOpenSkills={onOpenSkills}
               onOpenMcp={onOpenMcp}
             />
-            {/* Composer entry passes no trigger: its row lives inside the Select, so use the dialog's native focus restore. */}
+            {/* The composer entry passes no trigger (its row lives inside the
+                Select), so SettingsModal's close handler focuses nothing and
+                the native dialog restores focus to `body` — unlike the
+                account-menu entry, which passes its own trigger. Wiring the
+                switcher's trigger through is a known follow-up. */}
             <ModelReasoningSwitcher
               models={models}
               reasoningEfforts={reasoningEfforts}
