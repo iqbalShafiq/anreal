@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "#/components/ui/button";
 import { FormTextAreaField, FormTextField } from "#/components/ui/form-field";
 import { Select } from "#/components/ui/select";
@@ -121,9 +121,6 @@ export function ProviderModelEditor({
   const [vendorLabel, setVendorLabel] = useState(initial?.vendorLabel ?? "");
   // Once the user edits the vendor by hand the suggestion stops overwriting it.
   const [vendorTouched, setVendorTouched] = useState(false);
-  // The vendor names other BYOK rows have declared; the suggestion below is
-  // only ever drawn from these, so a gateway's own name is never proposed.
-  const [knownVendors, setKnownVendors] = useState<string[]>([]);
   const [discovered, setDiscovered] = useState<ListedProviderModel[] | null>(
     null,
   );
@@ -205,18 +202,18 @@ export function ProviderModelEditor({
   // Seed the vendor suggestion source from the catalog. This preference order
   // keeps a vendor the user has already declared winning over the current
   // catalog, so reopening the editor does not lose a name that is not yet there.
-  useEffect(() => {
-    const fromCatalog = declaredVendors(models);
+  // The catalog scan depends only on `models`; the in-progress value is merged
+  // on top so a keystroke in the vendor field does not re-derive it.
+  const catalogVendors = useMemo(() => declaredVendors(models), [models]);
+  const knownVendors = useMemo(() => {
     const current = vendorLabel.trim();
-    const already = fromCatalog.some(
+    const already = catalogVendors.some(
       (vendor) => vendor.toLowerCase() === current.toLowerCase(),
     );
-    if (current.length > 0 && !already) {
-      setKnownVendors([current, ...fromCatalog]);
-    } else {
-      setKnownVendors(fromCatalog);
-    }
-  }, [models, vendorLabel]);
+    return current.length > 0 && !already
+      ? [current, ...catalogVendors]
+      : catalogVendors;
+  }, [catalogVendors, vendorLabel]);
 
   // Offer — never apply — a vendor drawn from the upstream id's prefix. The
   // suggestion is shown as a button; only an explicit click writes the field.
@@ -226,7 +223,6 @@ export function ProviderModelEditor({
     vendorTouched || vendorLabel.trim().length > 0
       ? null
       : vendorSuggestion(upstreamId, knownVendors);
-  const vendorDatalistId = "provider-model-vendor-options";
   const vendorHelper =
     knownVendors.length > 0
       ? `Optional. Which vendor made this model, e.g. ${formatVendorExamples(knownVendors)}. A label for filtering in the picker only — it does not affect routing.`
@@ -430,17 +426,9 @@ export function ProviderModelEditor({
           }}
           placeholder="OpenAI"
           helper={vendorHelper}
-          list={knownVendors.length > 0 ? vendorDatalistId : undefined}
           optional
           disabled={busy}
         />
-        {knownVendors.length > 0 ? (
-          <datalist id={vendorDatalistId}>
-            {knownVendors.map((vendor) => (
-              <option key={vendor} value={vendor} />
-            ))}
-          </datalist>
-        ) : null}
         {offeredVendor ? (
           <div className="flex items-center justify-end">
             <button

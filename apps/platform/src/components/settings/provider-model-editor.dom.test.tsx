@@ -122,6 +122,20 @@ describe("ProviderModelEditor — the vendor field", () => {
     expect(screen.getByText(/does not affect routing/i)).toBeTruthy();
   });
 
+  it("uses no native autocomplete popup — no list/datalist is attached", () => {
+    // The in-app `Suggested:` button carries the affordance; a native datalist
+    // popup is browser-chrome styled and honours none of the app's tokens.
+    const { container } = renderEditor({ models: [catalogRow("OpenAI")] });
+    const vendor = screen.getByLabelText(/Vendor/) as HTMLInputElement;
+    expect(vendor.getAttribute("list")).toBeNull();
+    expect(container.querySelector("datalist")).toBeNull();
+  });
+
+  it("names a known vendor as an example in the helper line", () => {
+    renderEditor({ models: [catalogRow("OpenAI")] });
+    expect(screen.getByText(/e\.g\. OpenAI/)).toBeTruthy();
+  });
+
   it("suggests a known vendor from the id prefix but does not apply it", () => {
     renderEditor({ models: [catalogRow("OpenAI")] });
     chooseCustomMode();

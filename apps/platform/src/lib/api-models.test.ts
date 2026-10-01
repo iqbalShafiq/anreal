@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { normalizeModelRow, type ModelInfo } from "./api";
+import {
+  normalizeModelRow,
+  normalizeProviderModelRow,
+  type ModelInfo,
+  type ProviderModelRow,
+} from "./api";
 import { EMPTY_PICKER_FILTERS, filterModels, sortModels } from "./model-picker";
 
 /** A row as an older server might send it: no `vendorLabel` at all. */
@@ -70,5 +75,44 @@ describe("normalizeModelRow", () => {
     ).toHaveLength(0);
     // With no vendor selected it stays listed.
     expect(filterModels([model], EMPTY_PICKER_FILTERS)).toHaveLength(1);
+  });
+});
+
+describe("normalizeProviderModelRow", () => {
+  /** A settings row as a pre-`vendorLabel` server would send it. */
+  function rowWithoutVendorLabel(): ProviderModelRow {
+    const row = {
+      id: "m1",
+      slug: "gw/model-x",
+      upstreamId: "x/model-x",
+      name: "Model X",
+      label: "Model X",
+      hint: null,
+      description: null,
+      iconSvg: "",
+      outputType: "text",
+      contextWindowTokens: null,
+      maxInputTokens: null,
+      maxOutputTokens: null,
+      reasoningEfforts: [],
+      capabilities: null,
+      imageCapabilities: null,
+      isActive: true,
+      sortOrder: 0,
+      connectionId: "conn-1",
+      createdAt: "",
+      updatedAt: "",
+    };
+    // Deliberately omit vendorLabel to model a pre-field server.
+    return row as unknown as ProviderModelRow;
+  }
+
+  it("parses a row without vendorLabel to null", () => {
+    expect(normalizeProviderModelRow(rowWithoutVendorLabel()).vendorLabel).toBeNull();
+  });
+
+  it("keeps a declared vendorLabel", () => {
+    const row = { ...rowWithoutVendorLabel(), vendorLabel: "OpenAI" };
+    expect(normalizeProviderModelRow(row).vendorLabel).toBe("OpenAI");
   });
 });

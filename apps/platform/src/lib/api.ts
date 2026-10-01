@@ -2425,6 +2425,21 @@ function isProviderModelRow(value: unknown): value is ProviderModelRow {
   );
 }
 
+/**
+ * Normalise one provider-model row before it reaches the settings editor. A row
+ * from an older server omits `vendorLabel`, and the field is typed `string |
+ * null` — the same treatment `normalizeModelRow` gives the catalog, so a reader
+ * that eventually calls `.length` on it cannot crash on a mixed deploy.
+ */
+export function normalizeProviderModelRow(
+  row: ProviderModelRow,
+): ProviderModelRow {
+  return {
+    ...row,
+    vendorLabel: typeof row.vendorLabel === "string" ? row.vendorLabel : null,
+  };
+}
+
 export async function listProviderKinds(): Promise<{
   kinds: ProviderKindInfo[];
   effortVocabulary: string[];
@@ -2568,7 +2583,7 @@ export async function listProviderModels(
   if (!Array.isArray(data)) {
     throw new Error("Unexpected provider models response shape");
   }
-  return data.filter(isProviderModelRow);
+  return data.filter(isProviderModelRow).map(normalizeProviderModelRow);
 }
 
 export async function createProviderModel(
@@ -2591,7 +2606,7 @@ export async function createProviderModel(
     throw new Error("Unexpected provider model response shape");
   }
   invalidateModelsCache();
-  return data;
+  return normalizeProviderModelRow(data);
 }
 
 export async function updateProviderModel(
@@ -2615,7 +2630,7 @@ export async function updateProviderModel(
     throw new Error("Unexpected provider model response shape");
   }
   invalidateModelsCache();
-  return data;
+  return normalizeProviderModelRow(data);
 }
 
 export async function deleteProviderModel(
