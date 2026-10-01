@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { ModelInfo } from "#/lib/api";
 import {
   EMPTY_PICKER_FILTERS,
   PICKER_SORTS,
@@ -9,7 +10,6 @@ import {
   type PickerFilterState,
   type PickerSource,
 } from "./model-picker";
-
 /**
  * A structural `PickerSource` factory. The module declares the shape itself
  * (never importing `ModelInfo`), so the tests build plain objects — the same
@@ -611,5 +611,108 @@ describe("isFilterActive", () => {
 
   it("ignores whitespace-only query", () => {
     expect(isFilterActive(filters({ query: "   " }))).toBe(false);
+  });
+});
+
+/**
+ * Pins the contract between the API's `listModels` projection and the picker's
+ * expectations in one place. The picker's `PickerSource` type is structural, so
+ * the picker never imports `ModelInfo`; that is exactly how a rename or a
+ * dropped field in the real merged row could pass every layer test while
+ * breaking the picker at runtime. These rows are typed `ModelInfo` — the exact
+ * merged shape the API produces, including fields the picker does not read
+ * (`description`, `connectionId`, `prices.longPrompt*`, `sortOrder`) — and are
+ * fed through the real filter, so the whole shape is asserted rather than
+ * assumed.
+ */
+describe("picker contract with the real listModels row shape", () => {
+  /** A catalog row as `toModelInfo` projects it (every ModelInfo field). */
+  const catalogRow: ModelInfo = {
+    modelId: "openai/gpt-6-luna",
+    label: "GPT 6 Luna",
+    name: "GPT 6 Luna",
+    hint: "Fast",
+    description: "A catalog model",
+    vendorLabel: null,
+    iconSvg: "",
+    provider: { slug: "openai", name: "OpenAI" },
+    contextWindowTokens: 1_000_000,
+    maxInputTokens: null,
+    maxOutputTokens: 128_000,
+    prices: {
+      input: 1.25,
+      cachedInput: 0.125,
+      output: 10,
+      cacheWriteMultiplier: null,
+      longPromptThresholdTokens: null,
+      longPromptInputMultiplier: null,
+      longPromptOutputMultiplier: null,
+    },
+    reasoningEfforts: ["low", "high"],
+    outputType: "text",
+    imageCapabilities: null,
+    source: "catalog",
+    connectionId: null,
+    inputModalities: ["text", "image"],
+    sortOrder: 0,
+  };
+
+  /** A connection row as `toConnectionModelInfo` projects it. */
+  const connectionRow: ModelInfo = {
+    modelId: "my-gateway/vendor-path-model",
+    label: "Vendor Path Model",
+    name: "Vendor Path Model",
+    hint: null,
+    description: null,
+    vendorLabel: "OpenAI",
+    iconSvg: "",
+    provider: { slug: "my-gateway", name: "My Gateway" },
+    contextWindowTokens: 200_000,
+    maxInputTokens: null,
+    maxOutputTokens: null,
+    prices: {
+      input: null,
+      cachedInput: null,
+      output: null,
+      cacheWriteMultiplier: null,
+      longPromptThresholdTokens: null,
+      longPromptInputMultiplier: null,
+      longPromptOutputMultiplier: null,
+    },
+    reasoningEfforts: ["low"],
+    outputType: "text",
+    imageCapabilities: null,
+    source: "connection",
+    connectionId: "pc_vendor_path",
+    inputModalities: ["text"],
+    sortOrder: 0,
+  };
+
+  const merged = [catalogRow, connectionRow];
+
+  it("filters the real connection row by its declared vendor", () => {
+    expect(ids(filterModels(merged, filters({ vendors: ["OpenAI"] })))).toEqual([
+      "openai/gpt-6-luna",
+      "my-gateway/vendor-path-model",
+    ]);
+  });
+
+  it("files the real catalog row under its provider, not a guessed vendor", () => {
+    // Only the catalog row's provider is named OpenAI; the connection row's
+    // provider is the connection ("My Gateway"), so a "My Gateway" vendor
+    // selection matches nothing.
+    expect(
+      filterModels(merged, filters({ vendors: ["My Gateway"] })),
+    ).toEqual([]);
+  });
+
+  it("offers the real vendors as facets", () => {
+    expect(pickerFacets(merged).vendors.sort()).toEqual(["OpenAI"]);
+  });
+
+  it("filters the real connection row by its connection slug", () => {
+    expect(
+      ids(filterModels(merged, filters({ connections: ["my-gateway"] }))),
+    ).toEqual(["my-gateway/vendor-path-model"]);
   });
 });
