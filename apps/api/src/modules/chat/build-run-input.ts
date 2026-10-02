@@ -1181,7 +1181,10 @@ export async function resolveRecipeImageTarget(
     // degrades to the shared-key path instead of killing the run. The chat
     // path throws instead, because a wrong header there is the failure we
     // are removing. Both are logged server-side.
-    console.warn("[chat] BYOK image headers could not be resolved", { error });
+    console.warn("[chat] BYOK image headers could not be resolved", {
+      slug: row.slug,
+      error,
+    });
     return null;
   }
 

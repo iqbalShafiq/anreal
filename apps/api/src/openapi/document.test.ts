@@ -239,4 +239,39 @@ describe("OpenAPI document", () => {
     expect(JSON.stringify(doc)).not.toContain("tool_approval_request");
     expect(JSON.stringify(doc)).not.toContain("clarification_request");
   });
+
+  it("publishes the literal-or-dynamic header union on the provider write endpoints", () => {
+    const union = {
+      oneOf: [
+        { type: "string" },
+        {
+          type: "object",
+          required: ["dynamic"],
+          properties: {
+            dynamic: {
+              type: "string",
+              enum: ["sessionId", "requestId", "userId"],
+            },
+          },
+          additionalProperties: false,
+        },
+      ],
+    };
+    const headerSchema = (path: string) => {
+      const operation = doc.paths[path]?.post as {
+        requestBody?: {
+          content?: Record<
+            string,
+            { schema?: { properties?: Record<string, unknown> } }
+          >;
+        };
+      };
+      return operation.requestBody?.content?.["application/json"]?.schema
+        ?.properties?.headers as { additionalProperties?: unknown } | undefined;
+    };
+    expect(headerSchema("/api/providers")?.additionalProperties).toEqual(union);
+    expect(headerSchema("/api/providers/test")?.additionalProperties).toEqual(
+      union,
+    );
+  });
 });

@@ -90,6 +90,28 @@ const connectionTestBodyExample = {
 
 const connectionEnabledBodyExample = { isEnabled: false };
 
+/**
+ * One header value: a literal string, or `{ dynamic }` naming a run-time
+ * source the API resolves at the provider seam. The enum is the closed
+ * vocabulary `sanitizeHeaders` accepts (`DYNAMIC_HEADER_SOURCES`).
+ */
+const dynamicHeaderValue = {
+  oneOf: [
+    { type: "string" },
+    {
+      type: "object",
+      required: ["dynamic"],
+      properties: {
+        dynamic: {
+          type: "string",
+          enum: ["sessionId", "requestId", "userId"],
+        },
+      },
+      additionalProperties: false,
+    },
+  ],
+};
+
 const connectionBody = {
   type: "object",
   required: ["kind", "label"],
@@ -120,9 +142,9 @@ const connectionBody = {
     },
     headers: {
       type: ["object", "null"],
-      additionalProperties: { type: "string" },
+      additionalProperties: dynamicHeaderValue,
       description:
-        "Optional gateway headers. `authorization` is rejected: use apiKey.",
+        "Optional gateway headers. Each value is a literal string or `{ dynamic }` naming a run-time source (sessionId, requestId, userId). `authorization` is rejected: use apiKey.",
     },
   },
 };
@@ -179,9 +201,9 @@ const connectionTestBody = {
     },
     headers: {
       type: ["object", "null"],
-      additionalProperties: { type: "string" },
+      additionalProperties: dynamicHeaderValue,
       description:
-        "Gateway headers. Ignored when a stored credential is reused, and `authorization` is rejected.",
+        "Gateway headers. Each value is a literal string or `{ dynamic }` naming a run-time source (sessionId, requestId, userId). Ignored when a stored credential is reused, and `authorization` is rejected.",
     },
     connectionId: {
       type: ["string", "null"],

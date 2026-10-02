@@ -1,5 +1,6 @@
 import type { ContextSnippetSourceRole } from "#/lib/chat/context-snippet-text";
 import type { StageInteractionInput } from "#/lib/chat/interaction-response";
+import type { ProviderHeaderValue } from "#/lib/dynamic-headers";
 import { MODEL_ROLE_KEYS, type ModelRoleKey } from "#/lib/model-role-labels";
 
 const DEFAULT_API_PORT = 3001;
@@ -2314,7 +2315,7 @@ export type ProviderConnectionInput = {
    * run-time source (the closed vocabulary in `#/lib/dynamic-headers`) that the
    * API resolves at the provider seam. The API re-validates every value.
    */
-  headers?: Record<string, string | { dynamic: string }>;
+  headers?: Record<string, ProviderHeaderValue>;
 };
 
 export type ProviderModelInput = {
@@ -2715,7 +2716,7 @@ export async function testProviderConnection(input: {
    * markers: a new connection whose required header is dynamic can only pass
    * the test-before-save gate if the probe carries the marker.
    */
-  headers?: Record<string, string | { dynamic: string }>;
+  headers?: Record<string, ProviderHeaderValue>;
   connectionId?: string;
 }): Promise<{ ok: true; modelCount: number }> {
   const response = await apiFetch(`${API_BASE}/api/providers/test`, {

@@ -12,6 +12,7 @@ import type {
   ProviderModelInput,
   ProviderModelPrefill,
 } from "#/lib/api";
+import type { ProviderHeaderValue } from "#/lib/dynamic-headers";
 
 const SLUG_MAX = 96;
 
@@ -165,7 +166,7 @@ export function canSaveConnection(input: {
  */
 export function geminiHeaderWarning(
   kind: string,
-  headers: Record<string, string | { dynamic: string }>,
+  headers: Record<string, ProviderHeaderValue>,
 ): string | null {
   if (kind !== "gemini") return null;
   if (Object.keys(headers).length === 0) return null;

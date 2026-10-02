@@ -6,6 +6,7 @@ import { type SelectOption } from "#/components/ui/select-list";
 import {
   DYNAMIC_HEADER_LABELS,
   DYNAMIC_HEADER_SOURCES,
+  isDynamicHeaderSource,
   type DynamicHeaderSource,
 } from "#/lib/dynamic-headers";
 
@@ -19,7 +20,7 @@ export type KeyValueRow = {
    * means the literal `value` is sent unchanged. Only callers that opt into
    * `allowDynamicValues` can set it.
    */
-  dynamic?: string;
+  dynamic?: DynamicHeaderSource;
 };
 
 /**
@@ -154,7 +155,9 @@ export function KeyValueListField({
             <Select
               value={row.dynamic ?? ""}
               onChange={(next) =>
-                updateRow(index, { dynamic: next === "" ? undefined : next })
+                updateRow(index, {
+                  dynamic: isDynamicHeaderSource(next) ? next : undefined,
+                })
               }
               options={VALUE_MODE_OPTIONS}
               ariaLabel={`${label} header value mode`}

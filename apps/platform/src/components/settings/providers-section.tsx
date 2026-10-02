@@ -30,6 +30,7 @@ import {
   deriveConnectionSlug,
   geminiHeaderWarning,
 } from "#/lib/provider-model-draft";
+import type { ProviderHeaderValue } from "#/lib/dynamic-headers";
 import {
   issuesFromError,
   issuesToFieldErrors,
@@ -62,13 +63,14 @@ function kindLabel(kinds: ProviderKindInfo[], kind: string): string {
 /**
  * Map header rows to the wire shape. A row in Dynamic mode sends
  * `{ dynamic: source }`; a Fixed row sends its literal value. Names are
- * trimmed, and a nameless row is skipped. A stale source left on a Fixed row
- * must never override the literal.
+ * trimmed, and a nameless row is skipped. The marker is emitted whenever the
+ * row carries a source; the picker is what clears `dynamic` when a row is
+ * switched back to Fixed, so a Fixed row stays literal by construction.
  */
 export function toHeadersPayload(
   rows: KeyValueRow[],
-): Record<string, string | { dynamic: string }> {
-  const out: Record<string, string | { dynamic: string }> = {};
+): Record<string, ProviderHeaderValue> {
+  const out: Record<string, ProviderHeaderValue> = {};
   for (const row of rows) {
     const name = row.name.trim();
     if (name.length === 0) continue;
