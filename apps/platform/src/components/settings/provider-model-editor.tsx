@@ -453,6 +453,7 @@ export function ProviderModelEditor({
           value={contextWindowTokens}
           onChange={(event) => setContextWindowTokens(event.target.value)}
           inputMode="numeric"
+          numeric
           placeholder="200000"
           disabled={busy}
         />
@@ -461,6 +462,7 @@ export function ProviderModelEditor({
           value={maxInputTokens}
           onChange={(event) => setMaxInputTokens(event.target.value)}
           inputMode="numeric"
+          numeric
           placeholder="optional"
           disabled={busy}
         />
@@ -469,6 +471,7 @@ export function ProviderModelEditor({
           value={maxOutputTokens}
           onChange={(event) => setMaxOutputTokens(event.target.value)}
           inputMode="numeric"
+          numeric
           placeholder="optional"
           disabled={busy}
         />
@@ -540,6 +543,7 @@ export function ProviderModelEditor({
               }))
             }
             inputMode="numeric"
+            numeric
             placeholder={String(limits.nMax)}
             helper={
               limits.nMax > 1
