@@ -162,6 +162,15 @@ const search = () => screen.getByRole("searchbox", { name: "Search models" });
 const optionList = () =>
   screen.getByRole("listbox", { name: "Model" }) as HTMLUListElement;
 
+/** The group whose label text matches, found by walking up from the label. */
+function groupFor(labelText: string): HTMLElement {
+  const label = screen
+    .getAllByText(labelText)
+    .find((node) => node.className.includes("uppercase"));
+  if (!label) throw new Error(`no group label ${labelText}`);
+  return label.parentElement as HTMLElement;
+}
+
 describe("ModelPickerMenu: search", () => {
   const models = [
     catalogModel("openai/alpha", { name: "Alpha" }),
@@ -203,6 +212,19 @@ describe("ModelPickerMenu: search", () => {
     expect(target).not.toBeNull();
     // The id resolves to the empty-state container the message sits in.
     expect(target?.textContent).toContain("No models match");
+  });
+
+  it("gives the empty-state aria-controls target an honest status role", () => {
+    renderMenu(models);
+    fireEvent.change(search(), { target: { value: "zzz" } });
+
+    // The id resolves to a real element...
+    const controls = search().getAttribute("aria-controls") as string;
+    const target = document.getElementById(controls);
+    expect(target).not.toBeNull();
+    // ...whose role matches what it is: a no-results notice, not a listbox.
+    expect(target?.getAttribute("role")).toBe("status");
+    expect(target?.getAttribute("role")).not.toBe("listbox");
   });
 
   /**
@@ -377,6 +399,20 @@ describe("ModelPickerMenu: scroll cap and the action row", () => {
     );
     expect(list.className).toContain("grid");
   });
+
+  it("lets the controls stack shrink and scroll so a short panel does not clip it", () => {
+    renderMenu(manyModels);
+    fireEvent.click(screen.getByRole("button", { name: "Sort" }));
+
+    // The controls sit between the search and the list. On a panel clamped
+    // shorter than its fixed rows they are the row that gives, so they must be
+    // able to shrink (`min-h-0`) and scroll rather than be cut off by the
+    // panel's `overflow-hidden`. The sort group's parent is that stack.
+    const controls = groupFor("Sort by").parentElement as HTMLElement;
+    expect(controls.className).toContain("flex-col");
+    expect(controls.className).toContain("min-h-0");
+    expect(controls.className).toContain("overflow-y-auto");
+  });
 });
 
 describe("ModelPickerMenu: the list is inside the panel's card, not its own", () => {
@@ -453,15 +489,6 @@ describe("ModelPickerMenu: facet labels sit above their chips", () => {
       provider: { slug: "google", name: "Google" },
     }),
   ];
-
-  /** The group whose label text matches, found by walking up from the label. */
-  function groupFor(labelText: string): HTMLElement {
-    const label = screen
-      .getAllByText(labelText)
-      .find((node) => node.className.includes("uppercase"));
-    if (!label) throw new Error(`no group label ${labelText}`);
-    return label.parentElement as HTMLElement;
-  }
 
   it("stacks the label above a horizontal chip row", () => {
     renderMenu(models);

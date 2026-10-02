@@ -74,6 +74,19 @@ export function SelectOptionList({
   const columnCount = Math.max(1, Math.floor(columns) || 1);
 
   /**
+   * The option's own layout is the layout prop's job, not only the container's:
+   * in list mode the row is a horizontal icon + stacked label/hint (unchanged,
+   * byte-identical — Select depends on it). In grid mode the same elements
+   * become a vertical card: icon on its own line, then the label, then the hint
+   * (which already carries capability and context). Only the arrangement
+   * changes — the elements, their label/hint classes, selection state, hover
+   * card and click behaviour are identical in both modes.
+   */
+  const rowClass = isGrid
+    ? "flex w-full cursor-pointer flex-col items-start gap-1 px-3 py-2 text-left transition duration-150 hover:bg-white/[0.06] focus-visible:outline-none focus-visible:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-40"
+    : "flex w-full cursor-pointer items-start gap-2 px-3 py-2 text-left transition duration-150 hover:bg-white/[0.06] focus-visible:outline-none focus-visible:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-40";
+
+  /**
    * Grid-only arrow handling. In list layout the caller owns the keys (Select
    * moves by ±1 in `select.tsx`), so this stays inert there and every existing
    * caller keeps its exact keyboard behaviour. In grid layout ↑/↓ move by a row
@@ -162,7 +175,7 @@ export function SelectOptionList({
             type="button"
             disabled={opt.disabled}
             data-option-value={opt.value}
-            className={`flex w-full cursor-pointer items-start gap-2 px-3 py-2 text-left transition duration-150 hover:bg-white/[0.06] focus-visible:outline-none focus-visible:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-40 ${
+            className={`${rowClass} ${
               isSelected ? "bg-white/[0.05]" : ""
             }`}
             onClick={() => {

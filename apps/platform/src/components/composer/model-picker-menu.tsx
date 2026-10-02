@@ -418,7 +418,12 @@ export function ModelPickerMenu({
           this single `gap-2`: one source of spacing for the whole controls
           area. The group owns no margin or padding of its own. */}
       {showFilters || showSort ? (
-        <div className="flex shrink-0 flex-col gap-2 px-2 pt-2">
+        // `min-h-0 overflow-y-auto`: on a very short viewport the panel's
+        // maxHeight clamp can be smaller than the fixed rows (search + these
+        // controls + the action). While this stack could not shrink, the panel's
+        // overflow-hidden cut it off. Allowing it to shrink and scroll keeps
+        // every control — and the rows below it — reachable instead of clipped.
+        <div className="flex min-h-0 shrink flex-col gap-2 overflow-y-auto px-2 pt-2">
           {showFilters
             ? (
                 <>
@@ -532,9 +537,13 @@ export function ModelPickerMenu({
         // The id lives here too, not only on the listbox: with no matches the
         // listbox unmounts, and the search input's and trigger's `aria-controls`
         // would otherwise reference an id absent from the document. Pointing
-        // them at the empty state keeps the relationship resolvable.
+        // them at the empty state keeps the relationship resolvable. `role=`
+        // "status" makes that target honest: it is a live no-results notice, not
+        // a listbox, so `aria-controls` resolves to an element whose role
+        // matches what it actually is.
         <div
           id={id}
+          role="status"
           className="chat-scroll flex min-h-0 flex-1 flex-col items-center gap-2 overflow-y-auto px-3 py-6 text-center"
         >
           <span className="text-xs text-text-muted">No models match</span>

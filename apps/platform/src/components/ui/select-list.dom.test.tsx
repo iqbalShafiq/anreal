@@ -177,6 +177,107 @@ describe("SelectOptionList: grid layout", () => {
   });
 });
 
+describe("SelectOptionList: grid cards", () => {
+  it("stacks icon, label and hint vertically in grid mode", () => {
+    const options: SelectOption[] = [
+      {
+        value: "0",
+        label: "Alpha",
+        hint: "Vision • 1M context",
+        icon: <span data-testid="icon-0" />,
+      },
+      { value: "1", label: "Beta", hint: "128K context" },
+    ];
+    const { buttons } = setup({
+      id: "l",
+      ariaLabel: "Options",
+      value: "0",
+      options,
+      onSelect: vi.fn(),
+      layout: "grid",
+      columns: 2,
+    });
+
+    // The row is a column: icon first, then the label/hint stack.
+    expect(buttons[0].className).toContain("flex-col");
+    expect(buttons[0].className).not.toContain("items-start gap-2");
+
+    const [icon, stack] = Array.from(buttons[0].children) as HTMLElement[];
+    // Icon on its own line at the top.
+    expect(icon.querySelector('[data-testid="icon-0"]')).not.toBeNull();
+    // Then the label, then the hint, inside the stacked text block.
+    const label = stack.children[0] as HTMLElement;
+    const hint = stack.children[1] as HTMLElement;
+    expect(label.textContent).toBe("Alpha");
+    expect(label.className).toContain("text-xs");
+    expect(hint.textContent).toBe("Vision • 1M context");
+    expect(hint.className).toContain("text-[10px]");
+    // The label/hint keep their exact classes, so the only change is layout.
+    expect(stack.className).toBe("flex min-w-0 flex-col gap-0.5");
+  });
+
+  it("keeps the list row horizontal and byte-identical (Select's default)", () => {
+    const options: SelectOption[] = [
+      { value: "0", label: "Alpha", hint: "128K context", icon: <span /> },
+    ];
+    const { buttons } = setup({
+      id: "l",
+      ariaLabel: "Options",
+      value: "0",
+      options,
+      onSelect: vi.fn(),
+    });
+
+    const expected =
+      "flex w-full cursor-pointer items-start gap-2 px-3 py-2 text-left transition duration-150 hover:bg-white/[0.06] focus-visible:outline-none focus-visible:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-40 bg-white/[0.05]";
+    expect(buttons[0].className).toBe(expected);
+    // The icon and text block stay siblings on one horizontal row.
+    expect(buttons[0].children[0].tagName).toBe("SPAN");
+    expect(buttons[0].children[1].className).toBe(
+      "flex min-w-0 flex-col gap-0.5",
+    );
+  });
+
+  it("keeps role, aria-selected and click behaviour in grid mode", () => {
+    const onSelect = vi.fn();
+    const { list, buttons } = setup({
+      id: "l",
+      ariaLabel: "Options",
+      value: "0",
+      options: OPTIONS,
+      onSelect,
+      layout: "grid",
+      columns: 3,
+    });
+
+    const options = list.querySelectorAll('li[role="option"]');
+    expect(options).toHaveLength(OPTIONS.length);
+    expect(options[0].getAttribute("aria-selected")).toBe("true");
+    expect(options[1].getAttribute("aria-selected")).toBe("false");
+
+    fireEvent.click(buttons[2]);
+    expect(onSelect).toHaveBeenCalledWith("2");
+  });
+
+  it("does not collapse a grid cell that has no icon", () => {
+    const { buttons } = setup({
+      id: "l",
+      ariaLabel: "Options",
+      value: "0",
+      options: [{ value: "0", label: "Alpha", hint: "128K context" }],
+      onSelect: vi.fn(),
+      layout: "grid",
+      columns: 1,
+    });
+
+    // One child: the label/hint stack. No empty icon line to collapse.
+    expect(buttons[0].children).toHaveLength(1);
+    const stack = buttons[0].children[0] as HTMLElement;
+    expect(stack.className).toBe("flex min-w-0 flex-col gap-0.5");
+    expect(stack.children[0].textContent).toBe("Alpha");
+  });
+});
+
 describe("SelectOptionList: scroll cap", () => {
   it("applies maxHeight from style and keeps the list scrollable", () => {
     const { list } = setup({
