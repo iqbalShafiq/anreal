@@ -1,10 +1,12 @@
 import {
   CLIENT_STREAM_PROTOCOL,
   customAgentEventsToClientStream,
+  maskedClientError,
   parseClientStreamEvent,
   type AgentClientStreamContext,
   type ClientDataSchemas,
   type ClientStream,
+  type ClientStreamError,
   type ClientStreamEvent,
 } from "@anvia/client";
 import type { ClientResumableEvent } from "@anvia/server";
@@ -323,6 +325,42 @@ export async function* gateRootInteraction(
   }
 }
 
+/**
+ * Marks an error whose message the server has already authored for the user
+ * (never a raw provider/agent payload). Only instances of this exact class may
+ * pass the client-stream adapter's masking.
+ *
+ * Constructibility is the security boundary: this is a live in-process class,
+ * not a shape. Nothing parsed from Redis, the wire, or a provider SDK is ever
+ * an `instanceof UserFacingStreamError`, so untrusted data cannot forge one by
+ * supplying a matching `message`, `code`, `name`, or `__proto__`.
+ */
+export class UserFacingStreamError extends Error {
+  readonly code: string | undefined;
+  constructor(message: string, code?: string) {
+    super(message);
+    this.name = "UserFacingStreamError";
+    this.code = code;
+  }
+}
+
+/**
+ * Error mapper for the client-stream adapter. `event.error` reaches this
+ * function by reference from the app's own terminal path: user-facing errors
+ * are pre-sanitized and pass through verbatim; everything else is masked with
+ * the adapter's own opaque default, keeping the message byte-identical.
+ */
+export function mapChatStreamError(error: unknown): ClientStreamError {
+  if (error instanceof UserFacingStreamError) {
+    return {
+      name: error.name,
+      message: error.message,
+      ...(error.code === undefined ? {} : { code: error.code }),
+    };
+  }
+  return maskedClientError();
+}
+
 export function createChatClientStream(options: {
   runId: string;
   metadata?: ChatMetadata;
@@ -337,6 +375,7 @@ export function createChatClientStream(options: {
     metadata,
     events: gateRootInteraction(options.events, options.onInteraction) as AsyncIterable<ChatAgentEvent | ChatAppEvent>,
     mapCustomEvent: mapChatAppEvent,
+    mapError: mapChatStreamError,
   });
 }
 

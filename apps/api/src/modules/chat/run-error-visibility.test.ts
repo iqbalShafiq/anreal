@@ -1,10 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { ProviderConnectionMissingError } from "./run-recipe.js";
+import { ProviderCredentialUnreadableError } from "../provider-connections/credentials.js";
 import { isUserFacingRunError } from "./run-worker.js";
 
 describe("user-facing run errors", () => {
   it("lets the provider-connection message through", () => {
     expect(isUserFacingRunError(new ProviderConnectionMissingError("pc_1"))).toBe(true);
+  });
+
+  it("lets the unreadable-credential message through", () => {
+    expect(isUserFacingRunError(new ProviderCredentialUnreadableError())).toBe(true);
   });
 
   it("keeps an ordinary failure opaque", () => {

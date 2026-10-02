@@ -23,6 +23,7 @@ import { reconstructChatRunInput } from "./build-run-input.js";
 import {
   createChatClientStream,
   toChatResumableEvent,
+  UserFacingStreamError,
   type ChatAppEvent,
   type ChatClientEvent,
   type ChatResumableEvent,
@@ -74,6 +75,9 @@ const SAFE_CANCEL_MESSAGE = "The answer was stopped.";
 const USER_FACING_RUN_ERROR_CODES = new Set([
   // A provider connection was deleted while this run was queued.
   "PROVIDER_CONNECTION_MISSING",
+  // The connection's stored credential can no longer be decrypted; the user
+  // can only fix it by re-entering the key in Settings → Providers.
+  "PROVIDER_CREDENTIAL_UNREADABLE",
 ]);
 
 export function isUserFacingRunError(error: unknown): boolean {
@@ -161,16 +165,25 @@ function requireUserPrompt(message: Message): UserMessage {
 function safeErrorEvent(error?: unknown): AgentStreamEvent {
   const cancellation = isRecord(error) && error.code === "CHAT_RUN_CANCELLED";
   const userFacing = !cancellation && isUserFacingRunError(error) && error instanceof Error;
+  // The user-facing and cancellation messages are authored here, so they are
+  // delivered as a `UserFacingStreamError` marker. That is the only shape the
+  // client-stream adapter lets through un-masked; the opaque case stays a plain
+  // object and is masked downstream, byte-identical to the adapter default.
+  const shapedError = cancellation
+    ? new UserFacingStreamError(SAFE_CANCEL_MESSAGE, "CHAT_RUN_CANCELLED")
+    : userFacing
+      ? new UserFacingStreamError(
+          (error as Error).message,
+          isRecord(error) && typeof error.code === "string" ? error.code : undefined,
+        )
+      : null;
   return {
     type: "error",
-    error: {
-      code: cancellation ? "CHAT_RUN_CANCELLED" : "CHAT_RUN_FAILED",
-      message: cancellation
-        ? SAFE_CANCEL_MESSAGE
-        : userFacing
-          ? (error as Error).message
-          : SAFE_ERROR_MESSAGE,
-    },
+    error:
+      shapedError ?? {
+        code: "CHAT_RUN_FAILED",
+        message: SAFE_ERROR_MESSAGE,
+      },
     usage: {
       inputTokens: 0,
       outputTokens: 0,
@@ -493,11 +506,14 @@ async function appendSafeTerminal(
   streamId: string,
   runId: string,
   cancellation = false,
+  error?: unknown,
 ): Promise<void> {
   const stream = createChatClientStream({
     runId,
     metadata: undefined,
-    events: toAsync([safeErrorEvent(cancellation ? { code: "CHAT_RUN_CANCELLED" } : undefined)]),
+    events: toAsync([
+      safeErrorEvent(cancellation ? { code: "CHAT_RUN_CANCELLED" } : error),
+    ]),
   });
   for await (const event of stream) await appendClientEvent(store, streamId, event);
 }
@@ -883,6 +899,9 @@ export function createChatRunProcessor(input?: ChatRunWorkerDependencies) {
       await clearOwnedStopFlag();
       if (terminal === "error") throw safeError(cancelled ? { code: "CHAT_RUN_CANCELLED" } : undefined);
     } catch (error) {
+      // The user-facing message is deliberately opaque, so the raw cause must
+      // be logged here or it is lost entirely. Server-side only.
+      console.error("[chat-run] run failed", error);
       appEvents.end();
       if (resumePolicy && !policyConsumed && nativeStream === null) {
         await deps.releaseInteractionPolicy({
@@ -894,7 +913,7 @@ export function createChatRunProcessor(input?: ChatRunWorkerDependencies) {
       if (statusNow.status === "running") {
         try {
           await finalizeLiveOnce();
-          await appendSafeTerminal(deps.streamStore, streamId, streamId, cancelled);
+          await appendSafeTerminal(deps.streamStore, streamId, streamId, cancelled, error);
           await deps.streamStore.close({ streamId, status: "error" });
         } catch (terminalError) {
           console.error("[chat-run] safe terminal append failed", terminalError);

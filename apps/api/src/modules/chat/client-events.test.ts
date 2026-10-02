@@ -7,8 +7,10 @@ import type { AgentStreamEvent } from "@anvia/core/agent";
 import {
   ChatMetadataSchema,
   ChatDataSchemas,
+  UserFacingStreamError,
   createChatClientStream,
   mapChatAppEvent,
+  mapChatStreamError,
   toChatResumableEvent,
   type ChatAppEvent,
   type ChatClientEvent,
@@ -317,6 +319,70 @@ describe("createChatClientStream", () => {
 
   it("exposes the v3 protocol constant through canonical event envelopes", () => {
     expect(CLIENT_STREAM_PROTOCOL).toBe("anvia.client.v3");
+  });
+
+  describe("error masking at the server adapter boundary", () => {
+    it("passes a UserFacingStreamError through verbatim, code included", async () => {
+      const errorEvent = {
+        type: "error",
+        error: new UserFacingStreamError(
+          "Re-enter it in Settings → Providers",
+          "PROVIDER_CREDENTIAL_UNREADABLE",
+        ),
+        usage: {},
+      } as unknown as AgentStreamEvent;
+      const events = await collect(
+        createChatClientStream({ runId: "run-1", metadata, events: toAsync([errorEvent]) }),
+      );
+      expect(events.find((event) => event.type === "error")).toMatchObject({
+        type: "error",
+        error: {
+          name: "UserFacingStreamError",
+          message: "Re-enter it in Settings → Providers",
+          code: "PROVIDER_CREDENTIAL_UNREADABLE",
+        },
+      });
+    });
+
+    it("masks a forged look-alike object that never was a marker instance", async () => {
+      // Same message/code/name as the passing case, but a plain object. The
+      // marker grants passage by class identity, never by shape.
+      const forged = Object.assign(new Error("Re-enter it in Settings → Providers"), {
+        code: "PROVIDER_CREDENTIAL_UNREADABLE",
+        name: "UserFacingStreamError",
+      });
+      const errorEvent = { type: "error", error: forged, usage: {} } as unknown as AgentStreamEvent;
+      const events = await collect(
+        createChatClientStream({ runId: "run-1", metadata, events: toAsync([errorEvent]) }),
+      );
+      const error = events.find((event) => event.type === "error") as { error: { message: string } };
+      expect(error.error.message).toBe("An unexpected error occurred.");
+      expect(JSON.stringify(error)).not.toContain("Settings");
+    });
+
+    it("masks a marker clone round-tripped through JSON (wire/Redis shape)", async () => {
+      // Serializing and parsing a real marker yields a plain object — exactly
+      // what a compromised cache or the wire could deliver. It must not pass.
+      const real = new UserFacingStreamError(
+        "Re-enter it in Settings → Providers",
+        "PROVIDER_CREDENTIAL_UNREADABLE",
+      );
+      const clone = JSON.parse(JSON.stringify(real)) as unknown;
+      expect(clone instanceof UserFacingStreamError).toBe(false);
+      expect(mapChatStreamError(clone).message).toBe("An unexpected error occurred.");
+    });
+
+    it("masks raw provider/agent errors and non-errors alike", () => {
+      expect(mapChatStreamError(new Error("sk-live-secret leaked"))).toEqual({
+        message: "An unexpected error occurred.",
+      });
+      expect(mapChatStreamError("sk-live-secret leaked")).toEqual({
+        message: "An unexpected error occurred.",
+      });
+      expect(mapChatStreamError(undefined)).toEqual({
+        message: "An unexpected error occurred.",
+      });
+    });
   });
 });
 

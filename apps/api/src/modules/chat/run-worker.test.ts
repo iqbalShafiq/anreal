@@ -12,6 +12,7 @@ import {
 import type { ChatResumableEvent } from "./client-events.js";
 import type { StartRunJob, ResumeRunJob } from "./run-queue.js";
 import { CHAT_AGENT_ID, CHAT_AGENT_RECIPE_VERSION } from "./run-recipe.js";
+import { ProviderCredentialUnreadableError } from "../provider-connections/credentials.js";
 import {
   ActiveRunRegistry,
   createChatRunProcessor,
@@ -795,5 +796,25 @@ describe("Anvia v1 chat worker", () => {
     expect(clearStopFlag).toHaveBeenCalledTimes(1);
     expect(JSON.stringify(h.store.events)).not.toContain("secret prompt");
     expect(JSON.stringify(h.store.events)).not.toContain("provider details");
+  });
+
+  it("surfaces an unreadable credential as the actionable message, not the opaque one", async () => {
+    // Fails before the agent's first turn, exactly like the reported defect:
+    // reconstruction cannot decrypt the stored provider credential.
+    const h = createDependencies(fakeStream([responseEvent()]), {
+      reconstruct: async () => {
+        throw new ProviderCredentialUnreadableError();
+      },
+    });
+
+    await expect(
+      createChatRunProcessor(h.dependencies)(startJob()),
+    ).rejects.toThrow("Re-enter it in Settings → Providers");
+
+    // The terminal appended to the stream carries the same actionable message
+    // (never the opaque fallback).
+    const serialized = JSON.stringify(h.store.events);
+    expect(serialized).toContain("Re-enter it in Settings → Providers");
+    expect(serialized).not.toContain("Something went wrong while answering");
   });
 });

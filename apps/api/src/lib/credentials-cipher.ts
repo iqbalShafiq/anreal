@@ -40,6 +40,19 @@ export function createCredentialsCipher(
   let devKey: Buffer | null = null;
   let devWarned = false;
 
+  function productionKeyRequired(): Error {
+    return new Error(
+      `${keyEnv} is required in production to store ${subject} credentials`,
+    );
+  }
+
+  // Fail at creation, not first use: a process that cannot store credentials
+  // must not accept a request and fail later with a credential it can never
+  // decrypt. Dev/test still fall back to an ephemeral key at first use.
+  if (!process.env[keyEnv]?.trim() && process.env.NODE_ENV === "production") {
+    throw productionKeyRequired();
+  }
+
   function resolveKey(): Buffer {
     const raw = process.env[keyEnv]?.trim();
     if (raw) {
@@ -50,9 +63,7 @@ export function createCredentialsCipher(
       );
     }
     if (process.env.NODE_ENV === "production") {
-      throw new Error(
-        `${keyEnv} is required in production to store ${subject} credentials`,
-      );
+      throw productionKeyRequired();
     }
     devKey ??= randomBytes(32);
     if (!devWarned) {

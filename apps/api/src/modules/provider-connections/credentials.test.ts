@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  ProviderCredentialUnreadableError,
   decodeProviderCredentials,
   encodeProviderCredentials,
   sanitizeHeaders,
@@ -64,5 +65,32 @@ describe("provider credentials", () => {
   it("trims header names and values", () => {
     const result = sanitizeHeaders({ "  X-Trim  ": "  value  " });
     expect(result).toEqual({ ok: true, headers: { "X-Trim": "value" } });
+  });
+
+  it("throws the coded error when the reference cannot be decrypted", () => {
+    // Encrypted under a different key, so decryption fails the same way a
+    // rotated PROVIDER_CREDENTIALS_KEY would.
+    vi.stubEnv("PROVIDER_CREDENTIALS_KEY", "c".repeat(64));
+    const foreignRef = encodeProviderCredentials({ apiKey: "sk-stale" });
+    vi.stubEnv("PROVIDER_CREDENTIALS_KEY", "b".repeat(64));
+
+    let caught: unknown;
+    try {
+      decodeProviderCredentials(foreignRef);
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(ProviderCredentialUnreadableError);
+    expect((caught as { code?: string }).code).toBe(
+      "PROVIDER_CREDENTIAL_UNREADABLE",
+    );
+  });
+
+  it("carries a credential-free, actionable message", () => {
+    const error = new ProviderCredentialUnreadableError();
+    expect(error.message).toContain("Re-enter it in Settings → Providers");
+    // Never leaks material or internals.
+    expect(error.message).not.toMatch(/sk-/);
+    expect(error.message).not.toMatch(/^\[|at \w|\{\{/);
   });
 });

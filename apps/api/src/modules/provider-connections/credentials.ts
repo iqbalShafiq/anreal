@@ -9,6 +9,22 @@ export type ProviderCredentials = {
   headers?: Record<string, string> | null;
 };
 
+/**
+ * A stored credential reference that cannot be read — typically because the
+ * vault key changed or was ephemeral. The message is authored for the user and
+ * carries no ciphertext, key, or endpoint, so it can survive the run-worker's
+ * safe-error collapse. Retrying cannot fix it; only re-entering the key can.
+ */
+export class ProviderCredentialUnreadableError extends Error {
+  readonly code = "PROVIDER_CREDENTIAL_UNREADABLE";
+  constructor() {
+    super(
+      "The API key stored for this provider connection can no longer be read. Re-enter it in Settings → Providers, then send your message again.",
+    );
+    this.name = "ProviderCredentialUnreadableError";
+  }
+}
+
 const cipher = createCredentialsCipher({
   keyEnv: "PROVIDER_CREDENTIALS_KEY",
   subject: "provider",
@@ -26,13 +42,22 @@ export function encodeProviderCredentials(value: ProviderCredentials): string {
 
 /** Decrypt a storage reference. Throws on tampering, wrong key, or version. */
 export function decodeProviderCredentials(ref: string): ProviderCredentials {
-  const parsed = JSON.parse(cipher.decrypt(ref)) as unknown;
+  let plaintext: string;
+  try {
+    plaintext = cipher.decrypt(ref);
+  } catch {
+    // The cipher's own message is kept out of the user-facing error: this
+    // wraps the failure so callers get a distinct, actionable code instead of
+    // a bare Error. The cause never reaches a transcript.
+    throw new ProviderCredentialUnreadableError();
+  }
+  const parsed = JSON.parse(plaintext) as unknown;
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    throw new Error("provider credential reference is invalid");
+    throw new ProviderCredentialUnreadableError();
   }
   const record = parsed as { apiKey?: unknown; headers?: unknown };
   if (typeof record.apiKey !== "string" || record.apiKey.length === 0) {
-    throw new Error("provider credential reference is invalid");
+    throw new ProviderCredentialUnreadableError();
   }
   const headers =
     typeof record.headers === "object" &&

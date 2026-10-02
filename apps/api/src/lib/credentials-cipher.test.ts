@@ -61,6 +61,21 @@ describe("credentials cipher", () => {
     );
   });
 
+  it("fails fast at cipher creation in production when the key env is missing", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    // Setting the variable to the empty string models an absent key without
+    // deleting it, so restoring the environment afterwards stays trivial.
+    vi.stubEnv("PROVIDER_CREDENTIALS_KEY", "");
+
+    expect(() => makeCipher()).toThrow(
+      "PROVIDER_CREDENTIALS_KEY is required in production to store provider credentials",
+    );
+
+    // Restored: the dev/test fallback is available again once the env is sane.
+    vi.stubEnv("PROVIDER_CREDENTIALS_KEY", KEY_HEX);
+    expect(() => makeCipher()).not.toThrow();
+  });
+
   it("rejects a key that is not 32 bytes of hex", () => {
     vi.stubEnv("PROVIDER_CREDENTIALS_KEY", "abcd");
     expect(() => makeCipher().resolveKey()).toThrow(
