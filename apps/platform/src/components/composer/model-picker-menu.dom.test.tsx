@@ -228,50 +228,46 @@ describe("ModelPickerMenu: search", () => {
   });
 
   /**
-   * I1: the search input used to sit inside a wrapper carrying
+   * I1: the search input used to sit inside a span wrapper carrying
    * `pointer-events-none`. Because `pointer-events` is inherited, the input
-   * inherited `none`, so it could not receive mouse events — you could type
-   * into it (the menu focuses it on open) but not click into it. Asserting the
-   * behavioural consequence, not the absent class: the point under the input's
-   * centre must hit-test to the input (or one of its descendants).
+   * inherited `none` and could not receive mouse events — you could type into it
+   * (the menu focuses it on open) but not click into it. The opt-out belongs on
+   * the decorative Search icon, not on the wrapper.
+   *
+   * jsdom loads no Tailwind stylesheet, so a bare `getComputedStyle` call would
+   * read the initial `auto` for every node and pass whether or not the class is
+   * present — as vacuous as the old, monkey-patched `elementFromPoint` version.
+   * Injecting the matching rule into a `<style>` block makes jsdom resolve the
+   * class: jsdom does apply `<style>` rules and does propagate this inherited
+   * property to the wrapper's child (verified: a `.pe { pointer-events: none }`
+   * wrapper's child computes `none` while an unclassed child computes `auto`).
+   * So this test genuinely fails if the regression returns.
+   *
+   * What this proves: the markup carries the intended classes and jsdom resolves
+   * the inheritance. It does NOT prove a browser accepts a click — that is the
+   * recorded browser observation, not this unit test.
    */
-  it("is hit-testable at its centre — the pointer-events-none wrapper is gone", () => {
-    renderMenu(models);
-    const input = search() as HTMLInputElement;
-    input.getBoundingClientRect = () =>
-      ({
-        x: 0,
-        y: 0,
-        top: 0,
-        left: 0,
-        right: 200,
-        bottom: 28,
-        width: 200,
-        height: 28,
-        toJSON: () => ({}),
-      }) as DOMRect;
-
-    // document.elementFromPoint does not do layout in jsdom, so place a spy on
-    // it that resolves hit-testing by computed `pointer-events`: an element
-    // inheriting `none` is skipped the way the browser would skip it.
-    const original = document.elementFromPoint;
-    document.elementFromPoint = () => {
-      let node: HTMLElement | null = input;
-      while (node) {
-        const pointerEvents = getComputedStyle(node).pointerEvents;
-        if (pointerEvents === "none") return null;
-        node = node.parentElement;
-      }
-      return input;
-    };
-
+  it("keeps pointer-events off the search input's wrapper", () => {
+    const style = document.createElement("style");
+    style.textContent = ".pointer-events-none { pointer-events: none; }";
+    document.head.appendChild(style);
     try {
-      // The wrapper no longer inherits `none`, so the input resolves to itself.
-      const hit = document.elementFromPoint(100, 14);
-      expect(hit).toBe(input);
+      renderMenu(models);
+      const input = search() as HTMLInputElement;
+      const wrapper = input.parentElement as HTMLElement;
+
+      // The wrapper must not opt out of pointer events — that is the regression.
+      expect(wrapper.className).not.toContain("pointer-events-none");
+      // Structural pin: the opt-out lives on the decorative icon instead.
+      const icon = wrapper.querySelector("svg");
+      expect(icon?.getAttribute("class")).toContain("pointer-events-none");
+
+      // Behavioural pin under the injected rule: with `pointer-events-none` back
+      // on the wrapper this computes `none` (inherited) and fails; with the fix
+      // it computes `auto`.
       expect(getComputedStyle(input).pointerEvents).not.toBe("none");
     } finally {
-      document.elementFromPoint = original;
+      style.remove();
     }
   });
 });
