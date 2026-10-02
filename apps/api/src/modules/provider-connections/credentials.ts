@@ -1,12 +1,17 @@
 import { createCredentialsCipher } from "../../lib/credentials-cipher.js";
-import { HEADER_VALUE_MAX } from "./dynamic-headers.js";
+import {
+  DYNAMIC_HEADER_SOURCES,
+  HEADER_VALUE_MAX,
+  isDynamicHeaderValue,
+  type HeaderValue,
+} from "./dynamic-headers.js";
 
 export const MAX_CUSTOM_HEADERS = 16;
 export const HEADER_NAME_MAX = 128;
 
 export type ProviderCredentials = {
   apiKey: string;
-  headers?: Record<string, string> | null;
+  headers?: Record<string, HeaderValue> | null;
 };
 
 /**
@@ -63,13 +68,13 @@ export function decodeProviderCredentials(ref: string): ProviderCredentials {
     typeof record.headers === "object" &&
     record.headers !== null &&
     !Array.isArray(record.headers)
-      ? (record.headers as Record<string, string>)
+      ? (record.headers as Record<string, HeaderValue>)
       : null;
   return { apiKey: record.apiKey, headers };
 }
 
 type SanitizeHeadersResult =
-  | { ok: true; headers: Record<string, string> | null }
+  | { ok: true; headers: Record<string, HeaderValue> | null }
   | { ok: false; message: string };
 
 /**
@@ -90,10 +95,9 @@ export function sanitizeHeaders(value: unknown): SanitizeHeadersResult {
     };
   }
   if (entries.length === 0) return { ok: true, headers: null };
-  const out: Record<string, string> = {};
+  const out: Record<string, HeaderValue> = {};
   for (const [rawName, rawValue] of entries) {
     const name = rawName.trim();
-    const headerValue = typeof rawValue === "string" ? rawValue.trim() : "";
     if (!name || name.length > HEADER_NAME_MAX) {
       return {
         ok: false,
@@ -107,10 +111,15 @@ export function sanitizeHeaders(value: unknown): SanitizeHeadersResult {
           "Do not set an authorization header — enter the API key in the key field instead",
       };
     }
+    if (isDynamicHeaderValue(rawValue)) {
+      out[name] = { dynamic: rawValue.dynamic };
+      continue;
+    }
+    const headerValue = typeof rawValue === "string" ? rawValue.trim() : "";
     if (!headerValue || headerValue.length > HEADER_VALUE_MAX) {
       return {
         ok: false,
-        message: `Header values must be 1-${HEADER_VALUE_MAX} characters`,
+        message: `Header values must be 1-${HEADER_VALUE_MAX} characters or one of: ${DYNAMIC_HEADER_SOURCES.join(", ")}`,
       };
     }
     out[name] = headerValue;

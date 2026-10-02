@@ -22,6 +22,7 @@ import {
   encodeProviderCredentials,
   sanitizeHeaders,
 } from "./credentials.js";
+import { type HeaderValue } from "./dynamic-headers.js";
 import { parseImageCapabilities } from "../chat/image-capabilities.js";
 import {
   deriveConnectionSlug,
@@ -76,7 +77,7 @@ export type ValidatedConnectionInput = {
   baseUrl: string | null;
   api: "chat" | "responses" | null;
   apiKey: string;
-  headers: Record<string, string> | null;
+  headers: Record<string, HeaderValue> | null;
 };
 
 function isProviderKind(value: unknown): value is ProviderKind {

@@ -142,10 +142,18 @@ export function effortVocabulary(): readonly string[] {
   return EFFORT_VOCABULARY;
 }
 
+/**
+ * A stored connection header value: a literal, or a dynamic reference the
+ * caller resolves before it builds a model. The dynamic vocabulary belongs to
+ * the caller; this package only needs to know a value may still be unresolved,
+ * so it fails loudly rather than serialising the reference into a header.
+ */
+export type ProviderHeaderValue = string | { dynamic: string };
+
 export type ProviderCredentials = {
   apiKey: string;
   baseUrl?: string | null;
-  headers?: Record<string, string> | null;
+  headers?: Record<string, ProviderHeaderValue> | null;
 };
 
 export type CompletionTarget = {
@@ -159,11 +167,34 @@ export type CompletionTarget = {
   reasoningEfforts?: readonly string[] | null;
 };
 
+/**
+ * Connection headers as the concrete strings the client options carry. A
+ * caller resolves dynamic references before it builds a model; one that reaches
+ * this package unresolved is a wiring bug, so it fails loudly — naming only the
+ * header — instead of letting an object become a header value.
+ */
+function literalHeaders(
+  headers: Record<string, ProviderHeaderValue>,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [name, value] of Object.entries(headers)) {
+    if (typeof value !== "string") {
+      throw new Error(
+        `provider header "${name}" holds an unresolved dynamic reference`,
+      );
+    }
+    out[name] = value;
+  }
+  return out;
+}
+
 function managedClientOptions(credentials: ProviderCredentials) {
   return {
     apiKey: credentials.apiKey,
     ...(credentials.baseUrl ? { baseUrl: credentials.baseUrl } : {}),
-    ...(credentials.headers ? { headers: credentials.headers } : {}),
+    ...(credentials.headers
+      ? { headers: literalHeaders(credentials.headers) }
+      : {}),
   };
 }
 
@@ -263,7 +294,7 @@ export type ImageTarget = {
    * the kinds whose client options declare a `headers` field receive them —
    * see the per-kind notes in `createImageGenerationModelFor`.
    */
-  headers?: Record<string, string> | null;
+  headers?: Record<string, ProviderHeaderValue> | null;
   /** Injected for tests and for callers that proxy requests. */
   fetchFn?: typeof fetch;
 };
@@ -307,7 +338,7 @@ export function createImageGenerationModelFor(
         apiKey,
         baseUrl,
         defaultModel: modelId,
-        ...(headers ? { headers } : {}),
+        ...(headers ? { headers: literalHeaders(headers) } : {}),
         ...(fetchFn ? { fetchFn } : {}),
       });
     }
@@ -348,7 +379,7 @@ export function createImageGenerationModelFor(
       return new GrokClient({
         apiKey,
         ...(baseUrl ? { baseUrl } : {}),
-        ...(headers ? { headers } : {}),
+        ...(headers ? { headers: literalHeaders(headers) } : {}),
         ...(fetchFn ? { fetch: fetchFn } : {}),
       }).imageGenerationModel({ modelId });
     }

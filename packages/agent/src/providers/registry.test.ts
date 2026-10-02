@@ -232,6 +232,23 @@ describe("createCompletionModelFor", () => {
       expect.objectContaining({ headers: { "X-Workspace": "acme" } }),
     );
   });
+
+  it("fails loudly on an unresolved dynamic header instead of sending an object", () => {
+    mocks.client.mockClear();
+
+    expect(() =>
+      createCompletionModelFor({
+        kind: "openai",
+        upstreamId: "gpt-5.6-luna",
+        credentials: {
+          apiKey: "sk-test",
+          headers: { "x-opencode-session": { dynamic: "sessionId" } },
+        },
+      }),
+    ).toThrow(/x-opencode-session/);
+    // The object must never reach the client as a header value.
+    expect(mocks.client).not.toHaveBeenCalled();
+  });
 });
 
 describe("createImageGenerationModelFor", () => {

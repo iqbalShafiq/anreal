@@ -5,6 +5,7 @@ import {
   encodeProviderCredentials,
   sanitizeHeaders,
 } from "./credentials.js";
+import { resolveConnectionHeaders } from "./dynamic-headers.js";
 
 describe("provider credentials", () => {
   beforeEach(() => {
@@ -92,5 +93,66 @@ describe("provider credentials", () => {
     // Never leaks material or internals.
     expect(error.message).not.toMatch(/sk-/);
     expect(error.message).not.toMatch(/^\[|at \w|\{\{/);
+  });
+
+  it("accepts a dynamic header source", () => {
+    const result = sanitizeHeaders({ "x-opencode-session": { dynamic: "sessionId" } });
+    expect(result).toEqual({
+      ok: true,
+      headers: { "x-opencode-session": { dynamic: "sessionId" } },
+    });
+  });
+
+  it("accepts literals and dynamic sources in one map", () => {
+    const result = sanitizeHeaders({
+      "x-tenant": "acme",
+      "x-session": { dynamic: "sessionId" },
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  it("rejects a dynamic source outside the allowlist at save time", () => {
+    const result = sanitizeHeaders({ "x-bad": { dynamic: "apiKey" } });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.message).toMatch(/sessionId/);
+  });
+
+  it("still rejects an authorization header", () => {
+    const result = sanitizeHeaders({ Authorization: "Bearer x" });
+    expect(result.ok).toBe(false);
+  });
+
+  it("rejects a dynamic authorization header too", () => {
+    // The name checks must run before the dynamic branch, or a reserved name
+    // could be smuggled in through the new shape.
+    const result = sanitizeHeaders({ Authorization: { dynamic: "sessionId" } });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.message).toMatch(/authorization/i);
+  });
+
+  it("round-trips dynamic headers through the encrypted envelope", () => {
+    const ref = encodeProviderCredentials({
+      apiKey: "sk-live",
+      headers: { "x-opencode-session": { dynamic: "sessionId" } },
+    });
+    expect(decodeProviderCredentials(ref).headers).toEqual({
+      "x-opencode-session": { dynamic: "sessionId" },
+    });
+  });
+
+  it("decodes a legacy envelope whose headers are plain strings", () => {
+    // Written before dynamic values existed: the reader must not need a migration,
+    // because the envelope is ciphertext and no SQL migration is possible.
+    const ref = encodeProviderCredentials({
+      apiKey: "sk-legacy",
+      headers: { "x-tenant": "acme" },
+    });
+    const decoded = decodeProviderCredentials(ref);
+    expect(decoded.headers).toEqual({ "x-tenant": "acme" });
+    expect(resolveConnectionHeaders(decoded.headers, {
+      sessionId: "s_1",
+      userId: "u_1",
+      requestId: "r_1",
+    })).toEqual({ "x-tenant": "acme" });
   });
 });
