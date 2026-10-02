@@ -172,6 +172,7 @@ import {
   summarizeProfileForScope,
 } from "../profiling/service.js";
 import { decodeProviderCredentials } from "../provider-connections/credentials.js";
+import { resolveConnectionHeaders } from "../provider-connections/dynamic-headers.js";
 import {
   CHAT_AGENT_ID,
   CHAT_AGENT_RECIPE_VERSION,
@@ -877,6 +878,11 @@ export async function resolveRecipeCompletionModel(
   if (!row || !model) throw new ProviderConnectionMissingError(connectionId);
 
   const credentials = decodeProviderCredentials(row.credentialsRef);
+  const headers = resolveConnectionHeaders(credentials.headers, {
+    sessionId: recipe.identity.sessionId,
+    userId: recipe.identity.userId,
+    requestId: recipe.trace?.traceId ?? crypto.randomUUID(),
+  });
   const frozen = recipe.staticContext.model;
   return createCompletionModelFor({
     kind: row.kind as ProviderKind,
@@ -887,7 +893,7 @@ export async function resolveRecipeCompletionModel(
     credentials: {
       apiKey: credentials.apiKey,
       baseUrl: row.baseUrl,
-      headers: credentials.headers ?? null,
+      headers,
     },
     contextLimits: {
       contextWindow: frozen.contextWindowTokens,
@@ -1163,6 +1169,22 @@ export async function resolveRecipeImageTarget(
     return null;
   }
 
+  let headers: Record<string, string> | null;
+  try {
+    headers = resolveConnectionHeaders(credentials.headers, {
+      sessionId: recipe.identity.sessionId,
+      userId: recipe.identity.userId,
+      requestId: recipe.trace?.traceId ?? crypto.randomUUID(),
+    });
+  } catch (error) {
+    // Preserves this function's documented contract: an unresolvable header
+    // degrades to the shared-key path instead of killing the run. The chat
+    // path throws instead, because a wrong header there is the failure we
+    // are removing. Both are logged server-side.
+    console.warn("[chat] BYOK image headers could not be resolved", { error });
+    return null;
+  }
+
   let model: ImageGenerationModel<unknown> | null;
   try {
     model = createImageGenerationModelFor({
@@ -1175,7 +1197,7 @@ export async function resolveRecipeImageTarget(
       // that authenticates by custom header must authenticate image requests
       // the same way. The factory forwards them only to the kinds whose client
       // options declare a `headers` field.
-      headers: credentials.headers ?? null,
+      headers,
       ...(options.fetchFn ? { fetchFn: options.fetchFn } : {}),
     });
   } catch (error) {

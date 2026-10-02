@@ -6,6 +6,7 @@ import {
 } from "@anreal/agent";
 import type { CompletionModel } from "@anvia/core";
 import { decodeProviderCredentials } from "../provider-connections/credentials.js";
+import { resolveConnectionHeaders } from "../provider-connections/dynamic-headers.js";
 import {
   ROLE_KEYS,
   roleDefaultModelId,
@@ -316,6 +317,19 @@ export async function buildRoleCompletionModel(
 
   try {
     const credentials = decodeProviderCredentials(row.credentialsRef);
+    // This path has no conversation: the vision helper runs inside a chat run,
+    // but profiling and site builds do not, and the signature carries only the
+    // user. A sessionless call still needs a stable affinity group, so a
+    // dynamic `sessionId` resolves to a stable per-user value — one user's
+    // non-conversation calls are exactly that group. Failing instead would
+    // break image descriptions, profiling, and site builds the moment a user
+    // added a session header. The decision lives here, not in the resolver,
+    // which stays pure.
+    const headers = resolveConnectionHeaders(credentials.headers, {
+      sessionId: `user:${userId}`,
+      userId,
+      requestId: crypto.randomUUID(),
+    });
     const contextLimits: ModelContextLimits | null =
       model.contextWindowTokens === null
         ? null
@@ -336,7 +350,7 @@ export async function buildRoleCompletionModel(
       credentials: {
         apiKey: credentials.apiKey,
         baseUrl: row.baseUrl,
-        headers: credentials.headers ?? null,
+        headers,
       },
       contextLimits,
       reasoningEfforts: model.reasoningEfforts,
