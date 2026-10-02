@@ -358,8 +358,11 @@ export function ModelPickerMenu({
     <div className="flex min-h-0 w-full min-w-0 flex-1 flex-col">
       {/* Search row */}
       <div className="flex shrink-0 items-center gap-1 px-2 pt-2">
-        <span className="pointer-events-none flex min-w-0 flex-1 items-center gap-1.5 rounded-lg bg-white/[0.04] px-2 ring-1 ring-white/[0.08] focus-within:ring-2 focus-within:ring-accent-ring">
-          <Search className="size-3.5 shrink-0 text-text-faint" strokeWidth={1.75} />
+        <span className="flex min-w-0 flex-1 items-center gap-1.5 rounded-lg bg-white/[0.04] px-2 ring-1 ring-white/[0.08] focus-within:ring-2 focus-within:ring-accent-ring">
+          <Search
+            className="pointer-events-none size-3.5 shrink-0 text-text-faint"
+            strokeWidth={1.75}
+          />
           <input
             ref={searchRef}
             type="search"

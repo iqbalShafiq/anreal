@@ -204,6 +204,54 @@ describe("ModelPickerMenu: search", () => {
     // The id resolves to the empty-state container the message sits in.
     expect(target?.textContent).toContain("No models match");
   });
+
+  /**
+   * I1: the search input used to sit inside a wrapper carrying
+   * `pointer-events-none`. Because `pointer-events` is inherited, the input
+   * inherited `none`, so it could not receive mouse events — you could type
+   * into it (the menu focuses it on open) but not click into it. Asserting the
+   * behavioural consequence, not the absent class: the point under the input's
+   * centre must hit-test to the input (or one of its descendants).
+   */
+  it("is hit-testable at its centre — the pointer-events-none wrapper is gone", () => {
+    renderMenu(models);
+    const input = search() as HTMLInputElement;
+    input.getBoundingClientRect = () =>
+      ({
+        x: 0,
+        y: 0,
+        top: 0,
+        left: 0,
+        right: 200,
+        bottom: 28,
+        width: 200,
+        height: 28,
+        toJSON: () => ({}),
+      }) as DOMRect;
+
+    // document.elementFromPoint does not do layout in jsdom, so place a spy on
+    // it that resolves hit-testing by computed `pointer-events`: an element
+    // inheriting `none` is skipped the way the browser would skip it.
+    const original = document.elementFromPoint;
+    document.elementFromPoint = () => {
+      let node: HTMLElement | null = input;
+      while (node) {
+        const pointerEvents = getComputedStyle(node).pointerEvents;
+        if (pointerEvents === "none") return null;
+        node = node.parentElement;
+      }
+      return input;
+    };
+
+    try {
+      // The wrapper no longer inherits `none`, so the input resolves to itself.
+      const hit = document.elementFromPoint(100, 14);
+      expect(hit).toBe(input);
+      expect(getComputedStyle(input).pointerEvents).not.toBe("none");
+    } finally {
+      document.elementFromPoint = original;
+    }
+  });
 });
 
 describe("ModelPickerMenu: filters", () => {
