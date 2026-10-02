@@ -133,3 +133,63 @@ describe("KeyValueListField", () => {
     expect(screen.getByText("At most 16 headers are allowed")).toBeTruthy();
   });
 });
+
+describe("KeyValueListField: opt-in dynamic values", () => {
+  it("renders no mode toggle unless the caller opts in", () => {
+    render(
+      <KeyValueListField
+        label="Headers"
+        rows={[{ id: "1", name: "x-opencode-session", value: "" }]}
+        onChange={() => {}}
+        addLabel="Add"
+      />,
+    );
+    expect(
+      screen.queryByRole("button", { name: /header value mode/i }),
+    ).toBeNull();
+  });
+
+  it("switches a row to a dynamic source and reports it", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(
+      <KeyValueListField
+        label="Headers"
+        rows={[{ id: "1", name: "x-opencode-session", value: "" }]}
+        onChange={onChange}
+        addLabel="Add"
+        allowDynamicValues
+      />,
+    );
+    await user.click(
+      screen.getByRole("button", { name: /header value mode/i }),
+    );
+    await user.click(screen.getByRole("option", { name: /session id/i }));
+    expect(onChange).toHaveBeenLastCalledWith([
+      { id: "1", name: "x-opencode-session", value: "", dynamic: "sessionId" },
+    ]);
+  });
+
+  it("clears the dynamic source when the row returns to Fixed", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(
+      <KeyValueListField
+        label="Headers"
+        rows={[
+          { id: "1", name: "x-session", value: "literal", dynamic: "sessionId" },
+        ]}
+        onChange={onChange}
+        addLabel="Add"
+        allowDynamicValues
+      />,
+    );
+    await user.click(
+      screen.getByRole("button", { name: /header value mode/i }),
+    );
+    await user.click(screen.getByRole("option", { name: /fixed/i }));
+    expect(onChange).toHaveBeenLastCalledWith([
+      { id: "1", name: "x-session", value: "literal", dynamic: undefined },
+    ]);
+  });
+});
