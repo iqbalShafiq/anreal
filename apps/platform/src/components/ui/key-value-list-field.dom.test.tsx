@@ -192,4 +192,28 @@ describe("KeyValueListField: opt-in dynamic values", () => {
       { id: "1", name: "x-session", value: "literal", dynamic: undefined },
     ]);
   });
+
+  it("moves focus into the picker and walks it with the arrow keys", async () => {
+    const user = userEvent.setup();
+    render(
+      <KeyValueListField
+        label="Headers"
+        rows={[{ id: "1", name: "x-session", value: "" }]}
+        onChange={vi.fn()}
+        addLabel="Add"
+        allowDynamicValues
+      />,
+    );
+    await user.click(
+      screen.getByRole("button", { name: /header value mode/i }),
+    );
+    // The selected (Fixed) option must own focus on open, not the trigger.
+    expect(document.activeElement).toBe(
+      screen.getByRole("option", { name: /fixed/i }),
+    );
+    await user.keyboard("{ArrowDown}");
+    expect(document.activeElement).toBe(
+      screen.getByRole("option", { name: /session id/i }),
+    );
+  });
 });

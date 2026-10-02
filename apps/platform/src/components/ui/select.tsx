@@ -26,6 +26,17 @@ export type SelectProps = {
    * Hover detail placement for option cards (model logos etc).
    */
   hoverSide?: "top" | "right";
+  /**
+   * Label for the popup listbox when it should differ from the trigger's.
+   * Defaults to `ariaLabel`, so existing callers are untouched.
+   */
+  listAriaLabel?: string;
+  /**
+   * Put `role="option"` (and therefore the click target) on each option's
+   * button instead of its `li` wrapper. Opt-in; the default keeps the exact
+   * structure every existing caller renders.
+   */
+  optionsAsButtons?: boolean;
 };
 
 type ListPos = {
@@ -50,6 +61,8 @@ export function Select({
   className = "",
   disabled = false,
   hoverSide = "top",
+  listAriaLabel,
+  optionsAsButtons = false,
 }: SelectProps) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -160,18 +173,30 @@ export function Select({
     };
   }, [open, dialogPortal, options.length]);
 
+  /**
+   * The listbox only mounts on the commit *after* the layout effect above
+   * calls `setListPos`, and React flushes the previous commit's passive
+   * effects before that second commit. Keying the effect on `[open]` alone
+   * therefore always observed `listRef.current === null` and focus never left
+   * the trigger. `listMounted` flips once the list actually exists and stays
+   * put across position updates, so arrow-key navigation is not reset by a
+   * scroll or resize.
+   */
+  const listMounted = open && listPos !== null;
   useEffect(() => {
-    if (!open) return;
+    if (!listMounted) return;
     const list = listRef.current;
     if (!list) return;
     const selectedButton = list.querySelector<HTMLButtonElement>(
-      'li[aria-selected="true"] button',
+      optionsAsButtons
+        ? 'button[data-option-value][aria-selected="true"]'
+        : 'li[aria-selected="true"] button',
     );
     const firstButton = list.querySelector<HTMLButtonElement>(
       "button[data-option-value]",
     );
     (selectedButton ?? firstButton)?.focus();
-  }, [open]);
+  }, [listMounted, optionsAsButtons]);
 
   const moveFocus = (index: number, direction: 1 | -1) => {
     const list = listRef.current;
@@ -249,7 +274,7 @@ export function Select({
             <SelectOptionList
               ref={listRef}
               id={listId}
-              ariaLabel={ariaLabel}
+              ariaLabel={listAriaLabel ?? ariaLabel}
               value={value}
               options={options}
               onSelect={(optionValue) => {
@@ -258,6 +283,7 @@ export function Select({
               }}
               onKeyDown={handleListKeyDown}
               hoverSide={hoverSide}
+              optionsAsButtons={optionsAsButtons}
               className="overflow-y-auto"
               style={{ maxHeight: listPos.maxHeight }}
             />

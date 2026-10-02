@@ -47,6 +47,13 @@ export type SelectOptionListProps = {
    * silently.
    */
   chromeless?: boolean;
+  /**
+   * Put `role="option"` (and therefore the click target) on each option's
+   * button, leaving the `li` as a presentation wrapper. Off by default so
+   * every existing caller keeps the exact `<li role="option">` structure
+   * those tests pin.
+   */
+  optionsAsButtons?: boolean;
 };
 
 /**
@@ -69,6 +76,7 @@ export function SelectOptionList({
   layout = "list",
   columns = 1,
   chromeless = false,
+  optionsAsButtons = false,
 }: SelectOptionListProps) {
   const isGrid = layout === "grid";
   const columnCount = Math.max(1, Math.floor(columns) || 1);
@@ -173,6 +181,8 @@ export function SelectOptionList({
         const row = (
           <button
             type="button"
+            role={optionsAsButtons ? "option" : undefined}
+            aria-selected={optionsAsButtons ? isSelected : undefined}
             disabled={opt.disabled}
             data-option-value={opt.value}
             className={`${rowClass} ${
@@ -201,7 +211,11 @@ export function SelectOptionList({
           </button>
         );
         return (
-          <li key={opt.value} role="option" aria-selected={isSelected}>
+          <li
+            key={opt.value}
+            role={optionsAsButtons ? "presentation" : "option"}
+            aria-selected={optionsAsButtons ? undefined : isSelected}
+          >
             {opt.detail ? (
               <HoverCard
                 variant="tooltip"

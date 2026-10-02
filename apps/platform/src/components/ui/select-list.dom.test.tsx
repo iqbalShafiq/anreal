@@ -2,6 +2,7 @@
 import { createRef } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { SelectOptionList, type SelectOption } from "./select-list";
 
 afterEach(cleanup);
@@ -376,5 +377,45 @@ describe("SelectOptionList: chromeless", () => {
     expect(list.className).not.toContain("bg-canvas-elevated");
     expect(list.className).not.toContain("animate-fade-in");
     expect(list.style.gridTemplateColumns).toContain("repeat(3");
+  });
+});
+
+describe("SelectOptionList: optionsAsButtons", () => {
+  it("puts the option role and the click target on the button", async () => {
+    const user = userEvent.setup();
+    const onSelect = vi.fn();
+    const { list } = setup({
+      id: "l",
+      ariaLabel: "Options",
+      value: "0",
+      options: OPTIONS.slice(0, 2),
+      onSelect,
+      optionsAsButtons: true,
+    });
+
+    // The wrapper steps out of the way; the button itself is the option.
+    expect(list.querySelectorAll('li[role="option"]')).toHaveLength(0);
+    const option = screen.getByRole("option", { name: /zero/i });
+    expect(option.tagName).toBe("BUTTON");
+    await user.click(option);
+    expect(onSelect).toHaveBeenCalledWith("0");
+  });
+
+  it("leaves the li a presentation wrapper with no selection state", () => {
+    const { list } = setup({
+      id: "l",
+      ariaLabel: "Options",
+      value: "0",
+      options: OPTIONS.slice(0, 2),
+      onSelect: vi.fn(),
+      optionsAsButtons: true,
+    });
+
+    const li = list.querySelector("li");
+    expect(li?.getAttribute("role")).toBe("presentation");
+    expect(li?.getAttribute("aria-selected")).toBeNull();
+    expect(
+      list.querySelector('button[role="option"]')?.getAttribute("aria-selected"),
+    ).toBe("true");
   });
 });

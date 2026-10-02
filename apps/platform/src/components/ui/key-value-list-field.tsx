@@ -1,14 +1,8 @@
-import { ChevronDown, X } from "lucide-react";
-import {
-  useEffect,
-  useId,
-  useLayoutEffect,
-  useRef,
-  useState,
-} from "react";
-import { createPortal } from "react-dom";
+import { X } from "lucide-react";
 import { Button } from "#/components/ui/button";
 import { FIELD_CONTROL_CLASS } from "#/components/ui/form-field";
+import { Select } from "#/components/ui/select";
+import { type SelectOption } from "#/components/ui/select-list";
 import {
   DYNAMIC_HEADER_LABELS,
   DYNAMIC_HEADER_SOURCES,
@@ -47,250 +41,19 @@ function sourceExplanation(source: DynamicHeaderSource): string {
   return rest.join(" — ");
 }
 
-const PICKER_OPTION_CLASS =
-  "flex w-full cursor-pointer flex-col gap-0.5 px-3 py-2 text-left transition duration-150 hover:bg-white/[0.06] focus-visible:bg-white/[0.08] focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-40";
-const PICKER_OPTION_SELECTED_CLASS = "bg-white/[0.05]";
-
-type PickerListPosition = {
-  top: number;
-  left: number;
-  width: number;
-  /** Open above the trigger (bottom-of-dialog rows). */
-  openUp: boolean;
-};
-
-/** Rough per-option height, used only to pick the opening direction. */
-const PICKER_OPTION_ESTIMATE = 52;
-const PICKER_LIST_MIN_WIDTH = 224;
-
 /**
- * Opt-in per-row Fixed | Dynamic picker. The trigger carries the row's mode
- * control (`${label} header value mode`); choosing a source replaces the
- * literal input with the trigger showing that source, and choosing Fixed
- * clears the source back to a literal. The listbox portals into the nearest
- * `<dialog>` (or `document.body`) so a native dialog's `overflow: hidden`
- * cannot clip it, mirroring `select.tsx`.
+ * Fixed plus the three sources, in picker order. `""` is Fixed so a row with
+ * no source maps straight onto the literal input. Static, so one list is
+ * shared by every row and every instance of the field.
  */
-function DynamicValuePicker({
-  label,
-  value,
-  onChange,
-  disabled,
-  className = "",
-}: {
-  label: string;
-  /** The chosen source, or `""` for a literal (Fixed). */
-  value: string;
-  onChange: (next: string) => void;
-  disabled: boolean;
-  className?: string;
-}): React.JSX.Element {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLSpanElement>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const listRef = useRef<HTMLDivElement>(null);
-  const listId = useId();
-  const [dialogPortal, setDialogPortal] = useState<HTMLElement | null>(null);
-  const [position, setPosition] = useState<PickerListPosition | null>(null);
-
-  useLayoutEffect(() => {
-    setDialogPortal(rootRef.current?.closest("dialog") ?? null);
-  }, []);
-
-  useEffect(() => {
-    if (!open) return;
-    const handlePointer = (event: MouseEvent | PointerEvent) => {
-      const target = event.target as Node | null;
-      if (!target) return;
-      if (rootRef.current?.contains(target)) return;
-      // The portaled listbox lives outside the root — clicks on it must not
-      // close the picker before the option's own onClick fires.
-      if (listRef.current?.contains(target)) return;
-      setOpen(false);
-    };
-    const handleKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        setOpen(false);
-      }
-    };
-    document.addEventListener("pointerdown", handlePointer, true);
-    document.addEventListener("keydown", handleKey);
-    return () => {
-      document.removeEventListener("pointerdown", handlePointer, true);
-      document.removeEventListener("keydown", handleKey);
-    };
-  }, [open]);
-
-  useLayoutEffect(() => {
-    if (!open) {
-      setPosition(null);
-      return;
-    }
-    const update = () => {
-      const rect = triggerRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      const estimatedHeight =
-        PICKER_OPTION_ESTIMATE * (DYNAMIC_HEADER_SOURCES.length + 1) + 8;
-      const spaceBelow = window.innerHeight - rect.bottom - 6;
-      const openUp = spaceBelow < estimatedHeight && rect.top > spaceBelow;
-      const width = Math.max(rect.width, PICKER_LIST_MIN_WIDTH);
-      setPosition({
-        top: openUp ? rect.top - 6 : rect.bottom + 6,
-        left: Math.max(8, Math.min(rect.left, window.innerWidth - width - 8)),
-        width,
-        openUp,
-      });
-    };
-    update();
-    window.addEventListener("resize", update);
-    window.addEventListener("scroll", update, true);
-    return () => {
-      window.removeEventListener("resize", update);
-      window.removeEventListener("scroll", update, true);
-    };
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-    const list = listRef.current;
-    if (!list) return;
-    const selected = list.querySelector<HTMLButtonElement>(
-      'button[role="option"][aria-selected="true"]',
-    );
-    const first = list.querySelector<HTMLButtonElement>(
-      'button[role="option"]',
-    );
-    (selected ?? first)?.focus();
-  }, [open]);
-
-  const select = (next: string) => {
-    onChange(next);
-    setOpen(false);
-    triggerRef.current?.focus();
-  };
-
-  const handleListKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    const keys = ["ArrowDown", "ArrowUp", "Home", "End"];
-    if (!keys.includes(event.key)) return;
-    const list = listRef.current;
-    if (!list) return;
-    const options = Array.from(
-      list.querySelectorAll<HTMLButtonElement>('button[role="option"]'),
-    );
-    if (options.length === 0) return;
-    event.preventDefault();
-    const current = options.indexOf(
-      document.activeElement as HTMLButtonElement,
-    );
-    let next: number;
-    if (event.key === "ArrowDown") {
-      next = current < 0 ? 0 : (current + 1) % options.length;
-    } else if (event.key === "ArrowUp") {
-      next = current <= 0 ? options.length - 1 : current - 1;
-    } else if (event.key === "Home") {
-      next = 0;
-    } else {
-      next = options.length - 1;
-    }
-    options[next]?.focus();
-  };
-
-  const portalTarget =
-    dialogPortal ?? (typeof document !== "undefined" ? document.body : null);
-
-  const listbox =
-    open && position && portalTarget
-      ? createPortal(
-          <div
-            className="fixed z-[90]"
-            style={{
-              top: position.top,
-              left: position.left,
-              width: position.width,
-              transform: position.openUp ? "translateY(-100%)" : undefined,
-            }}
-          >
-            <div
-              ref={listRef}
-              id={listId}
-              role="listbox"
-              aria-label={`${label} header value source`}
-              onKeyDown={handleListKeyDown}
-              className="chat-scroll max-h-[16rem] overflow-y-auto rounded-xl border border-white/[0.08] bg-canvas-elevated text-text shadow-[0_12px_40px_-12px_rgba(0,0,0,0.75)] animate-fade-in"
-            >
-              <button
-                type="button"
-                role="option"
-                aria-selected={value === ""}
-                onClick={() => select("")}
-                className={`${PICKER_OPTION_CLASS} ${
-                  value === "" ? PICKER_OPTION_SELECTED_CLASS : ""
-                }`}
-              >
-                <span className="text-xs font-medium">Fixed</span>
-                <span className="text-[10px] leading-snug text-text-faint">
-                  The literal value, sent unchanged
-                </span>
-              </button>
-              {DYNAMIC_HEADER_SOURCES.map((source) => (
-                <button
-                  key={source}
-                  type="button"
-                  role="option"
-                  aria-selected={value === source}
-                  onClick={() => select(source)}
-                  className={`${PICKER_OPTION_CLASS} ${
-                    value === source ? PICKER_OPTION_SELECTED_CLASS : ""
-                  }`}
-                >
-                  <span className="text-xs font-medium">
-                    {shortSourceLabel(source)}
-                  </span>
-                  <span className="text-[10px] leading-snug text-text-faint">
-                    {sourceExplanation(source)}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>,
-          portalTarget,
-        )
-      : null;
-
-  return (
-    <span ref={rootRef} className={`relative ${className}`}>
-      <button
-        ref={triggerRef}
-        type="button"
-        disabled={disabled}
-        aria-label={`${label} header value mode`}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        aria-controls={listId}
-        onClick={() => setOpen((current) => !current)}
-        onKeyDown={(event) => {
-          if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-            event.preventDefault();
-            setOpen(true);
-          }
-        }}
-        className={`${FIELD_CONTROL_CLASS} flex cursor-pointer items-center justify-between gap-2 text-left`}
-      >
-        <span className="truncate">
-          {value === "" ? "Fixed" : shortSourceLabel(value)}
-        </span>
-        <ChevronDown
-          className={`size-4 shrink-0 text-text-faint transition-transform duration-200 ${
-            open ? "rotate-180" : ""
-          }`}
-          strokeWidth={1.75}
-        />
-      </button>
-      {listbox}
-    </span>
-  );
-}
+const VALUE_MODE_OPTIONS: SelectOption[] = [
+  { value: "", label: "Fixed", hint: "The literal value, sent unchanged" },
+  ...DYNAMIC_HEADER_SOURCES.map((source) => ({
+    value: source,
+    label: shortSourceLabel(source),
+    hint: sourceExplanation(source),
+  })),
+];
 
 /**
  * A controlled list of name/value rows (custom headers today; any repeated
@@ -388,12 +151,15 @@ export function KeyValueListField({
             />
           )}
           {allowDynamicValues ? (
-            <DynamicValuePicker
-              label={label}
+            <Select
               value={row.dynamic ?? ""}
               onChange={(next) =>
                 updateRow(index, { dynamic: next === "" ? undefined : next })
               }
+              options={VALUE_MODE_OPTIONS}
+              ariaLabel={`${label} header value mode`}
+              listAriaLabel={`${label} header value source`}
+              optionsAsButtons
               disabled={disabled}
               className={row.dynamic ? "min-w-0 flex-1" : "shrink-0"}
             />
