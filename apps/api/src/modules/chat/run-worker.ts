@@ -816,6 +816,12 @@ export function createChatRunProcessor(input?: ChatRunWorkerDependencies) {
               if (isRootTerminal(raw)) {
                 sawRoot = true;
                 terminal = raw.type;
+                // A provider failure is terminal and its message is sanitized
+                // before it can reach any client, so the raw cause has to be
+                // recorded here or a failed run leaves no server-side trace.
+                if (raw.type === "error") {
+                  console.error("[chat-run] agent error", raw.error);
+                }
               }
               yield sanitizeNativeEvent(raw);
               for (const appEvent of appEvents.drain()) yield appEvent;
