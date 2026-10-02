@@ -2309,7 +2309,12 @@ export type ProviderConnectionInput = {
   api?: string | null;
   /** Write-only. Never returned by any endpoint; omit on update to keep it. */
   apiKey?: string;
-  headers?: Record<string, string>;
+  /**
+   * Custom gateway headers. A string is sent literally; `{ dynamic }` names a
+   * run-time source (the closed vocabulary in `#/lib/dynamic-headers`) that the
+   * API resolves at the provider seam. The API re-validates every value.
+   */
+  headers?: Record<string, string | { dynamic: string }>;
 };
 
 export type ProviderModelInput = {
@@ -2705,7 +2710,12 @@ export async function testProviderConnection(input: {
   baseUrl?: string | null;
   api?: string | null;
   apiKey?: string | null;
-  headers?: Record<string, string>;
+  /**
+   * Same shape as `ProviderConnectionInput.headers`, including `{ dynamic }`
+   * markers: a new connection whose required header is dynamic can only pass
+   * the test-before-save gate if the probe carries the marker.
+   */
+  headers?: Record<string, string | { dynamic: string }>;
   connectionId?: string;
 }): Promise<{ ok: true; modelCount: number }> {
   const response = await apiFetch(`${API_BASE}/api/providers/test`, {

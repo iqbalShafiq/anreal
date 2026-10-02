@@ -160,11 +160,12 @@ export function canSaveConnection(input: {
  * lets the user act on it here rather than discovering unauthenticated requests
  * later. Non-blocking: the connection is still valid, so this only informs.
  * `kind` is the selected provider kind and `headers` the headers the form would
- * submit; a non-Gemini kind is never warned about.
+ * submit; a non-Gemini kind is never warned about. The parameter accepts the
+ * dynamic marker shape too — only the presence of any header matters here.
  */
 export function geminiHeaderWarning(
   kind: string,
-  headers: Record<string, string>,
+  headers: Record<string, string | { dynamic: string }>,
 ): string | null {
   if (kind !== "gemini") return null;
   if (Object.keys(headers).length === 0) return null;

@@ -60,6 +60,24 @@ function kindLabel(kinds: ProviderKindInfo[], kind: string): string {
 }
 
 /**
+ * Map header rows to the wire shape. A row in Dynamic mode sends
+ * `{ dynamic: source }`; a Fixed row sends its literal value. Names are
+ * trimmed, and a nameless row is skipped. A stale source left on a Fixed row
+ * must never override the literal.
+ */
+export function toHeadersPayload(
+  rows: KeyValueRow[],
+): Record<string, string | { dynamic: string }> {
+  const out: Record<string, string | { dynamic: string }> = {};
+  for (const row of rows) {
+    const name = row.name.trim();
+    if (name.length === 0) continue;
+    out[name] = row.dynamic ? { dynamic: row.dynamic } : row.value;
+  }
+  return out;
+}
+
+/**
  * The Providers settings section: a list of BYOK connections with an inline
  * editor, and (once a connection is saved) its registered models. Lives inside
  * the settings modal, so the editor is inline rather than a nested dialog.
@@ -329,11 +347,7 @@ function ProviderConnectionEditor({
   const derivedSlug = deriveConnectionSlug(label);
   const effectiveSlug = slugTouched ? slug.trim() : derivedSlug;
   const slugDisplay = effectiveSlug.length > 0 ? effectiveSlug : derivedSlug;
-  const headers = Object.fromEntries(
-    headerRows
-      .filter((row) => row.name.trim().length > 0)
-      .map((row) => [row.name.trim(), row.value]),
-  );
+  const headers = toHeadersPayload(headerRows);
   const busy = saving || testing;
   const headersWarning = geminiHeaderWarning(kind, headers);
 
@@ -551,6 +565,7 @@ function ProviderConnectionEditor({
         error={headerError}
         maxRows={16}
         secretValues
+        allowDynamicValues
         disabled={busy}
       />
 
