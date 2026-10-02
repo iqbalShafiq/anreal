@@ -2255,6 +2255,8 @@ export type ProviderConnection = {
   isActive: boolean;
   sortOrder: number;
   hasCredentials: boolean;
+  /** Whether the stored key still decrypts; "unreadable" needs re-entry. */
+  credentialsStatus: "ok" | "unreadable";
   createdAt: string;
   updatedAt: string;
 };
@@ -2413,6 +2415,20 @@ function isProviderConnection(value: unknown): value is ProviderConnection {
   );
 }
 
+/**
+ * A row from an older server omits `credentialsStatus`; default it to "ok"
+ * so the settings list cannot mislabel an unknown row as broken.
+ */
+export function normalizeProviderConnection(
+  row: ProviderConnection,
+): ProviderConnection {
+  return {
+    ...row,
+    credentialsStatus:
+      row.credentialsStatus === "unreadable" ? "unreadable" : "ok",
+  };
+}
+
 function isProviderModelRow(value: unknown): value is ProviderModelRow {
   return (
     isRecord(value) &&
@@ -2470,7 +2486,7 @@ export async function listProviderConnections(): Promise<ProviderConnection[]> {
   if (!Array.isArray(data)) {
     throw new Error("Unexpected provider connections response shape");
   }
-  return data.filter(isProviderConnection);
+  return data.filter(isProviderConnection).map(normalizeProviderConnection);
 }
 
 export async function createProviderConnection(
@@ -2489,7 +2505,7 @@ export async function createProviderConnection(
     throw new Error("Unexpected provider connection response shape");
   }
   invalidateModelsCache();
-  return data;
+  return normalizeProviderConnection(data);
 }
 
 export async function updateProviderConnection(
@@ -2512,7 +2528,7 @@ export async function updateProviderConnection(
     throw new Error("Unexpected provider connection response shape");
   }
   invalidateModelsCache();
-  return data;
+  return normalizeProviderConnection(data);
 }
 
 export async function deleteProviderConnection(id: string): Promise<void> {
@@ -2547,7 +2563,7 @@ export async function setProviderConnectionEnabled(
     throw new Error("Unexpected provider connection response shape");
   }
   invalidateModelsCache();
-  return data;
+  return normalizeProviderConnection(data);
 }
 
 export async function discoverProviderModels(

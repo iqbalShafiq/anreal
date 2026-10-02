@@ -742,6 +742,81 @@ describe("connection CRUD", () => {
     );
   });
 
+  it("reports an unreadable stored credential without exposing it", () => {
+    const publicRow = toPublicConnection({
+      id: "pc_1",
+      kind: "compatible",
+      label: "Broken",
+      slug: "broken",
+      baseUrl: "https://gw.example/v1",
+      api: "chat",
+      credentialsRef: "not-a-valid-envelope",
+      isActive: true,
+      sortOrder: 0,
+    });
+    expect(publicRow.credentialsStatus).toBe("unreadable");
+    expect(JSON.stringify(publicRow)).not.toContain("not-a-valid-envelope");
+  });
+
+  it("reports ok for a readable stored credential", () => {
+    const publicRow = toPublicConnection({
+      id: "pc_1",
+      kind: "compatible",
+      label: "Healthy",
+      slug: "healthy",
+      baseUrl: "https://gw.example/v1",
+      api: "chat",
+      credentialsRef: encodeProviderCredentials({ apiKey: "sk-live" }),
+      isActive: true,
+      sortOrder: 0,
+    });
+    expect(publicRow.credentialsStatus).toBe("ok");
+  });
+
+  it("lists every connection even when one credential is unreadable", async () => {
+    const db = makeDb({
+      providerConnection: {
+        count: vi.fn(async () => 2),
+        findFirst: vi.fn(async () => null),
+        findMany: vi.fn(async () => [
+          {
+            id: "pc_bad",
+            userId: "u_1",
+            kind: "compatible",
+            label: "Broken",
+            slug: "broken",
+            baseUrl: "https://gw.example/v1",
+            api: "chat",
+            credentialsRef: "not-a-valid-envelope",
+            isActive: true,
+            sortOrder: 0,
+          },
+          {
+            id: "pc_ok",
+            userId: "u_1",
+            kind: "compatible",
+            label: "Healthy",
+            slug: "healthy",
+            baseUrl: "https://gw.example/v1",
+            api: "chat",
+            credentialsRef: encodeProviderCredentials({ apiKey: "sk-live" }),
+            isActive: true,
+            sortOrder: 1,
+          },
+        ]),
+      },
+    });
+
+    const rows = await listConnections(db, "u_1");
+    expect(rows).toHaveLength(2);
+    expect(rows.find((row) => row.id === "pc_bad")).toMatchObject({
+      credentialsStatus: "unreadable",
+    });
+    expect(rows.find((row) => row.id === "pc_ok")).toMatchObject({
+      credentialsStatus: "ok",
+    });
+  });
+
   it("refuses a slug owned by an active catalog provider", async () => {
     // `anthropic` is a supported kind that is not seeded as a model provider,
     // so it is absent from RESERVED_CONNECTION_SLUGS — the constant. The
@@ -936,6 +1011,25 @@ describe("connection CRUD", () => {
     expect(
       decodeProviderCredentials(updatedCredentialsRef(db)).headers,
     ).toEqual({ "X-Org": "acme" });
+  });
+
+  it("surfaces the actionable message when the stored key cannot be read and the update omits it", async () => {
+    await expect(
+      updateConnection(makeConnectionDb("not-a-valid-envelope"), "u_1", "pc_1", {
+        kind: "compatible",
+        label: "Renamed",
+        baseUrl: "https://gw.example/v1",
+      }),
+    ).rejects.toThrow(/Re-enter the API key/);
+
+    // The failure is a field-level input error, not a raw decrypt crash.
+    await expect(
+      updateConnection(makeConnectionDb("not-a-valid-envelope"), "u_1", "pc_1", {
+        kind: "compatible",
+        label: "Renamed",
+        baseUrl: "https://gw.example/v1",
+      }),
+    ).rejects.toBeInstanceOf(ProviderInputError);
   });
 
   it("clears the stored headers when the update sends an explicit empty map", async () => {

@@ -220,11 +220,17 @@ export function ProvidersSection({ active }: { active: boolean }) {
           <ul className="flex flex-col gap-2">
             {rows.map((connection) => {
               const count = counts[connection.id] ?? 0;
+              const unreadable = connection.credentialsStatus === "unreadable";
               return (
                 <ManagementRow
                   key={connection.id}
                   title={connection.label}
                   subtitle={`${kindLabel(kinds ?? [], connection.kind)} · ${count} model${count === 1 ? "" : "s"}`}
+                  warning={
+                    unreadable
+                      ? "Stored API key can’t be read — open to re-enter it."
+                      : undefined
+                  }
                   leading={
                     <span
                       aria-hidden
@@ -521,7 +527,11 @@ function ProviderConnectionEditor({
             ? "••••••••"
             : meta?.credentialPlaceholder ?? "API key"
         }
-        helper="Stored server-side only, never shown again."
+        helper={
+          initial?.credentialsStatus === "unreadable"
+            ? "The stored key can no longer be read. Enter it again to restore this connection."
+            : "Stored server-side only, never shown again."
+        }
         optional={initial?.hasCredentials ?? false}
         error={apiKeyError}
         disabled={busy}

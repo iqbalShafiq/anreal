@@ -17,6 +17,7 @@ import {
   type ProviderKindMeta,
 } from "@anreal/agent";
 import {
+  ProviderCredentialUnreadableError,
   decodeProviderCredentials,
   encodeProviderCredentials,
   sanitizeHeaders,
@@ -724,6 +725,27 @@ async function collectReservedConnectionSlugs(
   return reserved;
 }
 
+export type ProviderCredentialStatus = "ok" | "unreadable";
+
+/**
+ * Probe a stored credential reference by decrypting it. Returns a status enum
+ * only — the plaintext is discarded immediately and never returned. An empty
+ * reference means "nothing stored", which is not the same as unreadable.
+ */
+export function credentialStatusOf(
+  credentialsRef: unknown,
+): ProviderCredentialStatus {
+  if (typeof credentialsRef !== "string" || credentialsRef.length === 0) {
+    return "ok";
+  }
+  try {
+    decodeProviderCredentials(credentialsRef);
+    return "ok";
+  } catch {
+    return "unreadable";
+  }
+}
+
 export function toPublicConnection(row: Omit<ConnectionRow, "userId">) {
   return {
     id: row.id,
@@ -736,6 +758,13 @@ export function toPublicConnection(row: Omit<ConnectionRow, "userId">) {
     sortOrder: row.sortOrder,
     hasCredentials:
       typeof row.credentialsRef === "string" && row.credentialsRef.length > 0,
+    /**
+     * Whether the stored credential can still be decrypted. Detection is a
+     * real decrypt attempt, never a heuristic; only this status crosses to the
+     * client — never the key or any ciphertext. A row whose key cannot be read
+     * is still listed, so one broken connection cannot blank the page.
+     */
+    credentialsStatus: credentialStatusOf(row.credentialsRef),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -790,8 +819,21 @@ export async function updateConnection(
   if (!row) notFound();
 
   // An omitted or blank key means "keep the stored credential" — the browser
-  // never receives the key back, so it cannot resend it.
-  const stored = decodeProviderCredentials(row.credentialsRef);
+  // never receives the key back, so it cannot resend it. When the stored key
+  // can no longer be decrypted, keeping it is impossible: surface the
+  // actionable re-entry message instead of a raw decrypt failure.
+  let stored: ReturnType<typeof decodeProviderCredentials>;
+  try {
+    stored = decodeProviderCredentials(row.credentialsRef);
+  } catch (error) {
+    if (error instanceof ProviderCredentialUnreadableError) {
+      fail(
+        "apiKey",
+        "The stored API key for this connection can no longer be read. Re-enter the API key to fix it.",
+      );
+    }
+    throw error;
+  }
   const apiKey = isBlankKey(input.apiKey) ? stored.apiKey : input.apiKey;
   // Headers are secret too, so an omitted map means "keep" — only an explicit
   // map (including {}) replaces or clears them.

@@ -133,8 +133,28 @@ function notFound(path = "id") {
  * same rules the server enforces and this layer restates nothing.
  */
 
+function isUnreadableCredential(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    (error as { code?: unknown }).code === "PROVIDER_CREDENTIAL_UNREADABLE"
+  );
+}
+
 /** Map a service failure onto a status plus a field-level body. */
 function providerErrorResponse(error: unknown) {
+  // A stored credential that cannot be decrypted is a user-fixable input
+  // problem, not a server fault: answer 400 with the same actionable message
+  // the run path shows, so the editor can present it against the API-key field.
+  if (isUnreadableCredential(error)) {
+    const message = error instanceof Error
+      ? error.message
+      : "The stored API key for this provider connection can no longer be read. Re-enter it in Settings → Providers, then send your message again.";
+    return {
+      status: 400 as const,
+      body: { error: message, issues: [{ path: "apiKey", message }] },
+    };
+  }
   // A Prisma unique violation has no ProviderInputError shape, so it has to be
   // recognised before the gate below or it degrades to a generic 500.
   if (isUniqueViolation(error)) {
