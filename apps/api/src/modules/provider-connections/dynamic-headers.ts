@@ -1,4 +1,12 @@
 /**
+ * The maximum length of a header value, in characters. Stored values are
+ * validated against it when they are saved; resolved dynamic values are
+ * checked against it at resolution, so a context value cannot exceed what a
+ * literal could have been.
+ */
+export const HEADER_VALUE_MAX = 2048;
+
+/**
  * The closed set of run-time values a connection header may resolve to. Adding
  * a source is a code change, never configuration: the allowlist is what keeps a
  * credential from ever becoming resolvable into a header.
@@ -41,7 +49,9 @@ export function isDynamicHeaderValue(
  * An unknown source throws rather than degrading: sending the marker itself (or
  * its serialization) would be a silent wrong value, which is the failure class
  * this feature exists to remove. The header name and the offending source name
- * are safe to name; no resolved value is included.
+ * are safe to name; no resolved value is included. A resolved value is
+ * length-checked against HEADER_VALUE_MAX before it is sent; a literal was
+ * already checked when it was saved.
  */
 export function resolveConnectionHeaders(
   headers: Record<string, HeaderValue> | null | undefined,
@@ -63,7 +73,13 @@ export function resolveConnectionHeaders(
         `provider header "${name}" names an unknown dynamic source "${String(source)}"`,
       );
     }
-    out[name] = context[source];
+    const resolved = context[source];
+    if (resolved.length > HEADER_VALUE_MAX) {
+      throw new Error(
+        `provider header "${name}" resolves to a value longer than ${HEADER_VALUE_MAX} characters`,
+      );
+    }
+    out[name] = resolved;
   }
   return out;
 }

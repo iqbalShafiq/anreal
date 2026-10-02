@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   DYNAMIC_HEADER_SOURCES,
+  HEADER_VALUE_MAX,
   isDynamicHeaderSource,
   resolveConnectionHeaders,
 } from "./dynamic-headers.js";
@@ -56,5 +57,24 @@ describe("dynamic provider headers", () => {
     expect(() => resolveConnectionHeaders(broken, context)).toThrow(
       /goneInV2/,
     );
+  });
+
+  it("rejects a resolved value longer than the header limit", () => {
+    expect(() =>
+      resolveConnectionHeaders(
+        { "x-long": { dynamic: "sessionId" } },
+        { ...context, sessionId: "s".repeat(HEADER_VALUE_MAX + 1) },
+      ),
+    ).toThrow(/x-long/);
+  });
+
+  it("accepts a resolved value exactly at the header limit", () => {
+    const atLimit = "s".repeat(HEADER_VALUE_MAX);
+    expect(
+      resolveConnectionHeaders(
+        { "x-long": { dynamic: "userId" } },
+        { ...context, userId: atLimit },
+      ),
+    ).toEqual({ "x-long": atLimit });
   });
 });

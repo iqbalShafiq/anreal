@@ -1,8 +1,8 @@
 import { createCredentialsCipher } from "../../lib/credentials-cipher.js";
+import { HEADER_VALUE_MAX } from "./dynamic-headers.js";
 
 export const MAX_CUSTOM_HEADERS = 16;
 export const HEADER_NAME_MAX = 128;
-export const HEADER_VALUE_MAX = 2048;
 
 export type ProviderCredentials = {
   apiKey: string;
