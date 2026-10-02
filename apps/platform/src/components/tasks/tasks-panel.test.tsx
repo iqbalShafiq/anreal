@@ -93,3 +93,74 @@ describe("schedules panel failure feedback", () => {
     expect(alert.textContent).toContain("Cancel failed");
   });
 });
+
+/** A task carrying the checklist the expanded row renders. */
+const checklistTask = {
+  id: "t2",
+  title: "Ship release",
+  status: "doing" as const,
+  description: "Cut the candidate build.",
+  subtasks: [
+    { id: "s1", title: "Write notes", done: true },
+    { id: "s2", title: "Tag the build", done: false },
+  ],
+  sourceSessionId: null,
+  dueAt: null,
+  createdAt: "2026-09-26T00:00:00.000Z",
+};
+
+describe("tasks panel checklist presentation", () => {
+  beforeEach(() => {
+    mocks.listTasks.mockResolvedValue([checklistTask]);
+  });
+
+  async function expandChecklist() {
+    render(<TasksPanel sessionId="s1" />);
+    await userEvent.click(
+      await screen.findByRole("button", { name: /show details for ship release/i }),
+    );
+  }
+
+  it("styles the subtask row and its affordances with the app's radius scale, not bare `rounded`", async () => {
+    await expandChecklist();
+    const checkbox = screen.getByRole("checkbox", { name: /mark subtask write notes not done/i });
+    const remove = screen.getByRole("button", { name: /remove subtask write notes/i });
+    const row = checkbox.closest("li");
+
+    // The shared system: rows are rounded-lg, inline affordances rounded-md.
+    expect(row?.className).toContain("rounded-lg");
+    expect(checkbox.className).toContain("rounded-md");
+    expect(remove.className).toContain("rounded-md");
+    // The off-system bare `rounded` (4px) is gone from both affordances.
+    expect(checkbox.className).not.toMatch(/(^|\s)rounded(\s|$)/);
+    expect(remove.className).not.toMatch(/(^|\s)rounded(\s|$)/);
+  });
+
+  it("gives the row the hover surface and focus ring the sibling management rows use", async () => {
+    await expandChecklist();
+    const checkbox = screen.getByRole("checkbox", { name: /mark subtask write notes not done/i });
+    const remove = screen.getByRole("button", { name: /remove subtask write notes/i });
+    const row = checkbox.closest("li");
+
+    expect(row?.className).toContain("hover:bg-white/[0.04]");
+    expect(checkbox.className).toContain("focus-visible:ring-accent-ring");
+    expect(remove.className).toContain("focus-visible:ring-accent-ring");
+  });
+
+  it("keeps the completed/aria semantics and the toggle payload intact", async () => {
+    await expandChecklist();
+    const done = screen.getByRole("checkbox", { name: /mark subtask write notes not done/i });
+    const open = screen.getByRole("checkbox", { name: /mark subtask tag the build done/i });
+
+    expect(done.getAttribute("aria-checked")).toBe("true");
+    expect(open.getAttribute("aria-checked")).toBe("false");
+
+    await userEvent.click(open);
+    await waitFor(() =>
+      expect(mocks.updateTask).toHaveBeenCalledWith("t2", {
+        sessionId: "s1",
+        toggleSubtasks: [{ id: "s2", done: true }],
+      }),
+    );
+  });
+});
