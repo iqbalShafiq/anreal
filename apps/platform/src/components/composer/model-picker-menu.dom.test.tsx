@@ -400,18 +400,37 @@ describe("ModelPickerMenu: scroll cap and the action row", () => {
     expect(list.className).toContain("grid");
   });
 
-  it("lets the controls stack shrink and scroll so a short panel does not clip it", () => {
+  it("keeps the controls at full height — they are never the row that shrinks", () => {
     renderMenu(manyModels);
     fireEvent.click(screen.getByRole("button", { name: "Sort" }));
 
-    // The controls sit between the search and the list. On a panel clamped
-    // shorter than its fixed rows they are the row that gives, so they must be
-    // able to shrink (`min-h-0`) and scroll rather than be cut off by the
-    // panel's `overflow-hidden`. The sort group's parent is that stack.
+    // The user rejected the earlier mechanism that let this stack shrink and
+    // scroll (its own scrollbar, cut-off chips). Priority is inverted: the
+    // controls render at their natural height (`shrink-0`) and never scroll
+    // (`no overflow-y-auto`), so the list below is the only row that gives.
     const controls = groupFor("Sort by").parentElement as HTMLElement;
     expect(controls.className).toContain("flex-col");
-    expect(controls.className).toContain("min-h-0");
-    expect(controls.className).toContain("overflow-y-auto");
+    expect(controls.className).toContain("shrink-0");
+    expect(controls.className).not.toContain("min-h-0");
+    expect(controls.className).not.toContain("overflow-y-auto");
+  });
+
+  it("keeps the filter facet group unclipped too, with no ability to shrink", () => {
+    renderMenu([
+      catalogModel("openai/alpha", {
+        name: "Alpha",
+        provider: { slug: "openai", name: "OpenAI" },
+      }),
+      catalogModel("google/gemini", {
+        name: "Gemini",
+        provider: { slug: "google", name: "Google" },
+      }),
+    ]);
+    fireEvent.click(screen.getByRole("button", { name: "Filter" }));
+
+    const controls = groupFor("Vendor").parentElement as HTMLElement;
+    expect(controls.className).toContain("shrink-0");
+    expect(controls.className).not.toContain("overflow-y-auto");
   });
 });
 

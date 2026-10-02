@@ -255,20 +255,87 @@ describe("ModelReasoningSwitcher model menu: the action row meets the panel bott
   });
 });
 
-describe("ModelReasoningSwitcher model menu: the panel is clamped to the space above", () => {
+describe("ModelReasoningSwitcher model menu: the panel is clamped below the top bar", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it("sets a max-height on the panel so it cannot cross the viewport top", async () => {
+  it("keeps the panel top at least 24px below the top bar's fallback bottom", async () => {
     stubGeometry(240, 1200);
     renderSwitcher();
     fireEvent.click(screen.getByRole("button", { name: "Model" }));
     await flush();
 
-    // Opens upward from `top = shellRect.top - 8`; the clamp is that anchor
-    // minus an 8px margin, so the panel can never extend past the viewport top.
-    expect(panelElement().style.maxHeight).toBe("584px"); // 600 - 8 - 8
+    // With no measurable `<header>` in jsdom, the fallback top bar is 56px.
+    // Anchored at top = 600 - 8 = 592, the clamp is
+    // 592 - (56 + 24) = 512, so the panel's top is 592 - 512 = 80,
+    // which is 24px below the 56px bar.
+    expect(panelElement().style.maxHeight).toBe("512px");
+  });
+
+  it("measures the real top bar and tracks its height", async () => {
+    stubGeometry(240, 1200);
+    // A 90px top bar: the clamp must use its measured bottom, not the constant.
+    // Assign the method on the element itself so it shadows the prototype stub
+    // `stubGeometry` puts on every element.
+    const header = document.createElement("header");
+    header.getBoundingClientRect = () =>
+      ({
+        width: 1200,
+        height: 90,
+        top: 0,
+        left: 0,
+        right: 1200,
+        bottom: 90,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+    document.body.appendChild(header);
+
+    renderSwitcher();
+    fireEvent.click(screen.getByRole("button", { name: "Model" }));
+    await flush();
+
+    // top = 592, clamp = 592 - (90 + 24) = 478.
+    expect(panelElement().style.maxHeight).toBe("478px");
+    header.remove();
+  });
+
+  it("floors the clamp at zero when the bar leaves no room", async () => {
+    // Shell near the top bar: anchor 200, fallback bar 56 + 24 → 120, still ≥ 0.
+    stubGeometry(240, 1200);
+    vi.mocked(Element.prototype.getBoundingClientRect).mockReturnValue({
+      width: 240,
+      height: 32,
+      top: 40,
+      left: 100,
+      right: 340,
+      bottom: 72,
+      x: 100,
+      y: 40,
+      toJSON: () => ({}),
+    } as DOMRect);
+    renderSwitcher();
+    fireEvent.click(screen.getByRole("button", { name: "Model" }));
+    await flush();
+
+    // top = 32, 32 - 80 < 0 → floored to 0, never negative.
+    expect(panelElement().style.maxHeight).toBe("0px");
+  });
+
+  it("scrolls the panel as a whole on the short viewport where fixed rows cannot fit", async () => {
+    // The documented last resort: the controls never shrink or scroll, so on a
+    // viewport too short to hold search + controls + action the panel itself
+    // scrolls rather than clipping the fixed rows silently.
+    stubGeometry(240, 1200);
+    renderSwitcher();
+    fireEvent.click(screen.getByRole("button", { name: "Model" }));
+    await flush();
+
+    const panel = panelElement();
+    expect(panel.className).toContain("overflow-y-auto");
+    expect(panel.className).toContain("overflow-x-hidden");
   });
 });
 

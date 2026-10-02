@@ -33,6 +33,49 @@ import { ModelPickerMenu, gridColumnsForWidth } from "./model-picker-menu";
 const EFFORT_ORDER = ["minimal", "low", "medium", "high", "xhigh", "max"];
 
 /**
+ * The top app bar's height, used when no bar can be measured. Both the
+ * workspace (`layout/chat-top-bar.tsx`) and the share surface
+ * (`routes/share.$shareToken.tsx`) render their bar with `h-14`, i.e. Tailwind's
+ * 3.5rem = 56px, so 56 is the honest constant when the landmark is absent — the
+ * composer also renders on the share surface, whose shell differs, and a menu
+ * opening there must still clamp rather than mis-measure. The value lives here
+ * rather than as a CSS custom property because the app exposes no shared top-bar
+ * token: `styles.css` hard-codes the same `3.5rem` for the content frame, so a
+ * single TS constant is the one source of truth this round can offer.
+ */
+export const TOP_BAR_HEIGHT_FALLBACK = 56;
+
+/**
+ * The gap the panel's top must keep below the top bar's bottom (user: "max di
+ * bawahnya top app bar kurang 24px"). Exported so the positioning test asserts
+ * against the same number the component uses.
+ */
+export const TOP_BAR_GAP = 24;
+
+/**
+ * The top bar's bottom edge, in viewport coordinates.
+ *
+ * 1. The top bar is the document's `<banner>` landmark — a top-level `<header>`.
+ *    Read `layout/chat-top-bar.tsx`: it is
+ *    `<header className="vt-topbar glass-top-bar absolute inset-x-0 top-0 … h-14">`,
+ *    and `routes/share.$shareToken.tsx` renders the same `<header h-14>` inside
+ *    its own shell. Querying the first `header` in the document finds that top
+ *    bar (the only nested `header`, in `empty-state.tsx`, comes later under
+ *    `<main>`), and its bounding rect is the real geometry — so the panel tracks
+ *    a bar that ever changes height.
+ * 2. When there is no measurable bar — jsdom in tests, or a shell without one —
+ *    fall back to {@link TOP_BAR_HEIGHT_FALLBACK}.
+ */
+export function topBarBottom(): number {
+  const bar = document.querySelector<HTMLElement>("header");
+  if (bar) {
+    const rect = bar.getBoundingClientRect();
+    if (rect.height > 0) return rect.bottom;
+  }
+  return TOP_BAR_HEIGHT_FALLBACK;
+}
+
+/**
  * Hover detail for a model option: input modality tags (icons only), max
  * context window, and input/output prices. Exported so the picker menu's grid
  * cards can carry the same hover card as the list rows.
@@ -172,19 +215,22 @@ export function ModelReasoningSwitcher({
         ? Math.min(560, window.innerWidth - 16)
         : Math.max(184, shellRect.width);
     const maxLeft = window.innerWidth - minWidth - 8;
-    /**
-     * Open upward from the shell at `top`, so the space the panel may occupy is
-     * everything above that anchor: `top` px, minus an 8px viewport margin. The
-     * panel is anchored to the composer, which sits low, and the controls area
-     * (filters + sort) can grow past that space; without this clamp the panel's
-     * top crossed the viewport edge and its top rows/controls were unreachable.
-     * This caps the panel's height (the option list, being the only shrinkable
-     * row of its flex column, then scrolls within what is left); it does not
-     * change the list's own `maxHeight` cap, which stays the smaller of the two
-     * and is still the value the menu passes down.
-     */
     const top = shellRect.top - 8;
-    const maxHeight = Math.max(0, top - 8);
+    /**
+     * Open upward from the shell at `top`, so the panel's top edge is
+     * `top - maxHeight`. The user asked that this top never reach the top app
+     * bar: it must sit at least {@link TOP_BAR_GAP} (24px) below the bar's
+     * bottom. The space the panel may occupy is therefore
+     * `top - (topBarBottom + 24)`. The clamp is floored at 0 — the existing
+     * viewport-margin behaviour — so it can never go negative.
+     *
+     * The option list, the only shrinkable row of the menu's flex column,
+     * scrolls within what is left; the filter/sort controls above it keep their
+     * full natural height. When even the fixed rows cannot fit (an extremely
+     * short viewport), the panel itself scrolls as a last resort so nothing is
+     * silently clipped — see the panel's `overflow-y-auto`.
+     */
+    const maxHeight = Math.max(0, top - (topBarBottom() + TOP_BAR_GAP));
     setMenuPos({
       top,
       left: Math.max(8, Math.min(shellRect.left, maxLeft)),
@@ -277,7 +323,7 @@ export function ModelReasoningSwitcher({
             }}
             className={
               openMenu === "model"
-                ? "flex flex-col chat-scroll overflow-hidden rounded-xl border border-white/[0.08] bg-canvas-elevated text-text shadow-[0_12px_40px_-12px_rgba(0,0,0,0.75)] animate-fade-in"
+                ? "flex flex-col chat-scroll overflow-y-auto overflow-x-hidden rounded-xl border border-white/[0.08] bg-canvas-elevated text-text shadow-[0_12px_40px_-12px_rgba(0,0,0,0.75)] animate-fade-in"
                 : ""
             }
           >

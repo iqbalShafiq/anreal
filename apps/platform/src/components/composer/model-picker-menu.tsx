@@ -418,12 +418,15 @@ export function ModelPickerMenu({
           this single `gap-2`: one source of spacing for the whole controls
           area. The group owns no margin or padding of its own. */}
       {showFilters || showSort ? (
-        // `min-h-0 overflow-y-auto`: on a very short viewport the panel's
-        // maxHeight clamp can be smaller than the fixed rows (search + these
-        // controls + the action). While this stack could not shrink, the panel's
-        // overflow-hidden cut it off. Allowing it to shrink and scroll keeps
-        // every control — and the rows below it — reachable instead of clipped.
-        <div className="flex min-h-0 shrink flex-col gap-2 overflow-y-auto px-2 pt-2">
+        // `shrink-0`: the filter/sort controls render at their full natural
+        // height and are never the thing that gives. A previous round let this
+        // stack shrink and scroll to stop a very short viewport clipping it;
+        // that made the controls themselves the scrollable, cut-off thing the
+        // user rejected. Priority is inverted instead: the model list below is
+        // the only shrinkable row, so these controls stay whole. On a viewport
+        // too short to hold even these fixed rows, the panel as a whole scrolls
+        // (see `model-reasoning-switcher`), so nothing is silently clipped.
+        <div className="flex shrink-0 flex-col gap-2 px-2 pt-2">
           {showFilters
             ? (
                 <>
