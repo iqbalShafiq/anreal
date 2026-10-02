@@ -1032,6 +1032,56 @@ describe("connection CRUD", () => {
     ).rejects.toBeInstanceOf(ProviderInputError);
   });
 
+  it("lets a supplied key repair an unreadable credential instead of demanding the old one", async () => {
+    const db = makeConnectionDb("not-a-valid-envelope");
+
+    const result = await updateConnection(db, "u_1", "pc_1", {
+      kind: "compatible",
+      label: "Renamed",
+      baseUrl: "https://gw.example/v1",
+      apiKey: "sk-typed-again",
+    });
+
+    // Re-entry must never require reading the credential it is replacing:
+    // that would make the actionable message impossible to act on.
+    expect(decodeProviderCredentials(updatedCredentialsRef(db)).apiKey).toBe(
+      "sk-typed-again",
+    );
+    expect(result.credentialsStatus).toBe("ok");
+  });
+
+  it("clears headers that the unreadable credential cannot supply, rather than deadlocking", async () => {
+    const db = makeConnectionDb("not-a-valid-envelope");
+
+    await updateConnection(db, "u_1", "pc_1", {
+      kind: "compatible",
+      label: "Renamed",
+      baseUrl: "https://gw.example/v1",
+      apiKey: "sk-typed-again",
+    });
+
+    // An unreadable envelope cannot provide stored headers. Keeping them is
+    // impossible, so re-entry clears them and the save succeeds; blocking here
+    // would leave the connection unfixable from the UI.
+    expect(decodeProviderCredentials(updatedCredentialsRef(db)).headers).toBeNull();
+  });
+
+  it("still keeps a readable stored key when the update omits it", async () => {
+    const db = makeConnectionDb(
+      encodeProviderCredentials({ apiKey: "sk-original" }),
+    );
+
+    await updateConnection(db, "u_1", "pc_1", {
+      kind: "compatible",
+      label: "Renamed",
+      baseUrl: "https://gw.example/v1",
+    });
+
+    expect(decodeProviderCredentials(updatedCredentialsRef(db)).apiKey).toBe(
+      "sk-original",
+    );
+  });
+
   it("clears the stored headers when the update sends an explicit empty map", async () => {
     const db = makeConnectionDb(
       encodeProviderCredentials({

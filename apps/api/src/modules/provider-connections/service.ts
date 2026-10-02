@@ -819,26 +819,34 @@ export async function updateConnection(
   if (!row) notFound();
 
   // An omitted or blank key means "keep the stored credential" — the browser
-  // never receives the key back, so it cannot resend it. When the stored key
-  // can no longer be decrypted, keeping it is impossible: surface the
-  // actionable re-entry message instead of a raw decrypt failure.
-  let stored: ReturnType<typeof decodeProviderCredentials>;
+  // never receives the key back, so it cannot resend it. The stored value is
+  // read lazily: a supplied key replaces it, and demanding the old one first
+  // would make re-entry impossible for a credential that can no longer be
+  // decrypted — the one case re-entry exists to fix.
+  const keyBlank = isBlankKey(input.apiKey);
+  let stored: ReturnType<typeof decodeProviderCredentials> | null = null;
   try {
     stored = decodeProviderCredentials(row.credentialsRef);
   } catch (error) {
-    if (error instanceof ProviderCredentialUnreadableError) {
+    if (!(error instanceof ProviderCredentialUnreadableError)) throw error;
+  }
+  let apiKey: unknown;
+  if (keyBlank) {
+    if (!stored) {
       fail(
         "apiKey",
         "The stored API key for this connection can no longer be read. Re-enter the API key to fix it.",
       );
     }
-    throw error;
+    apiKey = stored.apiKey;
+  } else {
+    apiKey = input.apiKey;
   }
-  const apiKey = isBlankKey(input.apiKey) ? stored.apiKey : input.apiKey;
   // Headers are secret too, so an omitted map means "keep" — only an explicit
-  // map (including {}) replaces or clears them.
+  // map (including {}) replaces or clears them. An unreadable credential
+  // cannot supply them, so re-entry clears them rather than deadlocking.
   const headers =
-    input.headers === undefined ? (stored.headers ?? null) : input.headers;
+    input.headers === undefined ? (stored?.headers ?? null) : input.headers;
 
   const slugs = await collectConnectionSlugs(db, userId, row.slug);
   const value = validateConnectionInput(

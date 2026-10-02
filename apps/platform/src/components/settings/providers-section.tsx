@@ -529,7 +529,7 @@ function ProviderConnectionEditor({
         }
         helper={
           initial?.credentialsStatus === "unreadable"
-            ? "The stored key can no longer be read. Enter it again to restore this connection."
+            ? "The stored key can no longer be read. Enter it again to restore this connection; custom headers must be re-entered too."
             : "Stored server-side only, never shown again."
         }
         optional={initial?.hasCredentials ?? false}
