@@ -1290,6 +1290,36 @@ describe("discoverConnectionModels", () => {
     expect(result.data[0]).toMatchObject({ id: "openai/gpt-5.6-luna" });
   });
 
+  it("resolves a dynamic stored header before listing models", async () => {
+    const agent = await import("@anreal/agent");
+    vi.mocked(agent.listProviderModels).mockClear();
+    const ref = encodeProviderCredentials({
+      apiKey: "sk-stored",
+      headers: { "x-opencode-session": { dynamic: "sessionId" } },
+    });
+    const db = makeDb({
+      providerConnection: {
+        findFirst: vi.fn(async () => ({
+          id: "pc_1",
+          userId: "u_1",
+          kind: "compatible",
+          baseUrl: "https://gw.example/v1",
+          api: "chat",
+          credentialsRef: ref,
+        })),
+      },
+    });
+
+    await discoverConnectionModels(db, "u_1", "pc_1");
+
+    const calledWith = vi.mocked(agent.listProviderModels).mock.calls.at(-1)?.[0] as {
+      credentials: { headers: Record<string, string> | null };
+    };
+    expect(calledWith.credentials.headers?.["x-opencode-session"]).toBe(
+      "connection-test-session",
+    );
+  });
+
   it("maps a listing failure to a readable, redacted message", async () => {
     const agent = await import("@anreal/agent");
     vi.mocked(agent.listProviderModels).mockRejectedValueOnce(
@@ -1390,6 +1420,68 @@ describe("testProviderConnection", () => {
         headers: { "X-Org": "acme" },
       },
     });
+  });
+
+  it("sends a sample value for a dynamic header so a required header still tests green", async () => {
+    const agent = await import("@anreal/agent");
+    const db = makeDb({
+      providerConnection: {
+        count: vi.fn(async () => 1),
+        findFirst: vi.fn(async () => ({
+          id: "pc_1",
+          userId: "u_1",
+          kind: "openai",
+          label: "GW",
+          slug: "gw",
+          baseUrl: "https://gw.example/v1",
+          api: "chat",
+          credentialsRef: encodeProviderCredentials({
+            apiKey: "sk-live",
+            headers: { "x-opencode-session": { dynamic: "sessionId" } },
+          }),
+          isActive: true,
+          sortOrder: 0,
+        })),
+        findMany: vi.fn(async () => []),
+        update: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({ id: "pc_1", ...data })),
+      },
+    });
+    vi.mocked(agent.listProviderModels).mockClear();
+
+    await testProviderConnection(db, "u_1", {
+      kind: "openai",
+      baseUrl: "https://gw.example/v1",
+      connectionId: "pc_1",
+    });
+
+    const calledWith = vi.mocked(agent.listProviderModels).mock.calls.at(-1)?.[0] as {
+      credentials: { headers: Record<string, string> | null };
+    };
+    expect(calledWith.credentials.headers).toMatchObject({
+      "x-opencode-session": expect.any(String),
+    });
+    // The marker must never reach the provider as an object.
+    expect(typeof calledWith.credentials.headers?.["x-opencode-session"]).toBe("string");
+  });
+
+  it("resolves a dynamic header supplied with a typed key, not only a stored one", async () => {
+    const agent = await import("@anreal/agent");
+    vi.mocked(agent.listProviderModels).mockClear();
+    const db = makeDb();
+
+    await testProviderConnection(db, "u_1", {
+      kind: "compatible",
+      baseUrl: "https://gw.example/v1",
+      apiKey: "sk-live",
+      headers: { "x-opencode-session": { dynamic: "userId" } },
+    });
+
+    const calledWith = vi.mocked(agent.listProviderModels).mock.calls.at(-1)?.[0] as {
+      credentials: { headers: Record<string, string> | null };
+    };
+    expect(calledWith.credentials.headers?.["x-opencode-session"]).toBe(
+      "connection-test-u_1",
+    );
   });
 
   it("ignores caller-supplied kind, base url, and headers on the reuse path", async () => {

@@ -22,7 +22,11 @@ import {
   encodeProviderCredentials,
   sanitizeHeaders,
 } from "./credentials.js";
-import { type HeaderValue } from "./dynamic-headers.js";
+import {
+  resolveConnectionHeaders,
+  type HeaderResolutionContext,
+  type HeaderValue,
+} from "./dynamic-headers.js";
 import { parseImageCapabilities } from "../chat/image-capabilities.js";
 import {
   deriveConnectionSlug,
@@ -1042,12 +1046,28 @@ function connectionProviderKind(connection: ConnectionRow): ProviderKind {
   return kind;
 }
 
+/**
+ * A probe has no conversation, so a dynamic source resolves to a deterministic
+ * sample. Sending nothing would fail a connection whose endpoint requires the
+ * header; sending a real session or user id would leak one into a test request.
+ */
+function probeHeaderContext(userId: string): HeaderResolutionContext {
+  return {
+    sessionId: "connection-test-session",
+    userId: `connection-test-${userId}`,
+    requestId: "connection-test-request",
+  };
+}
+
 function modelCredentials(connection: ConnectionRow): ProviderCredentials {
   const stored = decodeProviderCredentials(connection.credentialsRef);
   return {
     apiKey: stored.apiKey,
     baseUrl: connection.baseUrl,
-    headers: stored.headers ?? null,
+    headers: resolveConnectionHeaders(
+      stored.headers,
+      probeHeaderContext(connection.userId),
+    ),
   };
 }
 
@@ -1152,6 +1172,16 @@ export async function testProviderConnection(
   const sanitized = sanitizeHeaders(rawHeaders);
   if (!sanitized.ok) fail("headers", sanitized.message);
 
+  // A probe has no conversation, so every dynamic marker becomes a synthetic
+  // sample. This covers both the stored credential (the blank-key reuse path)
+  // and headers supplied with a typed key, which is how a new connection is
+  // tested before it can be saved. An endpoint that requires the header must
+  // still test green.
+  const headers = resolveConnectionHeaders(
+    sanitized.headers,
+    probeHeaderContext(userId),
+  );
+
   const rawBaseUrl =
     typeof rawBaseUrlInput === "string" ? rawBaseUrlInput.trim() : "";
   let baseUrl: string | null = null;
@@ -1166,7 +1196,7 @@ export async function testProviderConnection(
   try {
     const result = await listProviderModels({
       kind,
-      credentials: { apiKey, baseUrl, headers: sanitized.headers },
+      credentials: { apiKey, baseUrl, headers },
     });
     return { ok: true, modelCount: result.data.length };
   } catch (error) {
