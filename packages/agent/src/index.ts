@@ -6,6 +6,7 @@ export * from "./providers/registry.js";
 export * from "./providers/mistral.js";
 export * from "./providers/image-generation.js";
 export * from "./providers/image-options.js";
+export * from "./providers/usage-normalization.js";
 export * from "./ocr/run-document-ocr.js";
 export * from "./document/summaries.js";
 export * from "./document/chunking.js";

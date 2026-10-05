@@ -19,8 +19,10 @@ import {
 import { GROK_REASONING_EFFORTS, GrokClient } from "@anvia/grok";
 import { MistralClient } from "@anvia/mistral";
 import { OPENAI_REASONING_EFFORTS, OpenAIClient } from "@anvia/openai";
+import OpenAI from "openai";
 
 import { OpenRouterImageGenerationModel } from "./image-generation.js";
+import { normalizeFetch } from "./usage-normalization.js";
 
 export const PROVIDER_KINDS = [
   "openai",
@@ -198,6 +200,33 @@ function managedClientOptions(credentials: ProviderCredentials) {
   };
 }
 
+/**
+ * Build the injected SDK client for a BYOK OpenAI-shaped connection. The
+ * normalizing `fetch` is required because the OpenCode Go gateway attaches
+ * `usage` to every chunk of a chat-completions stream; `@anvia/openai` maps
+ * each usage-bearing chunk to a `final` event and rejects the second one as
+ * an invalid tool call, failing every run after the answer has streamed.
+ * `usage-normalization.ts` carries the full non-conformance and the rewrite
+ * rules.
+ *
+ * Only this path gets the rewrite. The catalog/env path
+ * (`createCompletionModel` in `providers/openai.ts`) keeps the managed client:
+ * conformant providers must not pay for the workaround, and their bytes must
+ * not change.
+ */
+function byokOpenAIClient(credentials: ProviderCredentials): OpenAI {
+  const headers = credentials.headers
+    ? literalHeaders(credentials.headers)
+    : undefined;
+  return new OpenAI({
+    apiKey: credentials.apiKey,
+    ...(credentials.baseUrl ? { baseURL: credentials.baseUrl } : {}),
+    ...(headers ? { defaultHeaders: headers } : {}),
+    fetch: normalizeFetch(globalThis.fetch),
+    maxRetries: 0,
+  });
+}
+
 /** Extract the limits and reasoning metadata an adapter publishes for a model. */
 export type ModelDescription = {
   provider: string;
@@ -271,14 +300,16 @@ export function createCompletionModelFor(
     case "openai":
     case "compatible":
     default: {
-      return new OpenAIClient(managedClientOptions(credentials)).completionModel(
-        {
-          modelId: upstreamId,
-          api: target.api ?? PROVIDER_KIND_META[kind].defaultApi ?? "responses",
-          ...(contextLimits ? { contextLimits } : {}),
-          ...explicitControls(efforts),
-        },
-      );
+      // Injected-client path so the BYOK stream passes through the usage
+      // normalization; see `byokOpenAIClient`.
+      return new OpenAIClient({
+        client: byokOpenAIClient(credentials),
+      }).completionModel({
+        modelId: upstreamId,
+        api: target.api ?? PROVIDER_KIND_META[kind].defaultApi ?? "responses",
+        ...(contextLimits ? { contextLimits } : {}),
+        ...explicitControls(efforts),
+      });
     }
   }
 }

@@ -22,6 +22,11 @@ const mocks = vi.hoisted(() => {
   return {
     completionModel,
     imageGenerationModel,
+    // Captures the options `registry.ts` passes to the injected OpenAI SDK
+    // client, plus each constructed instance so a test can prove the exact
+    // instance reaches `OpenAIClient({ client })`.
+    openaiClientConstructor: vi.fn((_options: unknown) => undefined),
+    openaiClientInstances: [] as unknown[],
     // A regular function, not an arrow: the registry constructs these clients
     // with `new`, and `new` on an arrow-function mock throws. The return type
     // keeps every member optional except completionModel so per-test
@@ -31,6 +36,15 @@ const mocks = vi.hoisted(() => {
     }),
   };
 });
+
+vi.mock("openai", () => ({
+  default: class {
+    constructor(options: unknown) {
+      mocks.openaiClientConstructor(options);
+      mocks.openaiClientInstances.push(this);
+    }
+  },
+}));
 
 vi.mock("@anvia/openai", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@anvia/openai")>();
@@ -104,9 +118,11 @@ describe("effortVocabulary", () => {
 });
 
 describe("createCompletionModelFor", () => {
-  it("passes the api default for openai and forwards credentials", () => {
+  it("passes the api default for openai through an injected SDK client", () => {
     mocks.completionModel.mockClear();
     mocks.client.mockClear();
+    mocks.openaiClientConstructor.mockClear();
+    mocks.openaiClientInstances.length = 0;
 
     createCompletionModelFor({
       kind: "openai",
@@ -114,9 +130,16 @@ describe("createCompletionModelFor", () => {
       credentials: { apiKey: "sk-test" },
     });
 
-    expect(mocks.client).toHaveBeenCalledWith(
-      expect.objectContaining({ apiKey: "sk-test" }),
-    );
+    // The BYOK path builds the SDK client itself (so it can inject the
+    // normalizing fetch) and hands that exact instance to the adapter.
+    expect(mocks.openaiClientConstructor).toHaveBeenCalledWith({
+      apiKey: "sk-test",
+      fetch: expect.any(Function),
+      maxRetries: 0,
+    });
+    expect(mocks.client).toHaveBeenCalledWith({
+      client: mocks.openaiClientInstances[0],
+    });
     expect(mocks.completionModel).toHaveBeenCalledWith(
       expect.objectContaining({ modelId: "gpt-5.6-luna", api: "responses" }),
     );
@@ -216,8 +239,8 @@ describe("createCompletionModelFor", () => {
     );
   });
 
-  it("passes custom headers through to the client", () => {
-    mocks.client.mockClear();
+  it("passes custom headers through to the injected client", () => {
+    mocks.openaiClientConstructor.mockClear();
 
     createCompletionModelFor({
       kind: "openai",
@@ -228,13 +251,58 @@ describe("createCompletionModelFor", () => {
       },
     });
 
-    expect(mocks.client).toHaveBeenCalledWith(
-      expect.objectContaining({ headers: { "X-Workspace": "acme" } }),
+    expect(mocks.openaiClientConstructor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        defaultHeaders: { "X-Workspace": "acme" },
+      }),
     );
+  });
+
+  it("wires the injected client to a usage-normalizing fetch", async () => {
+    mocks.openaiClientConstructor.mockClear();
+    const upstream = vi.fn(
+      async () =>
+        new Response(
+          'data: {"choices":[{"delta":{"content":"hi"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}\n\ndata: [DONE]\n\n',
+          { headers: { "content-type": "text/event-stream" } },
+        ),
+    );
+    vi.stubGlobal("fetch", upstream);
+    try {
+      createCompletionModelFor({
+        kind: "compatible",
+        upstreamId: "my-gateway/model",
+        credentials: { apiKey: "sk-test", baseUrl: "https://gw.example/v1" },
+      });
+
+      const options = mocks.openaiClientConstructor.mock.calls[0]![0] as {
+        fetch: typeof fetch;
+      };
+      // The wrapper must not be the raw global fetch: the non-conformant
+      // usage on the content chunk has to be gone before the adapter sees it.
+      expect(options.fetch).not.toBe(upstream);
+      const body = await (
+        await options.fetch("https://gw.example/v1/chat/completions")
+      ).text();
+      const chunks = body
+        .split("\n")
+        .filter((line) => line.startsWith("data: "))
+        .map((line) => line.slice("data: ".length))
+        .filter((payload) => payload !== "[DONE]")
+        .map(
+          (payload) =>
+            JSON.parse(payload) as { choices: unknown[]; usage?: unknown },
+        );
+      expect(chunks.filter((chunk) => "usage" in chunk)).toHaveLength(1);
+      expect(chunks.find((chunk) => "usage" in chunk)?.choices).toEqual([]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("fails loudly on an unresolved dynamic header instead of sending an object", () => {
     mocks.client.mockClear();
+    mocks.openaiClientConstructor.mockClear();
 
     expect(() =>
       createCompletionModelFor({
@@ -246,7 +314,8 @@ describe("createCompletionModelFor", () => {
         },
       }),
     ).toThrow(/x-opencode-session/);
-    // The object must never reach the client as a header value.
+    // The guard runs before either client is built.
+    expect(mocks.openaiClientConstructor).not.toHaveBeenCalled();
     expect(mocks.client).not.toHaveBeenCalled();
   });
 });
