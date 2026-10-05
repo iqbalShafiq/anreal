@@ -14,6 +14,17 @@ import {
   type SelectOption,
 } from "#/components/ui/select-list";
 
+export type SelectPanelContext = {
+  /** The listbox id the trigger's `aria-controls` points at. */
+  id: string;
+  /** Closes the dropdown (called after a selection is made). */
+  close: () => void;
+  /** The panel width the trigger's position produced. */
+  width: number;
+  /** The viewport room available on the open side, for the panel to respect. */
+  maxHeight: number;
+};
+
 export type SelectProps = {
   value: string;
   onChange: (value: string) => void;
@@ -37,6 +48,16 @@ export type SelectProps = {
    * structure every existing caller renders.
    */
   optionsAsButtons?: boolean;
+  /**
+   * Render a custom panel (search/filter/sort contents, a rich picker) instead
+   * of the option list. The panel owns its own content and focus; the Select
+   * keeps the anchoring, dialog portal, outside-click, and Escape handling.
+   * When set, `options` only feeds the trigger label and the open-direction
+   * estimate (`panelHeight` overrides the latter).
+   */
+  renderPanel?: (context: SelectPanelContext) => ReactNode;
+  /** Estimated height of the custom panel, in px; picks the open direction. */
+  panelHeight?: number;
 };
 
 type ListPos = {
@@ -51,6 +72,11 @@ type ListPos = {
 
 /** Matches the listbox's preferred height cap (16rem). */
 const LIST_MAX_HEIGHT = 256;
+/**
+ * The cap for a custom panel: tall enough for a rich picker (search + filter
+ * rows + ~8 option rows), still clamped to the viewport room on the open side.
+ */
+const PANEL_MAX_HEIGHT = 480;
 
 export function Select({
   value,
@@ -63,13 +89,17 @@ export function Select({
   hoverSide = "top",
   listAriaLabel,
   optionsAsButtons = false,
+  renderPanel,
+  panelHeight,
 }: SelectProps) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const listId = useId();
   const wasOpenRef = useRef(false);
+  const hasCustomPanel = renderPanel !== undefined;
   /**
    * Native `showModal()` dialogs live in the browser top layer, so a listbox
    * portaled to `document.body` renders *behind* the modal. Detect a dialog
@@ -89,12 +119,16 @@ export function Select({
     const onPointerDown = (event: MouseEvent) => {
       const target = event.target as Node;
       if (rootRef.current?.contains(target)) return;
-      // The portaled listbox lives outside the root — clicks on it must not
-      // close the dropdown before the option's onClick fires.
+      // The portaled listbox/panel lives outside the root — clicks on it must
+      // not close the dropdown before the option's onClick fires.
       if (listRef.current?.contains(target)) return;
+      if (panelRef.current?.contains(target)) return;
       setOpen(false);
     };
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      // A handler inside a custom panel may have consumed Escape (clearing an
+      // active filter keeps the dropdown open); respect that before closing.
+      if (event.defaultPrevented) return;
       if (event.key === "Escape") {
         event.preventDefault();
         setOpen(false);
@@ -135,8 +169,11 @@ export function Select({
       if (!rect) return;
 
       const gap = 6;
-      // Match max-h-[16rem] on the list — used only to pick open direction.
-      const estimatedListH = Math.min(options.length * 44 + 8, LIST_MAX_HEIGHT);
+      // The listbox's own cap (16rem) estimates the plain list's height; a
+      // custom panel supplies `panelHeight` instead. Used only to pick the
+      // open direction.
+      const estimatedListH =
+        panelHeight ?? Math.min(options.length * 44 + 8, LIST_MAX_HEIGHT);
       // The list is `fixed`, so the viewport is what constrains it — not the
       // dialog box. Measuring against the dialog is what used to clip the menu
       // at the modal edge (`.settings-dialog` is `overflow: hidden`), hiding
@@ -150,6 +187,9 @@ export function Select({
       const maxLeft = window.innerWidth - width - 8;
       const leftViewport = Math.max(8, Math.min(rect.left, maxLeft));
 
+      // A custom panel (rich picker) earns more room than the plain listbox.
+      const maxHeightCap = hasCustomPanel ? PANEL_MAX_HEIGHT : LIST_MAX_HEIGHT;
+
       setListPos({
         top: openUp ? rect.top - gap : rect.bottom + gap,
         left: leftViewport,
@@ -158,7 +198,7 @@ export function Select({
         // Scroll rather than overflow: a menu near an edge stays fully usable.
         maxHeight: Math.max(
           80,
-          Math.min(LIST_MAX_HEIGHT, openUp ? spaceAbove : spaceBelow),
+          Math.min(maxHeightCap, openUp ? spaceAbove : spaceBelow),
         ),
       });
     };
@@ -171,7 +211,7 @@ export function Select({
       window.removeEventListener("resize", update);
       window.removeEventListener("scroll", update, true);
     };
-  }, [open, dialogPortal, options.length]);
+  }, [open, dialogPortal, options.length, panelHeight, hasCustomPanel]);
 
   /**
    * The listbox only mounts on the commit *after* the layout effect above
@@ -184,7 +224,7 @@ export function Select({
    */
   const listMounted = open && listPos !== null;
   useEffect(() => {
-    if (!listMounted) return;
+    if (!listMounted || hasCustomPanel) return;
     const list = listRef.current;
     if (!list) return;
     const selectedButton = list.querySelector<HTMLButtonElement>(
@@ -196,7 +236,7 @@ export function Select({
       "button[data-option-value]",
     );
     (selectedButton ?? firstButton)?.focus();
-  }, [listMounted, optionsAsButtons]);
+  }, [listMounted, optionsAsButtons, hasCustomPanel]);
 
   const moveFocus = (index: number, direction: 1 | -1) => {
     const list = listRef.current;
@@ -271,22 +311,37 @@ export function Select({
               transform: listPos.openUp ? "translateY(-100%)" : undefined,
             }}
           >
-            <SelectOptionList
-              ref={listRef}
-              id={listId}
-              ariaLabel={listAriaLabel ?? ariaLabel}
-              value={value}
-              options={options}
-              onSelect={(optionValue) => {
-                onChange(optionValue);
-                setOpen(false);
-              }}
-              onKeyDown={handleListKeyDown}
-              hoverSide={hoverSide}
-              optionsAsButtons={optionsAsButtons}
-              className="overflow-y-auto"
-              style={{ maxHeight: listPos.maxHeight }}
-            />
+            {renderPanel ? (
+              <div
+                ref={panelRef}
+                className="chat-scroll overflow-y-auto"
+                style={{ maxHeight: listPos.maxHeight }}
+              >
+                {renderPanel({
+                  id: listId,
+                  close: () => setOpen(false),
+                  width: listPos.width,
+                  maxHeight: listPos.maxHeight,
+                })}
+              </div>
+            ) : (
+              <SelectOptionList
+                ref={listRef}
+                id={listId}
+                ariaLabel={listAriaLabel ?? ariaLabel}
+                value={value}
+                options={options}
+                onSelect={(optionValue) => {
+                  onChange(optionValue);
+                  setOpen(false);
+                }}
+                onKeyDown={handleListKeyDown}
+                hoverSide={hoverSide}
+                optionsAsButtons={optionsAsButtons}
+                className="overflow-y-auto"
+                style={{ maxHeight: listPos.maxHeight }}
+              />
+            )}
           </div>,
           portalTarget,
         )

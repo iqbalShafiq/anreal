@@ -210,8 +210,12 @@ export function ProvidersSection({ active }: { active: boolean }) {
           saving={connections.saving}
           onTest={runTest}
           onSave={async (input) => {
-            await connections.save(editingId ?? null, input);
-            setEditingId(undefined);
+            const saved = await connections.save(editingId ?? null, input);
+            // A newly added connection stays open: its Models section (with
+            // Add model) is only reachable from the edit state, and the user
+            // has no reason to hunt for the Edit button after creating it.
+            // Editing an existing connection keeps returning to the list.
+            setEditingId(editingId === null ? saved.id : undefined);
           }}
           onCancel={() => setEditingId(undefined)}
         />
@@ -683,6 +687,7 @@ function ConnectionModels({
           key={editingModelId ?? "new"}
           connectionId={connection.id}
           connectionSlug={connection.slug}
+          connectionLabel={connection.label}
           imageStyle={
             kinds.find((info) => info.kind === connection.kind)?.imageStyle ??
             "none"

@@ -107,6 +107,7 @@ function renderMenu(
     onAddModel?: () => void;
     onClose?: () => void;
     gridColumns?: number;
+    sorts?: { key: PickerSort; label: string }[];
   } = {},
 ) {
   const onSelect = vi.fn();
@@ -117,6 +118,7 @@ function renderMenu(
       onAddModel={options.onAddModel}
       onClose={options.onClose}
       gridColumns={options.gridColumns ?? 3}
+      sorts={options.sorts}
     />,
   );
   return { onSelect };
@@ -129,12 +131,14 @@ function MenuHost({
   onAddModel,
   onClose,
   gridColumns,
+  sorts,
 }: {
   models: ModelInfo[];
   onSelect: (value: string) => void;
   onAddModel?: () => void;
   onClose?: () => void;
   gridColumns: number;
+  sorts?: { key: PickerSort; label: string }[];
 }) {
   const [filters, setFilters] = useState<PickerFilterState>(
     EMPTY_PICKER_FILTERS,
@@ -154,6 +158,7 @@ function MenuHost({
       sort={sort}
       onSortChange={setSort}
       gridColumns={gridColumns}
+      sorts={sorts}
     />
   );
 }
@@ -337,6 +342,24 @@ describe("ModelPickerMenu: sort", () => {
     fireEvent.click(screen.getByRole("button", { name: "Name" }));
 
     expect(optionValues()).toEqual(["openai/alpha", "openai/bravo"]);
+  });
+
+  it("offers only the sorts the caller declares", () => {
+    renderMenu([catalogModel("openai/alpha", { name: "Alpha" })], {
+      sorts: [
+        { key: "default", label: "Default" },
+        { key: "name", label: "Name" },
+        { key: "context", label: "Context" },
+      ],
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Sort" }));
+
+    expect(screen.getByRole("button", { name: "Name" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Context" })).toBeTruthy();
+    // Price and Vendor mean nothing for a raw provider listing.
+    expect(screen.queryByRole("button", { name: "Price" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Vendor" })).toBeNull();
   });
 });
 

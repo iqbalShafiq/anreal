@@ -76,13 +76,26 @@ export function topBarBottom(): number {
 }
 
 /**
+ * The fields the hover card reads. Deliberately structural — a BYOK discovery
+ * row has no price or output-price data, and the card simply omits those rows
+ * instead of requiring a full `ModelInfo`.
+ */
+export type ModelDetailInfo = {
+  source: "catalog" | "connection";
+  provider: { name: string };
+  inputModalities: string[];
+  contextWindowTokens: number;
+  prices: { input: number | null; output?: number | null };
+};
+
+/**
  * Hover detail for a model option: input modality tags (icons only), max
  * context window, and input/output prices. Exported so the picker menu's grid
  * cards can carry the same hover card as the list rows.
  */
-export function ModelDetail({ model }: { model: ModelInfo }) {
+export function ModelDetail({ model }: { model: ModelDetailInfo }) {
   const priceIn = formatModelPrice(model.prices.input);
-  const priceOut = formatModelPrice(model.prices.output);
+  const priceOut = formatModelPrice(model.prices.output ?? null);
   return (
     <div className="flex w-full min-w-0 flex-col gap-1.5">
       <div className="flex flex-wrap items-center gap-1">

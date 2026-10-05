@@ -60,11 +60,12 @@ export function useProviderConnections(active: boolean) {
   }, [active]);
 
   const mutate = useCallback(
-    async (fn: () => Promise<unknown>, failure: string) => {
+    async <T,>(fn: () => Promise<T>, failure: string): Promise<T> => {
       setSaving(true);
       try {
-        await fn();
+        const result = await fn();
         await reload();
+        return result;
       } catch (error) {
         setError(error instanceof Error ? error.message : failure);
         throw error;

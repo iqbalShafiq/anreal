@@ -49,6 +49,20 @@ export function slugPreview(connectionSlug: string, upstreamId: string): string 
 }
 
 /**
+ * The display name the editor prefills from a model id: words are split at
+ * hyphens, underscores, slashes, and whitespace, then each is capitalised —
+ * `deepseek-v4-flash-vision-exp` becomes `Deepseek V4 Flash Vision Exp`. A dot
+ * inside a word is kept (`v4.1` stays `V4.1`), and a separator-only id yields
+ * the empty string rather than a stray word.
+ */
+export function displayNameFromModelId(id: string): string {
+  const words = id.match(/[A-Za-z0-9]+(?:\.[A-Za-z0-9]+)*/g) ?? [];
+  return words
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(" ");
+}
+
+/**
  * Compare the user's selected efforts against the adapter's declared set.
  * `unsupported` lists selections the adapter does not accept; `missing` lists
  * adapter values the user has not selected. Both preserve their source order.

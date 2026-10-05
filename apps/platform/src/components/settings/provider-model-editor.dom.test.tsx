@@ -1,7 +1,19 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ModelInfo, ProviderModelRow } from "#/lib/api";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  prefillProviderModel,
+  type ListedProviderModel,
+  type ModelInfo,
+  type ProviderModelRow,
+} from "#/lib/api";
 import { ProviderModelEditor } from "./provider-model-editor";
 
 vi.mock("#/lib/api", async (importOriginal) => {
@@ -10,6 +22,10 @@ vi.mock("#/lib/api", async (importOriginal) => {
 });
 
 afterEach(cleanup);
+
+beforeEach(() => {
+  vi.mocked(prefillProviderModel).mockReset();
+});
 
 /** A merged-catalog row, reduced to the fields this test's editor reads. */
 function catalogRow(vendorLabel: string | null): ModelInfo {
@@ -56,20 +72,24 @@ function renderEditor(input: {
   initial?: ProviderModelRow | null;
   models?: ModelInfo[];
   imageLimits?: typeof IMAGE_LIMITS | null;
+  effortVocabulary?: string[];
+  onDiscover?: () => Promise<ListedProviderModel[]>;
+  connectionLabel?: string;
 }) {
   return render(
     <ProviderModelEditor
       connectionId="conn-1"
       connectionSlug="gw"
+      connectionLabel={input.connectionLabel ?? "My gateway"}
       imageStyle={input.imageLimits ? "openrouter-images" : "none"}
       imageLimits={input.imageLimits ?? null}
-      effortVocabulary={["low"]}
+      effortVocabulary={input.effortVocabulary ?? ["low"]}
       models={input.models ?? []}
       initial={input.initial ?? null}
       saving={false}
       onSave={async () => undefined}
       onCancel={() => undefined}
-      onDiscover={async () => []}
+      onDiscover={input.onDiscover ?? (async () => [])}
     />,
   );
 }
@@ -181,5 +201,179 @@ describe("ProviderModelEditor — the vendor field", () => {
 
     expect(vendor.value).toBe("Acme AI");
     expect(screen.queryByText(/^Suggested:/)).toBeNull();
+  });
+});
+
+describe("ProviderModelEditor — declaring reasoning efforts", () => {
+  const VOCABULARY = ["minimal", "low", "medium", "high"];
+
+  it("renders every vocabulary effort as an unpressed toggle chip", () => {
+    renderEditor({ effortVocabulary: VOCABULARY });
+
+    expect(screen.queryByRole("checkbox")).toBeNull();
+    for (const effort of VOCABULARY) {
+      const chip = screen.getByRole("button", { name: effort });
+      expect(chip.getAttribute("aria-pressed")).toBe("false");
+    }
+  });
+
+  it("toggles one effort on and back off", () => {
+    renderEditor({ effortVocabulary: VOCABULARY });
+    const high = screen.getByRole("button", { name: "high" });
+
+    fireEvent.click(high);
+    expect(high.getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByText("1 selected")).toBeTruthy();
+
+    fireEvent.click(high);
+    expect(high.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("marks the efforts an existing model already declares", () => {
+    renderEditor({
+      effortVocabulary: VOCABULARY,
+      initial: {
+        id: "m1",
+        slug: "gw/model",
+        upstreamId: "gw/model",
+        name: "Model",
+        label: "Model",
+        hint: null,
+        description: null,
+        vendorLabel: null,
+        iconSvg: "",
+        outputType: "text",
+        contextWindowTokens: null,
+        maxInputTokens: null,
+        maxOutputTokens: null,
+        reasoningEfforts: ["low", "high"],
+        capabilities: null,
+        imageCapabilities: null,
+        isActive: true,
+        sortOrder: 0,
+        connectionId: "conn-1",
+        createdAt: "",
+        updatedAt: "",
+      },
+    });
+
+    expect(
+      screen.getByRole("button", { name: "low" }).getAttribute("aria-pressed"),
+    ).toBe("true");
+    expect(
+      screen.getByRole("button", { name: "high" }).getAttribute("aria-pressed"),
+    ).toBe("true");
+    expect(screen.getByText("2 selected")).toBeTruthy();
+  });
+
+  it("selects the whole vocabulary with All and empties it with Clear", () => {
+    renderEditor({ effortVocabulary: VOCABULARY });
+
+    fireEvent.click(screen.getByRole("button", { name: "Select all efforts" }));
+    for (const effort of VOCABULARY) {
+      expect(
+        screen.getByRole("button", { name: effort }).getAttribute("aria-pressed"),
+      ).toBe("true");
+    }
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear all efforts" }));
+    for (const effort of VOCABULARY) {
+      expect(
+        screen.getByRole("button", { name: effort }).getAttribute("aria-pressed"),
+      ).toBe("false");
+    }
+    expect(screen.getByText("0 selected")).toBeTruthy();
+  });
+});
+
+describe("ProviderModelEditor — discovering a model", () => {
+  const LISTING: ListedProviderModel[] = [
+    { id: "deepseek-v4-flash", name: "DeepSeek V4 Flash", contextLength: 128_000 },
+    { id: "other-model", name: "Other Model", contextLength: 8_000 },
+  ];
+
+  function prefill(overrides: Record<string, unknown> = {}) {
+    return {
+      name: "deepseek-v4-flash",
+      contextWindowTokens: 128_000,
+      maxInputTokens: null,
+      maxOutputTokens: null,
+      reasoningEfforts: [],
+      defaultReasoningEffort: null,
+      capabilities: null,
+      providerReported: true,
+      ...overrides,
+    };
+  }
+
+  it("opens the composer's search, filter, and sort picker for the provider's models", async () => {
+    renderEditor({ onDiscover: async () => LISTING });
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Provider model/ }),
+    );
+
+    expect(
+      await screen.findByRole("searchbox", { name: "Search models" }),
+    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Filter" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Sort" })).toBeTruthy();
+    expect(screen.getByRole("option", { name: /DeepSeek V4 Flash/ })).toBeTruthy();
+  });
+
+  it("narrows the listing with the panel's search", async () => {
+    renderEditor({ onDiscover: async () => LISTING });
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Provider model/ }),
+    );
+    fireEvent.change(
+      await screen.findByRole("searchbox", { name: "Search models" }),
+      { target: { value: "deepseek" } },
+    );
+
+    expect(screen.getByRole("option", { name: /DeepSeek V4 Flash/ })).toBeTruthy();
+    expect(screen.queryByRole("option", { name: /Other Model/ })).toBeNull();
+  });
+
+  it("prefills the display name in title case from the chosen id", async () => {
+    vi.mocked(prefillProviderModel).mockResolvedValue(prefill());
+    renderEditor({ onDiscover: async () => LISTING });
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Provider model/ }),
+    );
+    const option = await screen.findByRole("option", {
+      name: /DeepSeek V4 Flash/,
+    });
+    fireEvent.click(within(option).getByRole("button"));
+
+    await waitFor(() =>
+      expect(
+        (screen.getByLabelText("Display name") as HTMLInputElement).value,
+      ).toBe("Deepseek V4 Flash"),
+    );
+    expect(vi.mocked(prefillProviderModel)).toHaveBeenCalledWith("conn-1", {
+      upstreamId: "deepseek-v4-flash",
+    });
+  });
+
+  it("prefills the same title-cased name for an id typed by hand", async () => {
+    vi.mocked(prefillProviderModel).mockResolvedValue(
+      prefill({ name: "acme-vision-exp" }),
+    );
+    renderEditor({});
+
+    fireEvent.click(screen.getByRole("button", { name: /Model source/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Enter an id" }));
+    const id = screen.getByLabelText("Model id");
+    fireEvent.change(id, { target: { value: "acme-vision-exp" } });
+    fireEvent.blur(id);
+
+    await waitFor(() =>
+      expect(
+        (screen.getByLabelText("Display name") as HTMLInputElement).value,
+      ).toBe("Acme Vision Exp"),
+    );
   });
 });

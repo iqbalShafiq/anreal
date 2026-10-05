@@ -66,3 +66,75 @@ describe("Select: listAriaLabel", () => {
     expect(screen.getByRole("listbox", { name: "Source" })).toBeTruthy();
   });
 });
+
+describe("Select: custom panel", () => {
+  it("renders the panel instead of the option list and closes on its request", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(
+      <Select
+        value=""
+        onChange={onChange}
+        options={[]}
+        ariaLabel="Model"
+        renderPanel={({ close }) => (
+          <button
+            type="button"
+            onClick={() => {
+              onChange("m1");
+              close();
+            }}
+          >
+            Choose one
+          </button>
+        )}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /model/i }));
+    await user.click(
+      await screen.findByRole("button", { name: "Choose one" }),
+    );
+
+    expect(onChange).toHaveBeenCalledWith("m1");
+    expect(screen.queryByRole("button", { name: "Choose one" })).toBeNull();
+  });
+
+  it("lets the panel consume Escape before the dropdown closes", async () => {
+    const user = userEvent.setup();
+    let consumed = false;
+    render(
+      <Select
+        value=""
+        onChange={vi.fn()}
+        options={[]}
+        ariaLabel="Model"
+        renderPanel={() => (
+          <input
+            aria-label="Panel search"
+            onKeyDown={(event) => {
+              // Consume only the first Escape, like a real filter-clear does.
+              if (event.key === "Escape" && !consumed) {
+                event.preventDefault();
+                consumed = true;
+              }
+            }}
+          />
+        )}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /model/i }));
+    const search = await screen.findByLabelText("Panel search");
+    search.focus();
+
+    // First Escape is the panel's (clear a filter); the dropdown must stay.
+    await user.keyboard("{Escape}");
+    expect(consumed).toBe(true);
+    expect(screen.getByLabelText("Panel search")).toBeTruthy();
+
+    // The next Escape is unclaimed, so the dropdown closes.
+    await user.keyboard("{Escape}");
+    expect(screen.queryByLabelText("Panel search")).toBeNull();
+  });
+});

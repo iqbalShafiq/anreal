@@ -50,6 +50,16 @@ export const PICKER_SORTS: { key: PickerSort; label: string }[] = [
 ];
 
 /**
+ * The sorts worth offering for a provider's raw listing: it carries no prices
+ * and no declared vendor, so those orders would appear to do nothing.
+ */
+export const LISTING_PICKER_SORTS: { key: PickerSort; label: string }[] =
+  PICKER_SORTS.filter(
+    (entry) =>
+      entry.key === "default" || entry.key === "name" || entry.key === "context",
+  );
+
+/**
  * The only fields the picker reads from a model. Structurally satisfied by
  * `ModelInfo`, so this module never imports the API client (or React).
  */
@@ -66,6 +76,13 @@ export type PickerSource = {
   contextWindowTokens: number;
   prices: { input: number | null };
 };
+
+/**
+ * A picker row: the filter contract plus the icon it renders. `ModelInfo`
+ * satisfies it, and so does a raw provider listing mapped client-side, which
+ * is what lets the composer's picker serve the BYOK editor unchanged.
+ */
+export type PickerModel = PickerSource & { iconSvg?: string };
 
 /**
  * The context thresholds the picker may offer. They are the two floors the spec

@@ -15,7 +15,6 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
-import type { ModelInfo } from "#/lib/api";
 import { formatModelContext } from "#/lib/chat/models";
 import {
   EMPTY_PICKER_FILTERS,
@@ -26,6 +25,7 @@ import {
   sortModels,
   type PickerCapability,
   type PickerFilterState,
+  type PickerModel,
   type PickerSort,
   type PickerView,
 } from "#/lib/model-picker";
@@ -37,6 +37,7 @@ import {
   SelectOptionList,
   type SelectOption,
 } from "#/components/ui/select-list";
+import { ToggleChip } from "#/components/ui/toggle-chip";
 import { ModelDetail, ModelIcon } from "./model-reasoning-switcher";
 
 /**
@@ -76,11 +77,9 @@ const CAPABILITIES: { key: PickerCapability; label: string }[] = [
 ];
 
 /**
- * One chip. Inlined rather than promoted to a `ui/` primitive: it is a
- * single-line pressed button with one caller (this menu), and the app's
- * reusable selected/unselected tone already lives in `SegmentedTabs` — this is
- * the smaller, pressed-only sibling of that treatment, so a shared primitive
- * would carry only one caller's shape.
+ * One chip. Delegates to the shared `ToggleChip` so the picker's filter/sort
+ * chips and the provider editor's reasoning chips cannot drift apart; the
+ * default `sm` size is the picker's original h-6/text-[10px] treatment.
  */
 function FilterChip({
   label,
@@ -91,20 +90,7 @@ function FilterChip({
   pressed: boolean;
   onToggle: () => void;
 }) {
-  return (
-    <button
-      type="button"
-      aria-pressed={pressed}
-      onClick={onToggle}
-      className={`inline-flex h-6 cursor-pointer items-center rounded-md border px-2 text-[10px] font-medium transition duration-150 active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-ring ${
-        pressed
-          ? "border-accent/40 bg-accent/10 text-accent"
-          : "border-hairline bg-white/[0.04] text-text-muted hover:bg-white/10 hover:text-text"
-      }`}
-    >
-      {label}
-    </button>
-  );
+  return <ToggleChip label={label} pressed={pressed} onToggle={onToggle} />;
 }
 
 /**
@@ -172,10 +158,16 @@ export function ModelPickerMenu({
   sort,
   onSortChange,
   gridColumns,
+  sorts = PICKER_SORTS,
 }: {
   /** The listbox id, so the caller's `aria-controls` points at the real list. */
   id: string;
-  models: ModelInfo[];
+  /**
+   * The rows to present. `ModelInfo` satisfies `PickerModel`, and so does a
+   * provider listing mapped client-side — the picker's filter/sort logic reads
+   * only the picker contract.
+   */
+  models: PickerModel[];
   value: string;
   onSelect: (value: string) => void;
   onAddModel?: () => void;
@@ -197,6 +189,11 @@ export function ModelPickerMenu({
   onSortChange: (sort: PickerSort) => void;
   /** Columns for grid layout, derived by the caller from the panel width. */
   gridColumns: number;
+  /**
+   * The sorts offered. Defaults to the full catalog set; a caller showing a
+   * raw provider listing passes the subset that can actually discriminate.
+   */
+  sorts?: { key: PickerSort; label: string }[];
 }) {
   const liveId = useId();
   const searchRef = useRef<HTMLInputElement>(null);
@@ -257,7 +254,9 @@ export function ModelPickerMenu({
     value: model.modelId,
     label: model.name,
     hint: model.hint ?? undefined,
-    icon: <ModelIcon svg={model.iconSvg} className="size-3.5 shrink-0 opacity-70" />,
+    icon: (
+      <ModelIcon svg={model.iconSvg ?? ""} className="size-3.5 shrink-0 opacity-70" />
+    ),
     detail: <ModelDetail model={model} />,
   }));
 
@@ -517,7 +516,7 @@ export function ModelPickerMenu({
           {/* Inline sorts: a segmented row of pressed buttons. */}
           {showSort ? (
             <FilterGroup label="Sort by">
-              {PICKER_SORTS.map((entry) => (
+              {sorts.map((entry) => (
                 <FilterChip
                   key={entry.key}
                   label={entry.label}

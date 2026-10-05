@@ -3,6 +3,7 @@ import {
   canSaveConnection,
   connectionSlugError,
   deriveConnectionSlug,
+  displayNameFromModelId,
   draftFromListedModel,
   effortDiff,
   effortWarning,
@@ -113,6 +114,30 @@ describe("draftFromListedModel", () => {
     expect(draft.name).toBe("gw/model-x");
     expect(draft.contextWindowTokens).toBeNull();
     expect(draft.reasoningEfforts).toEqual([]);
+  });
+});
+
+describe("displayNameFromModelId", () => {
+  it("title-cases each word with the hyphens removed", () => {
+    expect(displayNameFromModelId("deepseek-v4-flash-vision-exp")).toBe(
+      "Deepseek V4 Flash Vision Exp",
+    );
+  });
+
+  it("keeps a dot inside a word", () => {
+    expect(displayNameFromModelId("deepseek-v4.1-flash")).toBe(
+      "Deepseek V4.1 Flash",
+    );
+  });
+
+  it("treats slashes, underscores, and repeated separators as word breaks", () => {
+    expect(displayNameFromModelId("openai/gpt-5.6__luna  turbo")).toBe(
+      "Openai Gpt 5.6 Luna Turbo",
+    );
+  });
+
+  it("returns an empty string for an id with no word characters", () => {
+    expect(displayNameFromModelId("--..--")).toBe("");
   });
 });
 

@@ -2,7 +2,21 @@ import { useEffect, useMemo, useState } from "react";
 import { Button } from "#/components/ui/button";
 import { FormTextAreaField, FormTextField } from "#/components/ui/form-field";
 import { Select } from "#/components/ui/select";
+import { ToggleChip } from "#/components/ui/toggle-chip";
+import { ReasoningEffortIcon } from "#/components/composer/model-reasoning-switcher";
 import {
+  ModelPickerMenu,
+  gridColumnsForWidth,
+} from "#/components/composer/model-picker-menu";
+import {
+  EMPTY_PICKER_FILTERS,
+  LISTING_PICKER_SORTS,
+  type PickerFilterState,
+  type PickerModel,
+  type PickerSort,
+} from "#/lib/model-picker";
+import {
+  displayNameFromModelId,
   effortWarning,
   imageCapabilityDraft,
   imageCapabilityPayload,
@@ -38,6 +52,10 @@ function parseLimit(value: string): number | null | "invalid" {
   return parsed;
 }
 
+/** Small inline text action (All / Clear / Suggested), shared for one rhythm. */
+const TEXT_BUTTON_CLASS =
+  "shrink-0 cursor-pointer rounded-md border border-hairline px-2 py-0.5 text-[11px] text-text-muted transition duration-150 ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-white/[0.06] hover:text-text disabled:cursor-not-allowed disabled:opacity-40";
+
 /**
  * The vendor names the catalog already files BYOK rows under: each one is a
  * `vendorLabel` some other model declared, so it stands in for the vendors a
@@ -71,6 +89,7 @@ function formatVendorExamples(vendors: string[]): string {
 export function ProviderModelEditor({
   connectionId,
   connectionSlug,
+  connectionLabel,
   imageStyle,
   imageLimits,
   effortVocabulary,
@@ -83,6 +102,8 @@ export function ProviderModelEditor({
 }: {
   connectionId: string;
   connectionSlug: string;
+  /** The connection's label, shown as the source in the discovery hover card. */
+  connectionLabel: string;
   imageStyle: ImageStyle;
   imageLimits: ImageCapabilityLimits | null;
   effortVocabulary: string[];
@@ -126,7 +147,12 @@ export function ProviderModelEditor({
   );
   const [discovering, setDiscovering] = useState(false);
   const [discoverError, setDiscoverError] = useState<string | null>(null);
-  const [filter, setFilter] = useState("");
+  // The discovery panel's search/filter/sort, owned here so they survive the
+  // panel closing — the same session-scoped intent the composer keeps.
+  const [pickerFilters, setPickerFilters] = useState<PickerFilterState>(
+    EMPTY_PICKER_FILTERS,
+  );
+  const [pickerSort, setPickerSort] = useState<PickerSort>("default");
   const [prefilling, setPrefilling] = useState(false);
   const [errors, setErrors] = useState<FieldErrors>({});
   // The output type the editor submits; an existing image row keeps its value
@@ -176,8 +202,12 @@ export function ProviderModelEditor({
         upstreamId: trimmed,
       });
       const draft = modelDraftFromPrefill(prefill);
+      // The display-name default is the id as words ("deepseek-v4-flash" →
+      // "Deepseek V4 Flash"), not the raw slug; a separator-only id keeps the
+      // server's fallback.
+      const titleizedName = displayNameFromModelId(trimmed);
       setUpstreamId(trimmed);
-      setName(draft.name);
+      setName(titleizedName.length > 0 ? titleizedName : draft.name);
       setContextWindowTokens(draft.contextWindowTokens);
       setMaxInputTokens(draft.maxInputTokens);
       setMaxOutputTokens(draft.maxOutputTokens);
@@ -277,19 +307,53 @@ export function ProviderModelEditor({
     }
   };
 
-  const normalizedFilter = filter.trim().toLowerCase();
-  const options = (discovered ?? [])
-    .filter(
-      (model) =>
-        normalizedFilter.length === 0 ||
-        model.id.toLowerCase().includes(normalizedFilter) ||
-        (model.name ?? "").toLowerCase().includes(normalizedFilter),
-    )
-    .map((model) => ({
-      value: model.id,
-      label: model.name?.trim() || model.id,
-      hint: model.name && model.name.trim() !== model.id ? model.id : undefined,
-    }));
+  /**
+   * The provider's listing as picker rows. The picker contract is satisfied
+   * structurally: capabilities and prices are unknown before registration, so
+   * those facet groups simply never render for a listing.
+   */
+  const pickerModels = useMemo<PickerModel[]>(
+    () =>
+      (discovered ?? []).map((model) => {
+        const name = model.name?.trim() || model.id;
+        return {
+          modelId: model.id,
+          name,
+          label: name,
+          hint: model.name && model.name.trim() !== model.id ? model.id : null,
+          provider: { slug: connectionSlug, name: connectionLabel },
+          vendorLabel: null,
+          source: "connection",
+          inputModalities: [],
+          reasoningEfforts: [],
+          contextWindowTokens: model.contextLength ?? 0,
+          prices: { input: null },
+        };
+      }),
+    [discovered, connectionSlug, connectionLabel],
+  );
+
+  /**
+   * The trigger's label source: the listing rows, plus the current id when the
+   * listing does not contain it (a fresh edit, or a model the provider stopped
+   * listing), so the field never reads "Select…" for a value it holds.
+   */
+  const triggerOptions = useMemo(() => {
+    const rows: { value: string; label: string; hint?: string }[] =
+      pickerModels.map((model) => ({
+        value: model.modelId,
+        label: model.name,
+        hint: model.hint ?? undefined,
+      }));
+    const current = upstreamId.trim();
+    if (current.length > 0 && !rows.some((row) => row.value === current)) {
+      rows.unshift({
+        value: current,
+        label: displayNameFromModelId(current) || current,
+      });
+    }
+    return rows;
+  }, [pickerModels, upstreamId]);
 
   const warning = wantsReasoning
     ? effortWarning(reasoningEfforts, adapterEfforts)
@@ -344,13 +408,6 @@ export function ProviderModelEditor({
 
       {mode === "discover" ? (
         <div className="flex flex-col gap-2">
-          <FormTextField
-            label="Search"
-            value={filter}
-            onChange={(event) => setFilter(event.target.value)}
-            placeholder="Filter the provider's models"
-            disabled={busy || discovering}
-          />
           {discovering ? (
             <p className="text-[11px] text-text-faint">Loading models…</p>
           ) : discoverError ? (
@@ -367,20 +424,51 @@ export function ProviderModelEditor({
                 Retry
               </Button>
             </div>
-          ) : options.length === 0 ? (
+          ) : pickerModels.length === 0 ? (
             <p className="text-[11px] text-text-faint">
-              {(discovered ?? []).length === 0
-                ? "The provider returned no models."
-                : "No models match that filter."}
+              The provider returned no models.
             </p>
           ) : (
-            <Select
-              value={upstreamId}
-              onChange={(value) => void applyPrefill(value)}
-              options={options}
-              ariaLabel="Provider model"
-              disabled={busy}
-            />
+            <div className="flex flex-col gap-1.5">
+              <span className="text-xs font-medium tracking-wide text-text-muted">
+                Model
+              </span>
+              <Select
+                value={upstreamId}
+                onChange={(value) => void applyPrefill(value)}
+                options={triggerOptions}
+                ariaLabel="Provider model"
+                disabled={busy}
+                panelHeight={440}
+                renderPanel={({ close, id, width }) => (
+                  // The composer's picker, chromed the same way its portal is,
+                  // so search/filter/sort behave identically in both surfaces.
+                  <div className="flex flex-col rounded-xl border border-white/[0.08] bg-canvas-elevated text-text shadow-[0_12px_40px_-12px_rgba(0,0,0,0.75)] animate-fade-in">
+                    <ModelPickerMenu
+                      id={id}
+                      models={pickerModels}
+                      value={upstreamId}
+                      open
+                      filters={pickerFilters}
+                      onFiltersChange={setPickerFilters}
+                      sort={pickerSort}
+                      onSortChange={setPickerSort}
+                      gridColumns={gridColumnsForWidth(width)}
+                      sorts={LISTING_PICKER_SORTS}
+                      onSelect={(selected) => {
+                        void applyPrefill(selected);
+                        close();
+                      }}
+                      onClose={close}
+                    />
+                  </div>
+                )}
+              />
+              <p className="text-[11px] text-text-faint">
+                Search, filter, and sort the provider's models; picking one fills
+                the form below.
+              </p>
+            </div>
           )}
         </div>
       ) : (
@@ -440,7 +528,7 @@ export function ProviderModelEditor({
                 setVendorLabel(offeredVendor);
               }}
               disabled={busy}
-              className="shrink-0 cursor-pointer rounded-md border border-hairline px-2 py-0.5 text-[11px] text-text-muted transition duration-150 ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-white/[0.06] hover:text-text disabled:cursor-not-allowed disabled:opacity-40"
+              className={TEXT_BUTTON_CLASS}
             >
               Suggested: {offeredVendor}
             </button>
@@ -588,7 +676,7 @@ export function ProviderModelEditor({
       ) : null}
 
       {wantsReasoning ? (
-        <fieldset className="flex flex-col gap-2 rounded-xl border border-white/[0.06] p-3">
+        <fieldset className="flex flex-col gap-2.5 rounded-xl border border-white/[0.06] p-3">
           <legend className="px-1 text-[11px] font-medium uppercase tracking-wide text-text-faint">
             Reasoning efforts
           </legend>
@@ -597,23 +685,57 @@ export function ProviderModelEditor({
               No reasoning vocabulary is available.
             </p>
           ) : (
-            <div className="flex flex-wrap gap-x-4 gap-y-1.5">
-              {effortVocabulary.map((effort) => (
-                <label
-                  key={effort}
-                  className="flex cursor-pointer items-center gap-2 text-xs text-text"
-                >
-                  <input
-                    type="checkbox"
-                    checked={reasoningEfforts.includes(effort)}
-                    onChange={() => toggleEffort(effort)}
+            <>
+              <p className="text-[11px] text-text-faint">
+                Pick every effort this model accepts.
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {effortVocabulary.map((effort) => (
+                  <ToggleChip
+                    key={effort}
+                    label={effort}
+                    pressed={reasoningEfforts.includes(effort)}
+                    onToggle={() => toggleEffort(effort)}
                     disabled={busy}
-                    className="accent-[var(--color-accent)]"
+                    size="md"
+                    // The gauge is the composer's own level language: fill grows
+                    // with the effort's rank, and `none` keeps the empty track.
+                    icon={
+                      <ReasoningEffortIcon
+                        effort={effort === "none" ? null : effort}
+                        efforts={effortVocabulary}
+                        className="size-3.5 shrink-0"
+                      />
+                    }
                   />
-                  {effort}
-                </label>
-              ))}
-            </div>
+                ))}
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] text-text-faint">
+                  {reasoningEfforts.length} selected
+                </span>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    aria-label="Select all efforts"
+                    onClick={() => setReasoningEfforts([...effortVocabulary])}
+                    disabled={busy}
+                    className={TEXT_BUTTON_CLASS}
+                  >
+                    All
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="Clear all efforts"
+                    onClick={() => setReasoningEfforts([])}
+                    disabled={busy}
+                    className={TEXT_BUTTON_CLASS}
+                  >
+                    Clear
+                  </button>
+                </div>
+              </div>
+            </>
           )}
           {adapterEfforts.length > 0 ? (
             <p className="text-[11px] text-text-faint">

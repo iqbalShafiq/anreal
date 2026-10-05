@@ -2,7 +2,7 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ProviderKindInfo } from "#/lib/api";
+import type { ProviderConnection, ProviderKindInfo } from "#/lib/api";
 
 /**
  * The hooks the section reads and the three API calls it makes are mocked, so
@@ -60,6 +60,25 @@ const KIND: ProviderKindInfo = {
   imageLimits: null,
 };
 
+/** A saved connection as the API client returns it after a create. */
+function savedConnection(overrides: Partial<ProviderConnection> = {}): ProviderConnection {
+  return {
+    id: "conn-new",
+    kind: "openai",
+    label: "My gateway",
+    slug: "my-gateway",
+    baseUrl: null,
+    api: null,
+    isActive: true,
+    sortOrder: 0,
+    hasCredentials: true,
+    credentialsStatus: "ok",
+    createdAt: "2026-10-05T00:00:00.000Z",
+    updatedAt: "2026-10-05T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.listProviderKinds.mockResolvedValue({
@@ -68,7 +87,7 @@ beforeEach(() => {
   });
   mocks.listProviderModels.mockResolvedValue([]);
   mocks.testProviderConnection.mockResolvedValue({ ok: true, modelCount: 3 });
-  mocks.save.mockResolvedValue(undefined);
+  mocks.save.mockResolvedValue(savedConnection());
   mocks.useProviderConnections.mockReturnValue({
     data: [],
     loading: false,
@@ -165,5 +184,41 @@ describe("ProvidersSection — the Test button carries dynamic markers", () => {
         }),
       ),
     );
+  });
+});
+
+describe("ProvidersSection — after saving a new provider", () => {
+  it("stays on the saved connection so a model can be added without opening Edit", async () => {
+    const user = userEvent.setup();
+    const saved = savedConnection();
+    // `save` resolves with the created row and the list holds it, exactly as
+    // the real hook's reload leaves the section.
+    mocks.useProviderConnections.mockReturnValue({
+      data: [saved],
+      loading: false,
+      error: null,
+      saving: false,
+      reload: vi.fn(),
+      save: mocks.save,
+      remove: vi.fn(),
+      toggle: vi.fn(),
+    });
+    render(<ProvidersSection active />);
+
+    await user.click(
+      await screen.findByRole("button", { name: "Add provider" }),
+    );
+    await user.type(screen.getByLabelText("Label"), "My gateway");
+    await user.click(screen.getByRole("button", { name: "Test connection" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Add provider" }),
+    );
+
+    // Still editing the saved connection — not back to the provider list.
+    expect(
+      await screen.findByRole("heading", { name: "Edit provider connection" }),
+    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Add model" })).toBeTruthy();
+    expect(screen.getByText("No models yet — add the ones you want in the picker.")).toBeTruthy();
   });
 });
