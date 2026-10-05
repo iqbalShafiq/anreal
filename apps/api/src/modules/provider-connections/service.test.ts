@@ -661,6 +661,47 @@ function updatedCredentialsRef(db: unknown): string {
   return call.data.credentialsRef;
 }
 
+/** The full `data` a put through `updateConnection` would write. */
+function updatedConnectionData(db: unknown): Record<string, unknown> {
+  const update = (
+    db as { providerConnection: { update: ReturnType<typeof vi.fn> } }
+  ).providerConnection.update;
+  return (update.mock.calls[0]?.[0] as { data: Record<string, unknown> }).data;
+}
+
+/**
+ * A stored `openai` connection whose kind default (`responses`) differs from
+ * its stored `api` (`chat`) — the exact shape a partial update used to reset.
+ */
+function makeStoredConnectionDb(
+  credentialsRef: string,
+  overrides: Record<string, unknown> = {},
+) {
+  return makeDb({
+    providerConnection: {
+      count: vi.fn(async () => 1),
+      findFirst: vi.fn(async () => ({
+        id: "pc_1",
+        userId: "u_1",
+        kind: "openai",
+        label: "OpenAI",
+        slug: "openai-gw",
+        baseUrl: "https://gw.example/v1",
+        api: "chat",
+        credentialsRef,
+        isActive: true,
+        sortOrder: 0,
+        ...overrides,
+      })),
+      findMany: vi.fn(async () => []),
+      update: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({
+        id: "pc_1",
+        ...data,
+      })),
+    },
+  });
+}
+
 describe("toPublicModel", () => {
   function row(overrides: Record<string, unknown> = {}) {
     return {
@@ -1011,6 +1052,105 @@ describe("connection CRUD", () => {
     expect(
       decodeProviderCredentials(updatedCredentialsRef(db)).headers,
     ).toEqual({ "X-Org": "acme" });
+  });
+
+  it("preserves the stored api when the update omits it", async () => {
+    const db = makeStoredConnectionDb(
+      encodeProviderCredentials({ apiKey: "sk-original" }),
+    );
+
+    await updateConnection(db, "u_1", "pc_1", {
+      kind: "openai",
+      label: "Renamed",
+      baseUrl: "https://gw.example/v1",
+    });
+
+    // `openai`'s default is `responses`; the stored shape is `chat`, and an
+    // omitted field must not reset it.
+    expect(updatedConnectionData(db).api).toBe("chat");
+  });
+
+  it("honours an api sent explicitly", async () => {
+    const db = makeStoredConnectionDb(
+      encodeProviderCredentials({ apiKey: "sk-original" }),
+    );
+
+    await updateConnection(db, "u_1", "pc_1", {
+      kind: "openai",
+      label: "Renamed",
+      baseUrl: "https://gw.example/v1",
+      api: "responses",
+    });
+
+    expect(updatedConnectionData(db).api).toBe("responses");
+  });
+
+  it("preserves the stored base URL when the update omits it", async () => {
+    const db = makeStoredConnectionDb(
+      encodeProviderCredentials({ apiKey: "sk-original" }),
+    );
+
+    await updateConnection(db, "u_1", "pc_1", {
+      kind: "openai",
+      label: "Renamed",
+      api: "chat",
+    });
+
+    expect(updatedConnectionData(db).baseUrl).toBe("https://gw.example/v1");
+  });
+
+  it("clears the stored base URL on an explicit null", async () => {
+    const db = makeStoredConnectionDb(
+      encodeProviderCredentials({ apiKey: "sk-original" }),
+    );
+
+    await updateConnection(db, "u_1", "pc_1", {
+      kind: "openai",
+      label: "Renamed",
+      api: "chat",
+      baseUrl: null,
+    });
+
+    expect(updatedConnectionData(db).baseUrl).toBeNull();
+  });
+
+  it("preserves the stored slug when the update omits it", async () => {
+    const db = makeStoredConnectionDb(
+      encodeProviderCredentials({ apiKey: "sk-original" }),
+      { slug: "custom-gw" },
+    );
+
+    await updateConnection(db, "u_1", "pc_1", {
+      kind: "openai",
+      label: "Totally Different Label",
+      api: "chat",
+      baseUrl: "https://gw.example/v1",
+    });
+
+    // The slug is the namespace model ids are built on; re-deriving it from a
+    // renamed label would silently move every model.
+    expect(updatedConnectionData(db).slug).toBe("custom-gw");
+  });
+
+  it("falls back to the new kind's defaults when the kind changes", async () => {
+    const db = makeStoredConnectionDb(
+      encodeProviderCredentials({ apiKey: "sk-original" }),
+      {
+        kind: "compatible",
+        api: "responses",
+        baseUrl: "https://gw.example/v1",
+      },
+    );
+
+    await updateConnection(db, "u_1", "pc_1", {
+      kind: "mistral",
+      label: "Mistral",
+    });
+
+    // `api`/`baseUrl` are kind-scoped: the stored shape belonged to the old
+    // kind, so an omitted value takes the new kind's default instead.
+    expect(updatedConnectionData(db).api).toBeNull();
+    expect(updatedConnectionData(db).baseUrl).toBeNull();
   });
 
   it("surfaces the actionable message when the stored key cannot be read and the update omits it", async () => {

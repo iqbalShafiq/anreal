@@ -372,8 +372,10 @@ function ProviderConnectionEditor({
     ...(slugTouched && effectiveSlug.length > 0
       ? { slug: effectiveSlug }
       : {}),
-    ...(supportsBaseUrl && baseUrl.trim().length > 0
-      ? { baseUrl: baseUrl.trim() }
+    // Omitted now means "keep the stored value" server-side, so clearing the
+    // field has to be an explicit null or the override would survive.
+    ...(supportsBaseUrl
+      ? { baseUrl: baseUrl.trim().length > 0 ? baseUrl.trim() : null }
       : {}),
     ...(apiVariants.length > 1 && effectiveApi ? { api: effectiveApi } : {}),
     ...(apiKey.trim().length > 0 ? { apiKey: apiKey.trim() } : {}),

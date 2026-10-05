@@ -678,6 +678,11 @@ function isBlankKey(value: unknown): boolean {
   );
 }
 
+/** True when a partial-update field was actually supplied (non-blank string). */
+function isProvidedString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
 async function findOwnedConnection(
   db: ProviderConnectionsDb,
   userId: string,
@@ -853,9 +858,22 @@ export async function updateConnection(
   const headers =
     input.headers === undefined ? (stored?.headers ?? null) : input.headers;
 
+  // A PATCH may change any subset, so an omitted `api`, `baseUrl`, or `slug`
+  // keeps the stored value instead of falling back to a kind default. `api` is
+  // the one that bit: an omitted value reset an `openai` connection from
+  // `chat` to the kind default `responses`, breaking every later run. When the
+  // request changes `kind`, the stored `api`/`baseUrl` belong to the old kind,
+  // so the new kind's defaults apply instead.
+  const kindChanged = input.kind !== undefined && input.kind !== row.kind;
+  const api =
+    isProvidedString(input.api) || kindChanged ? input.api : row.api;
+  const baseUrl =
+    input.baseUrl === undefined && !kindChanged ? row.baseUrl : input.baseUrl;
+  const slug = isProvidedString(input.slug) ? input.slug : row.slug;
+
   const slugs = await collectConnectionSlugs(db, userId, row.slug);
   const value = validateConnectionInput(
-    { ...input, apiKey, headers },
+    { ...input, api, baseUrl, slug, apiKey, headers },
     slugs,
     0,
     await collectReservedConnectionSlugs(db),
