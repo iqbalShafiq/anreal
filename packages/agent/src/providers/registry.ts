@@ -211,8 +211,10 @@ function managedClientOptions(credentials: ProviderCredentials) {
  *
  * Only this path gets the rewrite. The catalog/env path
  * (`createCompletionModel` in `providers/openai.ts`) keeps the managed client:
- * conformant providers must not pay for the workaround, and their bytes must
- * not change.
+ * conformant providers must not pay for the workaround. Every semantic event
+ * is preserved; when the rewrite does change bytes, the only difference
+ * beyond the intended usage strip or synthetic insert is around the
+ * sentinel's trailing blank line.
  */
 function byokOpenAIClient(credentials: ProviderCredentials): OpenAI {
   const headers = credentials.headers

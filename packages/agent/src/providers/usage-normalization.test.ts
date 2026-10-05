@@ -69,6 +69,20 @@ const GATEWAY_BODY = [
   "",
 ].join("\n");
 
+/**
+ * A spec-conformant stream: usage only on the empty-choices final chunk, and
+ * a body ending `[DONE]\n\n` exactly as conformant providers send it.
+ */
+const CONFORMANT_BODY = `${[
+  dataLine({
+    choices: [{ delta: { content: "hello" }, finish_reason: null }],
+  }),
+  "",
+  FINAL_USAGE_CHUNK,
+  "",
+  "data: [DONE]",
+].join("\n")}\n\n`;
+
 function parseChunks(body: string): Array<{ choices: unknown[]; usage?: unknown }> {
   return body
     .split("\n")
@@ -363,6 +377,62 @@ describe("normalizeFetch", () => {
       normalizeOpenAIUsageChunks(body.split("\n")).join("\n"),
     );
     expect(text).toContain("data: [DONE]");
+  });
+
+  it("passes a conformant body ending [DONE]\\n\\n through byte-for-byte", async () => {
+    const wrapped = normalizeFetch(async () => sseResponse(CONFORMANT_BODY));
+
+    const text = await (
+      await wrapped("https://gw.example/v1/chat/completions")
+    ).text();
+
+    expect(text).toBe(CONFORMANT_BODY);
+    expect(text).toBe(
+      normalizeOpenAIUsageChunks(CONFORMANT_BODY.split("\n")).join("\n"),
+    );
+  });
+
+  it("emits [DONE] without waiting for the upstream body to close", async () => {
+    const encoder = new TextEncoder();
+    let upstream!: ReadableStreamDefaultController<Uint8Array>;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        upstream = controller;
+        controller.enqueue(encoder.encode(CONFORMANT_BODY));
+        // Deliberately left open: a gateway may hold the connection after
+        // [DONE]. The sentinel must still be observable.
+      },
+    });
+    const wrapped = normalizeFetch(
+      async () =>
+        new Response(body, {
+          headers: { "content-type": "text/event-stream" },
+        }),
+    );
+
+    const response = await wrapped("https://gw.example/v1/chat/completions");
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let text = "";
+    try {
+      while (!text.includes("data: [DONE]")) {
+        const result = await Promise.race([
+          reader.read(),
+          new Promise<never>((_, reject) =>
+            setTimeout(
+              () => reject(new Error("timed out waiting for [DONE]")),
+              2_000,
+            ),
+          ),
+        ]);
+        if (result.done) break;
+        text += decoder.decode(result.value, { stream: true });
+      }
+      expect(text).toContain("data: [DONE]");
+    } finally {
+      upstream.close();
+      await reader.cancel();
+    }
   });
 });
 

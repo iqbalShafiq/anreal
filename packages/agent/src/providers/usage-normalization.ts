@@ -156,9 +156,9 @@ export function normalizeOpenAIUsageChunks(lines: string[]): string[] {
 
 /**
  * Streaming form of the same rewrite: lines are forwarded as they arrive
- * (never buffering the body), `[DONE]` is held back until the upstream closes
- * so a synthetic usage chunk can still precede it, and the transform closes
- * with the held `[DONE]`.
+ * (never buffering the body). `[DONE]` passes straight through unless a
+ * synthetic usage chunk is still pending, in which case the sentinel is held
+ * just long enough for the synthetic chunk to precede it.
  */
 function usageNormalizationTransform(): TransformStream<Uint8Array, Uint8Array> {
   const decoder = new TextDecoder();
@@ -170,6 +170,9 @@ function usageNormalizationTransform(): TransformStream<Uint8Array, Uint8Array> 
   let buffer = "";
   let doneLine: string | null = null;
   let doneLineTerminated = false;
+  // Set when `[DONE]` passed straight through because no synthetic usage
+  // chunk was pending. Flush must then not append one after the sentinel.
+  let sentinelPassed = false;
   // The last line emitted and whether it carried its `\n`; needed to terminate
   // the final event before the synthetic one.
   let lastLine: string | null = null;
@@ -180,10 +183,18 @@ function usageNormalizationTransform(): TransformStream<Uint8Array, Uint8Array> 
     line: string,
     terminated: boolean,
   ): void => {
-    // The SDK stops reading at `[DONE]`; hold it until flush.
     if (isDoneLine(line)) {
-      doneLine = line;
-      doneLineTerminated = terminated;
+      // The SDK stops reading at `[DONE]`. Hold the sentinel only while a
+      // synthetic usage chunk may still need to precede it; otherwise pass
+      // it straight through so the run does not wait for the upstream body
+      // to close.
+      if (syntheticUsageLine(state) !== null) {
+        doneLine = line;
+        doneLineTerminated = terminated;
+        return;
+      }
+      sentinelPassed = true;
+      controller.enqueue(encoder.encode(terminated ? `${line}\n` : line));
       return;
     }
     const normalized = normalizeUsageLine(line, state);
@@ -208,6 +219,9 @@ function usageNormalizationTransform(): TransformStream<Uint8Array, Uint8Array> 
       buffer += decoder.decode();
       if (buffer.length > 0) {
         writeLine(controller, buffer, false);
+      }
+      if (sentinelPassed) {
+        return;
       }
       const synthetic = syntheticUsageLine(state);
       if (synthetic !== null) {
