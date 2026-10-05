@@ -84,6 +84,29 @@ function messageStartsWithActivity(message: UIMessage): boolean {
 }
 
 /**
+ * True when the last *visible* part is reasoning/tool. The mirror of
+ * `messageStartsWithActivity`: a turn can end on a tool call, and the next
+ * message's answer text then needs the same breathing room it would get from a
+ * tool part inside one message. Without this, the gap above a trailing activity
+ * block (16px, inside the message) differed from the gap below it (4px, across
+ * the boundary) — the same visual join, two different sizes.
+ */
+function messageEndsWithActivity(message: UIMessage): boolean {
+  if (message.role === "tool") return true;
+  if (message.role !== "assistant") return false;
+  for (let i = message.parts.length - 1; i >= 0; i -= 1) {
+    const part = message.parts[i]!;
+    if (part.type === "text") {
+      if (part.text.trim().length > 0) return false;
+      continue;
+    }
+    if (part.type === "reasoning" || part.type === "tool") return true;
+    if (part.type === "attachment") continue;
+  }
+  return false;
+}
+
+/**
  * Memoized row: re-renders only when its own message (or the passed-in
  * stream/edit state) changes. @anvia/react keeps unchanged message objects
  * by reference, so a model switch — which re-renders the parent thread —
@@ -168,6 +191,7 @@ export const ChatMessageRow = memo(function ChatMessageRow({
   const [editWidthPx, setEditWidthPx] = useState<number | null>(null);
   const intermediate = isIntermediateStepMessage(message);
   const startsWithActivity = messageStartsWithActivity(message);
+  const endsWithActivity = messageEndsWithActivity(message);
   const showActions =
     !readOnly &&
     shouldShowMessageActions(
@@ -238,6 +262,7 @@ export const ChatMessageRow = memo(function ChatMessageRow({
       data-message-id={message.id}
       data-activity-only={intermediate ? "" : undefined}
       data-starts-activity={startsWithActivity ? "" : undefined}
+      data-ends-activity={endsWithActivity ? "" : undefined}
       className="relative flex w-full min-w-0 flex-col"
     >
       <MessagePrimitive.Root
@@ -451,10 +476,10 @@ const PARTS_STACK_CLASS = [
   "[&>[data-role=tool]+[data-role=reasoning]]:mt-1",
   "[&>[data-role=tool]+[data-role=tool]]:mt-1",
   "[&>[data-role=reasoning]+[data-role=reasoning]]:mt-1",
-  "[&>[data-role=reasoning]+[data-role=text]]:mt-4",
-  "[&>[data-role=tool]+[data-role=text]]:mt-4",
-  "[&>[data-role=text]+[data-role=reasoning]]:mt-4",
-  "[&>[data-role=text]+[data-role=tool]]:mt-4",
+  "[&>[data-role=reasoning]+[data-role=text]]:mt-2",
+  "[&>[data-role=tool]+[data-role=text]]:mt-2",
+  "[&>[data-role=text]+[data-role=reasoning]]:mt-2",
+  "[&>[data-role=text]+[data-role=tool]]:mt-2",
 ].join(" ");
 
 /** Composer-style chip for a file attachment, shown above the user bubble. */

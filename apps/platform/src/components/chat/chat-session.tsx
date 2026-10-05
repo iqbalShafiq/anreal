@@ -2952,6 +2952,9 @@ export function ChatSession({
                     Same-thread vs cross-message spacing:
                     - activity chain (tool↔reasoning, any message split): tight mt-1
                     - only jump to a message that *starts with answer text*: mt-4
+                    - a message that *ends* on activity joins the next message's
+                      answer text the same way a tool part inside one message
+                      does, so it gets the same mt-4
                     - around user turns: mt-4
                   */}
                   <ThreadPrimitive.Messages
@@ -2959,8 +2962,9 @@ export function ChatSession({
                       "flex w-full min-w-0 flex-col",
                       "[&>*]:min-w-0",
                       "[&>*+*]:mt-1",
-                      "[&>[data-activity-only]+[data-role=assistant]:not([data-starts-activity])]:mt-4",
-                      "[&>[data-role=tool]+[data-role=assistant]:not([data-starts-activity])]:mt-4",
+                      "[&>[data-activity-only]+[data-role=assistant]:not([data-starts-activity])]:mt-2",
+                      "[&>[data-role=tool]+[data-role=assistant]:not([data-starts-activity])]:mt-2",
+                      "[&>[data-ends-activity]+[data-role=assistant]:not([data-starts-activity])]:mt-2",
                       "[&>[data-role=user]+*]:mt-4",
                       "[&>*+[data-role=user]]:mt-4",
                     ].join(" ")}
