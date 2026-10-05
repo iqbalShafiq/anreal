@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   findEmptyNewChat,
+  isEmptyNewChat,
   isShareLinkStale,
   type SessionSummary,
 } from "./session-history";
@@ -31,6 +32,28 @@ describe("findEmptyNewChat", () => {
     expect(
       findEmptyNewChat([busy, filled], new Set(["busy-empty"])),
     ).toBeNull();
+  });
+});
+
+describe("isEmptyNewChat", () => {
+  it("treats a titled session with zero messages as a real chat, not a draft", () => {
+    // A run can fail before persisting anything, but the title was set when
+    // the user sent the first message — the session is not a blank draft.
+    expect(isEmptyNewChat(row("titled-failed", "Failed chat"))).toBe(false);
+  });
+
+  it("treats a blank-titled session with zero messages as the empty draft", () => {
+    expect(isEmptyNewChat(row("blank", ""))).toBe(true);
+    expect(isEmptyNewChat(row("whitespace", "   "))).toBe(true);
+    expect(isEmptyNewChat(row("placeholder", "New chat"))).toBe(true);
+  });
+
+  it("never reuses a titled session as the New chat target", () => {
+    const titled = row("titled-failed", "Failed chat");
+    const blank = row("blank-draft", "New chat");
+
+    expect(findEmptyNewChat([titled, blank])).toEqual(blank);
+    expect(findEmptyNewChat([titled])).toBeNull();
   });
 });
 

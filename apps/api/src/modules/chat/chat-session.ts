@@ -277,8 +277,29 @@ export async function deleteChatSessionsHard(
 }
 
 /**
- * Empty draft = ChatSession with zero agent memory messages (true "New chat").
- * Ordered newest first.
+ * Sidebar label for a chat the user has never sent a message into. Shared with
+ * `session-list.ts` so the API has one definition of the draft title.
+ */
+export const EMPTY_CHAT_TITLE = "New chat";
+
+/**
+ * The client's `isEmptyNewChat` title test, mirrored exactly: a blank title
+ * displays as "New chat". The client's list items carry a title synthesized by
+ * `session-list.ts` (stored title, else the first user message, else
+ * `EMPTY_CHAT_TITLE`), so this predicate and the client's agree by
+ * construction. Keep the two bodies in step.
+ */
+function isEmptyChatTitle(title: string | null | undefined): boolean {
+  const effective = title?.trim() || EMPTY_CHAT_TITLE;
+  return effective === EMPTY_CHAT_TITLE;
+}
+
+/**
+ * Empty draft = a ChatSession the user has never sent a message into: a blank
+ * title (the client's "New chat") AND zero agent memory messages. A titled
+ * session is a real chat even when its run failed before persisting anything —
+ * it must never be reused as a draft or pruned as a duplicate. Ordered newest
+ * first.
  */
 export async function findEmptyChatSessions(
   userId: string,
@@ -301,7 +322,7 @@ export async function findEmptyChatSessions(
     select: { sessionId: true },
   });
   const nonEmpty = new Set(withMessages.map((m) => m.sessionId));
-  return rows.filter((r) => !nonEmpty.has(r.id));
+  return rows.filter((r) => isEmptyChatTitle(r.title) && !nonEmpty.has(r.id));
 }
 
 /**

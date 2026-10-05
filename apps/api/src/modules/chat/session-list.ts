@@ -1,5 +1,5 @@
 import { prisma } from "../../utils/prisma.js";
-import { TITLE_MAX } from "./chat-session.js";
+import { EMPTY_CHAT_TITLE, TITLE_MAX } from "./chat-session.js";
 
 export type SessionListItem = {
   sessionId: string;
@@ -215,7 +215,7 @@ export async function listSessionsPage(input: {
     return {
       sessionId: row.id,
       updatedAt: row.updatedAt.toISOString(),
-      title: titles.get(row.id) ?? row.title ?? "New chat",
+      title: titles.get(row.id) ?? row.title ?? EMPTY_CHAT_TITLE,
       projectId: row.projectId,
       unread,
     };

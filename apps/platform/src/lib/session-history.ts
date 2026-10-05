@@ -89,7 +89,14 @@ export function groupSessionsByDate(
 /** UI / list title for an empty draft that has no first user message yet. */
 export const EMPTY_CHAT_TITLE = "New chat";
 
-/** True when the session is still an empty draft (no title from first message). */
+/**
+ * True when the session is still an empty draft — the user has never sent a
+ * message into it. The list endpoint synthesizes `EMPTY_CHAT_TITLE` exactly
+ * for sessions with a blank stored title and zero messages, which is the same
+ * rule the API's `findEmptyChatSessions` enforces (blank title AND no
+ * messages). A titled session is a real chat and must never be reused as a
+ * draft or pruned as a duplicate; keep this test in step with the API.
+ */
 export function isEmptyNewChat(session: Pick<SessionSummary, "title">): boolean {
   const title = session.title?.trim() || EMPTY_CHAT_TITLE;
   return title === EMPTY_CHAT_TITLE;
