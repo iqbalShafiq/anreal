@@ -430,16 +430,31 @@ export function isRenderablePart(part: MessagePart, role: UIMessage["role"]): bo
   return false;
 }
 
+/**
+ * Same-thread spacing between the parts of one assistant message.
+ *
+ * The stack's children are `MessagePrimitive.Part` wrappers, and the attribute
+ * that identifies a part is **`data-role`** — `@anvia/react-ui` sets it to the
+ * part's *type* (`text`, `reasoning`, `tool`, …). These rules previously keyed
+ * off a `data-part` attribute that nothing ever set, so none of them applied and
+ * every part sat flush against the next; the attribute name is the whole
+ * contract, so do not rename it without checking what the library emits.
+ *
+ * Activity next to activity stays tight (a thinking/tool chain reads as one
+ * block); answer text next to activity always breathes, in both directions,
+ * because a text part can appear anywhere in the sequence — thinking → tool →
+ * text → tool → thinking → text.
+ */
 const PARTS_STACK_CLASS = [
   "flex min-w-0 max-w-full flex-col",
-  "[&>[data-part=reasoning]+[data-part=tool]]:mt-1",
-  "[&>[data-part=tool]+[data-part=reasoning]]:mt-1",
-  "[&>[data-part=tool]+[data-part=tool]]:mt-1",
-  "[&>[data-part=reasoning]+[data-part=reasoning]]:mt-1",
-  "[&>[data-part=reasoning]+[data-part=text]]:mt-4",
-  "[&>[data-part=tool]+[data-part=text]]:mt-4",
-  "[&>[data-part=text]+[data-part=reasoning]]:mt-4",
-  "[&>[data-part=text]+[data-part=tool]]:mt-4",
+  "[&>[data-role=reasoning]+[data-role=tool]]:mt-1",
+  "[&>[data-role=tool]+[data-role=reasoning]]:mt-1",
+  "[&>[data-role=tool]+[data-role=tool]]:mt-1",
+  "[&>[data-role=reasoning]+[data-role=reasoning]]:mt-1",
+  "[&>[data-role=reasoning]+[data-role=text]]:mt-4",
+  "[&>[data-role=tool]+[data-role=text]]:mt-4",
+  "[&>[data-role=text]+[data-role=reasoning]]:mt-4",
+  "[&>[data-role=text]+[data-role=tool]]:mt-4",
 ].join(" ");
 
 /** Composer-style chip for a file attachment, shown above the user bubble. */
