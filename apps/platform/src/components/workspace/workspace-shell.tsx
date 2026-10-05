@@ -49,7 +49,7 @@ import {
   sessionNavigate,
 } from "#/lib/workspace-urls";
 
-const RECENT_PROJECTS_LIMIT = 5;
+const RECENT_PROJECTS_LIMIT = 4;
 
 type WorkspaceParams = {
   projectId?: string;
