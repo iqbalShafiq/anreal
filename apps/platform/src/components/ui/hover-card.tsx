@@ -45,6 +45,14 @@ export function HoverCard({
   const anchorRef = useRef<HTMLSpanElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
+  /**
+   * Native `showModal()` dialogs live in the browser top layer, so a panel
+   * portaled to `document.body` renders behind the modal. Detect a dialog
+   * ancestor after commit and portal INTO it instead — the same seam `Select`
+   * uses for its listbox. Outside dialogs the body portal is kept, so overflow
+   * and sibling stacking cannot clip the panel.
+   */
+  const [dialogPortal, setDialogPortal] = useState<HTMLElement | null>(null);
   const [pos, setPos] = useState<{
     top: number;
     bottom: number;
@@ -54,6 +62,10 @@ export function HoverCard({
   const openTimerRef = useRef<number | null>(null);
   const closeTimerRef = useRef<number | null>(null);
   const isPanelHoveredRef = useRef(false);
+
+  useLayoutEffect(() => {
+    setDialogPortal(anchorRef.current?.closest("dialog") ?? null);
+  }, []);
 
   const clearOpenTimer = () => {
     if (openTimerRef.current !== null) {
@@ -173,6 +185,9 @@ export function HoverCard({
     }
   }, [disabled]);
 
+  const portalTarget =
+    dialogPortal ?? (typeof document !== "undefined" ? document.body : null);
+
   return (
     <>
       <span
@@ -185,7 +200,7 @@ export function HoverCard({
       >
         {children}
       </span>
-      {open && pos
+      {open && pos && portalTarget
         ? createPortal(
             <div
               ref={panelRef}
@@ -198,13 +213,17 @@ export function HoverCard({
               onMouseLeave={handlePanelLeave}
               className={`${
                 variant === "tooltip"
-                  ? "fixed z-[80] max-w-[14rem] rounded-lg bg-black/85 px-2.5 py-1.5 text-[11px] leading-snug text-text shadow-[0_8px_24px_-8px_rgba(0,0,0,0.7)] backdrop-blur-md animate-fade-in"
-                  : "glass-popover fixed z-[80] w-[17rem] rounded-2xl p-2.5 text-text shadow-[0_12px_40px_-12px_rgba(0,0,0,0.75)] animate-scale-in"
+                  ? "fixed max-w-[14rem] rounded-lg bg-black/85 px-2.5 py-1.5 text-[11px] leading-snug text-text shadow-[0_8px_24px_-8px_rgba(0,0,0,0.7)] backdrop-blur-md animate-fade-in"
+                  : "glass-popover fixed w-[17rem] rounded-2xl p-2.5 text-text shadow-[0_12px_40px_-12px_rgba(0,0,0,0.75)] animate-scale-in"
+              } ${
+                // Inside a dialog, sit above the picker's own z-[90] panel so a
+                // flipped card is never trapped under it.
+                dialogPortal ? "z-[95]" : "z-[80]"
               }${panelClassName ? ` ${panelClassName}` : ""}`}
             >
               {content}
             </div>,
-            document.body,
+            portalTarget,
           )
         : null}
     </>
