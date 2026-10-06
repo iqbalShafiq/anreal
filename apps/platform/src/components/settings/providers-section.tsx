@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 import { Button } from "#/components/ui/button";
 import { ConfirmDialog } from "#/components/ui/confirm-dialog";
@@ -80,11 +80,25 @@ export function toHeadersPayload(
 }
 
 /**
+ * The exit action the settings modal's Back item calls. The section reports it
+ * while a connection editor is open and `null` once it is not, so the modal can
+ * swap its whole section nav for a single Back entry without owning the
+ * editor's state.
+ */
+export type ProviderDetailHandle = { onBack: () => void };
+
+/**
  * The Providers settings section: a list of BYOK connections with an inline
  * editor, and (once a connection is saved) its registered models. Lives inside
  * the settings modal, so the editor is inline rather than a nested dialog.
  */
-export function ProvidersSection({ active }: { active: boolean }) {
+export function ProvidersSection({
+  active,
+  onDetailChange,
+}: {
+  active: boolean;
+  onDetailChange?: (detail: ProviderDetailHandle | null) => void;
+}) {
   const connections = useProviderConnections(active);
   // The merged catalog, read only to offer the vendors other models declare.
   const { models } = useModels();
@@ -141,6 +155,18 @@ export function ProvidersSection({ active }: { active: boolean }) {
   }, [active, connections.data]);
 
   const rows = connections.data ?? [];
+
+  /**
+   * Report the detail state up while a connection editor is open; the modal
+   * renders its Back item from this. Cleanup clears it so leaving the section
+   * (or unmounting) cannot leave a stale Back behind.
+   */
+  const exitDetail = useCallback(() => setEditingId(undefined), []);
+  const inDetail = editingId !== undefined;
+  useEffect(() => {
+    onDetailChange?.(inDetail ? { onBack: exitDetail } : null);
+    return () => onDetailChange?.(null);
+  }, [inDetail, exitDetail, onDetailChange]);
 
   /**
    * Probe a connection against the provider without persisting anything. An

@@ -306,7 +306,7 @@ describe("ProviderModelEditor — discovering a model", () => {
     };
   }
 
-  it("opens the composer's search, filter, and sort picker for the provider's models", async () => {
+  it("opens the composer's search and sort picker for the provider's models", async () => {
     renderEditor({ onDiscover: async () => LISTING });
 
     fireEvent.click(
@@ -316,7 +316,9 @@ describe("ProviderModelEditor — discovering a model", () => {
     expect(
       await screen.findByRole("searchbox", { name: "Search models" }),
     ).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Filter" })).toBeTruthy();
+    // A raw provider listing has no facet that can discriminate, so the Filter
+    // tool is hidden rather than opening an empty stack.
+    expect(screen.queryByRole("button", { name: "Filter" })).toBeNull();
     expect(screen.getByRole("button", { name: "Sort" })).toBeTruthy();
     expect(screen.getByRole("option", { name: /DeepSeek V4 Flash/ })).toBeTruthy();
   });

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProviderConnection, ProviderKindInfo } from "#/lib/api";
@@ -220,5 +220,32 @@ describe("ProvidersSection — after saving a new provider", () => {
     ).toBeTruthy();
     expect(screen.getByRole("button", { name: "Add model" })).toBeTruthy();
     expect(screen.getByText("No models yet — add the ones you want in the picker.")).toBeTruthy();
+  });
+});
+
+describe("ProvidersSection — the provider detail contract", () => {
+  it("notifies the modal while a connection editor is open, and clears it on Back", async () => {
+    const user = userEvent.setup();
+    const onDetailChange = vi.fn();
+    render(<ProvidersSection active onDetailChange={onDetailChange} />);
+
+    await user.click(
+      await screen.findByRole("button", { name: "Add provider" }),
+    );
+
+    // The modal needs a way back that lives in the section, so the contract is
+    // a detail object carrying the exit action.
+    const detail = onDetailChange.mock.calls
+      .map(([value]) => value)
+      .find((value) => value !== null);
+    expect(detail).toBeTruthy();
+    expect(typeof detail.onBack).toBe("function");
+
+    act(() => detail.onBack());
+
+    expect(
+      await screen.findByText("No providers yet — add your first connection."),
+    ).toBeTruthy();
+    expect(onDetailChange).toHaveBeenLastCalledWith(null);
   });
 });

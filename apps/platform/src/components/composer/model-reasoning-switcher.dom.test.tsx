@@ -404,8 +404,22 @@ describe("ModelReasoningSwitcher model menu: filters survive closing (I2)", () =
   });
 
   const twoModels: ModelInfo[] = [
-    { ...model, modelId: "gateway/alpha", name: "Alpha", label: "Alpha" },
-    { ...model, modelId: "gateway/beta", name: "Beta", label: "Beta" },
+    {
+      ...model,
+      modelId: "gateway/alpha",
+      name: "Alpha",
+      label: "Alpha",
+      // Distinct vendors keep the Vendor facet discriminating, so the Filter
+      // tool exists for the active-dot assertion below.
+      provider: { slug: "alpha", name: "Alpha Gateway" },
+    },
+    {
+      ...model,
+      modelId: "gateway/beta",
+      name: "Beta",
+      label: "Beta",
+      provider: { slug: "beta", name: "Beta Gateway" },
+    },
   ];
 
   function renderMany() {

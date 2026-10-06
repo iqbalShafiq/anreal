@@ -26,7 +26,23 @@ vi.mock("#/hooks/use-profile", () => ({
 }));
 
 vi.mock("#/components/settings/providers-section", () => ({
-  ProvidersSection: () => <p>Providers body</p>,
+  ProvidersSection: ({
+    onDetailChange,
+  }: {
+    onDetailChange?: (detail: { onBack: () => void } | null) => void;
+  }) => (
+    <div>
+      <p>Providers body</p>
+      <button
+        type="button"
+        onClick={() =>
+          onDetailChange?.({ onBack: () => onDetailChange(null) })
+        }
+      >
+        enter provider detail
+      </button>
+    </div>
+  ),
 }));
 
 vi.mock("#/components/settings/personalization-section", () => ({
@@ -124,8 +140,26 @@ describe("SettingsDialogProvider", () => {
     expect(document.querySelectorAll("dialog[open]")).toHaveLength(1);
   });
 
-  it("returns focus to the trigger supplied to openSettings on close", () => {
-    function FocusEntry() {
+  it("swaps the section nav for a single Back item while a provider detail is open", () => {
+    renderProvider();
+    fireEvent.click(screen.getByRole("button", { name: "open providers" }));
+    expect(screen.getByRole("button", { name: "Account" })).toBeTruthy();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "enter provider detail" }),
+    );
+
+    // The whole section nav is replaced by one Back entry.
+    expect(screen.queryByRole("button", { name: "Account" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Providers" })).toBeNull();
+    const back = screen.getByRole("button", { name: "Back" });
+
+    fireEvent.click(back);
+    expect(screen.getByRole("button", { name: "Account" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Back" })).toBeNull();
+  });
+
+  it("returns focus to the trigger supplied to openSettings on close", () => {    function FocusEntry() {
       const { openSettings } = useSettingsDialog();
       const triggerRef = useRef<HTMLButtonElement>(null);
       return (

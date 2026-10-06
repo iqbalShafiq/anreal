@@ -258,6 +258,18 @@ export function ModelPickerMenu({
   );
 
   /**
+   * Whether any filter group would render. A group that cannot discriminate is
+   * omitted, so when every group is out the Filter tool itself is hidden rather
+   * than opening an empty stack. A raw provider listing (one vendor, no
+   * declared capabilities, no context split) lands here.
+   */
+  const filterAvailable =
+    facets.vendors.length > 1 ||
+    facets.connections.length > 1 ||
+    discriminantCapabilities.length > 0 ||
+    facets.contextThresholds.length > 0;
+
+  /**
    * The height the fixed rows (search, filter/sort stack, action) occupy
    * above/below the list. Measured rather than guessed because the stack grows
    * when the controls expand; the list then shrinks by the same amount. Only
@@ -409,14 +421,16 @@ export function ModelPickerMenu({
           />
         </span>
 
-        <ToolButton
-          label="Filter"
-          expanded={showFilters}
-          active={hasFilters}
-          onClick={() => setShowFilters((current) => !current)}
-        >
-          <ListFilter className="size-4" strokeWidth={1.75} />
-        </ToolButton>
+        {filterAvailable ? (
+          <ToolButton
+            label="Filter"
+            expanded={showFilters}
+            active={hasFilters}
+            onClick={() => setShowFilters((current) => !current)}
+          >
+            <ListFilter className="size-4" strokeWidth={1.75} />
+          </ToolButton>
+        ) : null}
         <ToolButton
           label="Sort"
           expanded={showSort}
@@ -447,7 +461,7 @@ export function ModelPickerMenu({
           same stack, so every group — facets and sort alike — is separated by
           this single `gap-2`: one source of spacing for the whole controls
           area. The group owns no margin or padding of its own. */}
-      {showFilters || showSort ? (
+      {((showFilters && filterAvailable) || showSort) ? (
         // `shrink-0`: the filter/sort controls render at their full natural
         // height and are never the thing that gives. A previous round let this
         // stack shrink and scroll to stop a very short viewport clipping it;
@@ -457,7 +471,7 @@ export function ModelPickerMenu({
         // too short to hold even these fixed rows, the panel as a whole scrolls
         // (see `model-reasoning-switcher`), so nothing is silently clipped.
         <div className="flex shrink-0 flex-col gap-2 px-2 pt-2">
-          {showFilters
+          {showFilters && filterAvailable
             ? (
                 <>
                   {facets.vendors.length > 1 ? (

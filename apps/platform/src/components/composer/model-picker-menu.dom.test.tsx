@@ -310,12 +310,22 @@ describe("ModelPickerMenu: filters", () => {
   });
 
   it("omits a facet group that cannot discriminate", () => {
-    renderMenu([catalogModel("openai/only", { name: "Only" })]);
+    // Same vendor on both, but one has vision — so the Filter tool exists for
+    // the capability group while Vendor (one value) stays out.
+    renderMenu([
+      catalogModel("openai/only", { name: "Only" }),
+      catalogModel("openai/eagle", {
+        name: "Eagle",
+        inputModalities: ["text", "image"],
+      }),
+    ]);
     fireEvent.click(screen.getByRole("button", { name: "Filter" }));
 
     // One vendor means no Vendor chip row at all.
     expect(screen.queryByText("Vendor")).toBeNull();
     expect(screen.queryByRole("button", { name: "OpenAI" })).toBeNull();
+    // The capability split is the group that does discriminate here.
+    expect(screen.getByRole("button", { name: "Vision" })).toBeTruthy();
   });
 
   it("omits a capability chip when every model already has it", () => {
@@ -324,8 +334,9 @@ describe("ModelPickerMenu: filters", () => {
         name: "Alpha",
         inputModalities: ["text", "image"],
       }),
-      catalogModel("openai/beta", {
+      catalogModel("google/beta", {
         name: "Beta",
+        provider: { slug: "google", name: "Google" },
         inputModalities: ["text", "image"],
       }),
     ]);
@@ -333,6 +344,14 @@ describe("ModelPickerMenu: filters", () => {
 
     // Vision would not narrow anything, so it is not offered.
     expect(screen.queryByRole("button", { name: "Vision" })).toBeNull();
+  });
+
+  it("hides the Filter tool when no group can discriminate", () => {
+    // A raw provider listing: one vendor, no capabilities declared, no context
+    // split. A Filter button that opens an empty stack is a dead control.
+    renderMenu([catalogModel("openai/only", { name: "Only" })]);
+
+    expect(screen.queryByRole("button", { name: "Filter" })).toBeNull();
   });
 });
 
