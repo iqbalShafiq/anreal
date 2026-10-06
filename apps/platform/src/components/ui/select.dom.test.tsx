@@ -137,4 +137,31 @@ describe("Select: custom panel", () => {
     await user.keyboard("{Escape}");
     expect(screen.queryByLabelText("Panel search")).toBeNull();
   });
+
+  it("lays the custom panel out as a flex column so only the panel's list scrolls", async () => {
+    const user = userEvent.setup();
+    render(
+      <Select
+        value=""
+        onChange={vi.fn()}
+        options={[]}
+        ariaLabel="Model"
+        renderPanel={() => <div data-testid="panel-content" />}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /model/i }));
+    const wrapper = (await screen.findByTestId("panel-content"))
+      .parentElement as HTMLElement;
+    const classes = wrapper.className.split(/\s+/);
+
+    // jsdom computes no layout, so this pins the structural rule the live
+    // double-scrollbar bug violated: as a flex column with its own overflow,
+    // the wrapper constrains the panel's inner list (a flex child that can
+    // shrink) and only the list scrolls — the wrapper must not scroll over it
+    // as a second scroller.
+    expect(classes).toContain("flex");
+    expect(classes).toContain("flex-col");
+    expect(classes).toContain("overflow-y-auto");
+  });
 });

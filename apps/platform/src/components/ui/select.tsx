@@ -312,9 +312,13 @@ export function Select({
             }}
           >
             {renderPanel ? (
+              // `flex flex-col` mirrors the composer's portal container: the
+              // panel's own list is a shrinkable flex child, so it is the one
+              // scroller. Without it the wrapper scrolls over a list that keeps
+              // its full height, producing two scrollbars in a short viewport.
               <div
                 ref={panelRef}
-                className="chat-scroll overflow-y-auto"
+                className="flex flex-col chat-scroll overflow-y-auto"
                 style={{ maxHeight: listPos.maxHeight }}
               >
                 {renderPanel({

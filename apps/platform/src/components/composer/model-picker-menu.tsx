@@ -9,6 +9,7 @@ import {
 import {
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -22,6 +23,7 @@ import {
   filterModels,
   isFilterActive,
   pickerFacets,
+  pickerListCap,
   sortModels,
   type PickerCapability,
   type PickerFilterState,
@@ -159,6 +161,7 @@ export function ModelPickerMenu({
   onSortChange,
   gridColumns,
   sorts = PICKER_SORTS,
+  maxHeight,
 }: {
   /** The listbox id, so the caller's `aria-controls` points at the real list. */
   id: string;
@@ -194,10 +197,18 @@ export function ModelPickerMenu({
    * raw provider listing passes the subset that can actually discriminate.
    */
   sorts?: { key: PickerSort; label: string }[];
+  /**
+   * The vertical room the embedding panel has, in px. When set, the option
+   * list shrinks to fit it (minus the fixed rows), so the panel never
+   * overflows its slot and only the list scrolls. Undefined keeps the
+   * composer's own sizing untouched.
+   */
+  maxHeight?: number;
 }) {
   const liveId = useId();
   const searchRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
 
   // Read synchronously in the initializer (the app's preference idiom) so the
   // first paint is already in the stored view rather than flashing the list.
@@ -245,6 +256,22 @@ export function ModelPickerMenu({
     () => sortModels(filterModels(models, filters), sort),
     [models, filters, sort],
   );
+
+  /**
+   * The height the fixed rows (search, filter/sort stack, action) occupy
+   * above/below the list. Measured rather than guessed because the stack grows
+   * when the controls expand; the list then shrinks by the same amount. Only
+   * relevant when the caller constrains the panel (`maxHeight`); the composer
+   * keeps its own sizing.
+   */
+  const [fixedRows, setFixedRows] = useState(0);
+  useLayoutEffect(() => {
+    if (maxHeight === undefined) return;
+    const root = rootRef.current;
+    const list = listRef.current;
+    if (!root || !list) return;
+    setFixedRows(Math.max(0, root.offsetHeight - list.offsetHeight));
+  }, [maxHeight, showFilters, showSort, onAddModel, visibleModels.length]);
 
   const selectOption = (selected: string) => {
     onSelect(selected);
@@ -349,12 +376,16 @@ export function ModelPickerMenu({
   if (!open) return null;
 
   const grid = view === "grid";
-  const cap = grid
+  const baseCap = grid
     ? GRID_VISIBLE_ROWS * GRID_CARD_HEIGHT
     : LIST_VISIBLE_ROWS * LIST_ROW_HEIGHT;
+  // The list is the only shrinkable row: inside a caller-constrained panel it
+  // takes the room left after the fixed rows, so the panel never overflows its
+  // slot and only this list scrolls.
+  const cap = pickerListCap(baseCap, maxHeight ?? null, fixedRows);
 
   return (
-    <div className="flex min-h-0 w-full min-w-0 flex-1 flex-col">
+    <div ref={rootRef} className="flex min-h-0 w-full min-w-0 flex-1 flex-col">
       {/* Search row */}
       <div className="flex shrink-0 items-center gap-1 px-2 pt-2">
         <span className="flex min-w-0 flex-1 items-center gap-1.5 rounded-lg bg-white/[0.04] px-2 ring-1 ring-white/[0.08] focus-within:ring-2 focus-within:ring-accent-ring">

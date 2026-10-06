@@ -440,10 +440,12 @@ export function ProviderModelEditor({
                 ariaLabel="Provider model"
                 disabled={busy}
                 panelHeight={440}
-                renderPanel={({ close, id, width }) => (
+                renderPanel={({ close, id, width, maxHeight }) => (
                   // The composer's picker, chromed the same way its portal is,
                   // so search/filter/sort behave identically in both surfaces.
-                  <div className="flex flex-col rounded-xl border border-white/[0.08] bg-canvas-elevated text-text shadow-[0_12px_40px_-12px_rgba(0,0,0,0.75)] animate-fade-in">
+                  // `ring` rather than `border`: a ring is a box-shadow, so the
+                  // chrome adds no layout height the measured room misses.
+                  <div className="flex flex-col rounded-xl bg-canvas-elevated text-text ring-1 ring-white/[0.08] shadow-[0_12px_40px_-12px_rgba(0,0,0,0.75)] animate-fade-in">
                     <ModelPickerMenu
                       id={id}
                       models={pickerModels}
@@ -455,6 +457,9 @@ export function ProviderModelEditor({
                       onSortChange={setPickerSort}
                       gridColumns={gridColumnsForWidth(width)}
                       sorts={LISTING_PICKER_SORTS}
+                      // The room Select measured: the list shrinks to it so the
+                      // panel never runs past the viewport or double-scrolls.
+                      maxHeight={maxHeight}
                       onSelect={(selected) => {
                         void applyPrefill(selected);
                         close();

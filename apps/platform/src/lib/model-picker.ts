@@ -321,6 +321,24 @@ export function pickerFacets(models: readonly PickerSource[]): {
   return { vendors, connections, capabilities, contextThresholds };
 }
 
+/**
+ * The height cap for the option list inside a panel that has `maxHeight` room.
+ * The list is the only shrinkable row, so it takes the room left after the
+ * fixed rows (search, filters, sorts, the action) — capped by the layout's own
+ * base cap. A `null` room means the panel is not height-constrained (the
+ * composer's own menu), so the base cap stands. Never negative: a viewport too
+ * short for even the fixed rows lets the panel scroll as a last resort rather
+ * than inverting the height.
+ */
+export function pickerListCap(
+  baseCap: number,
+  maxHeight: number | null,
+  fixedRows: number,
+): number {
+  if (maxHeight === null) return baseCap;
+  return Math.max(0, Math.min(baseCap, maxHeight - fixedRows));
+}
+
 /** Whether any filter is set. A whitespace-only query counts as unset. */
 export function isFilterActive(filters: PickerFilterState): boolean {
   return (

@@ -6,6 +6,7 @@ import {
   filterModels,
   isFilterActive,
   pickerFacets,
+  pickerListCap,
   sortModels,
   type PickerFilterState,
   type PickerSource,
@@ -611,6 +612,24 @@ describe("isFilterActive", () => {
 
   it("ignores whitespace-only query", () => {
     expect(isFilterActive(filters({ query: "   " }))).toBe(false);
+  });
+});
+
+describe("pickerListCap", () => {
+  it("keeps the layout's base cap when the panel is not height-constrained", () => {
+    expect(pickerListCap(384, null, 38)).toBe(384);
+  });
+
+  it("takes the panel's room minus the fixed rows", () => {
+    expect(pickerListCap(384, 307, 38)).toBe(269);
+  });
+
+  it("never grows past the layout's own cap", () => {
+    expect(pickerListCap(168, 900, 38)).toBe(168);
+  });
+
+  it("never returns a negative height when the fixed rows exceed the room", () => {
+    expect(pickerListCap(384, 100, 140)).toBe(0);
   });
 });
 

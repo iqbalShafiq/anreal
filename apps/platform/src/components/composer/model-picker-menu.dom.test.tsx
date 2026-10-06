@@ -108,6 +108,7 @@ function renderMenu(
     onClose?: () => void;
     gridColumns?: number;
     sorts?: { key: PickerSort; label: string }[];
+    maxHeight?: number;
   } = {},
 ) {
   const onSelect = vi.fn();
@@ -119,6 +120,7 @@ function renderMenu(
       onClose={options.onClose}
       gridColumns={options.gridColumns ?? 3}
       sorts={options.sorts}
+      maxHeight={options.maxHeight}
     />,
   );
   return { onSelect };
@@ -132,6 +134,7 @@ function MenuHost({
   onClose,
   gridColumns,
   sorts,
+  maxHeight,
 }: {
   models: ModelInfo[];
   onSelect: (value: string) => void;
@@ -139,6 +142,7 @@ function MenuHost({
   onClose?: () => void;
   gridColumns: number;
   sorts?: { key: PickerSort; label: string }[];
+  maxHeight?: number;
 }) {
   const [filters, setFilters] = useState<PickerFilterState>(
     EMPTY_PICKER_FILTERS,
@@ -159,6 +163,7 @@ function MenuHost({
       onSortChange={setSort}
       gridColumns={gridColumns}
       sorts={sorts}
+      maxHeight={maxHeight}
     />
   );
 }
@@ -406,6 +411,15 @@ describe("ModelPickerMenu: scroll cap and the action row", () => {
 
     fireEvent.click(addButton as HTMLButtonElement);
     expect(onAddModel).toHaveBeenCalledOnce();
+  });
+
+  it("caps the list to the panel room the caller passes", () => {
+    renderMenu(manyModels, { maxHeight: 200 });
+
+    // jsdom computes no layout, so the fixed rows measure 0 and the whole room
+    // goes to the list — the cap itself must still come from the caller's
+    // room, not the layout's base cap, or the panel would overflow its slot.
+    expect(optionList().style.maxHeight).toBe("200px");
   });
 
   it("caps the grid at 3 rows", () => {
