@@ -1,10 +1,12 @@
-import { DEFAULT_COMPLETION_MODEL, isKnownModel } from "#/lib/chat/models";
+import { DEFAULT_COMPLETION_MODEL } from "#/lib/chat/models";
 import type { ImageGenSettings, ModelInfo } from "#/lib/api";
+import type { PickerView } from "#/lib/model-picker";
 
 export const SELECTED_MODEL_KEY = "chat.selectedModel";
 export const SELECTED_REASONING_EFFORT_KEY = "chat.selectedReasoningEffort";
 export const IMAGE_GEN_ENABLED_KEY = "chat.imageGenerationEnabled";
 export const IMAGE_GEN_SETTINGS_KEY = "chat.imageGenSettings";
+export const MODEL_PICKER_VIEW_KEY = "chat.modelPickerView";
 
 export const DEFAULT_IMAGE_GEN_SETTINGS: ImageGenSettings = {
   modelId: "openai/gpt-5-image-mini",
@@ -12,19 +14,46 @@ export const DEFAULT_IMAGE_GEN_SETTINGS: ImageGenSettings = {
 };
 
 /**
- * Stored model id if it exists in the catalog, else the first active model,
- * else the default.
+ * The raw stored model id, or null when the user has never chosen one (or
+ * storage is unavailable). Kept separate from `readSelectedModel` so callers
+ * can tell an explicit choice apart from the catalog fallback.
  */
-export function readSelectedModel(models: ModelInfo[]): string {
+export function readStoredSelectedModel(): string | null {
   try {
     const stored = localStorage.getItem(SELECTED_MODEL_KEY);
-    if (stored !== null && stored.length > 0 && isKnownModel(models, stored)) {
-      return stored;
-    }
+    return stored !== null && stored.length > 0 ? stored : null;
   } catch {
     // ignore storage access errors
+    return null;
   }
+}
+
+/**
+ * The model a session should start on: a stored preference that the catalog
+ * still contains wins, then the first active model, then the app default.
+ * The input is explicit so the pure decision can be unit-tested without
+ * storage; `readSelectedModel` wires it to `localStorage`.
+ */
+export function resolveInitialModel(input: {
+  storedModelId: string | null;
+  models: readonly { modelId: string }[];
+}): string {
+  const { storedModelId, models } = input;
+  const inCatalog = (id: string | null): id is string =>
+    id !== null && models.some((model) => model.modelId === id);
+  if (inCatalog(storedModelId)) return storedModelId;
   return models[0]?.modelId ?? DEFAULT_COMPLETION_MODEL;
+}
+
+/**
+ * Stored model id if it exists in the catalog, else the first active model,
+ * else the default. Delegates the decision to `resolveInitialModel`.
+ */
+export function readSelectedModel(models: ModelInfo[]): string {
+  return resolveInitialModel({
+    storedModelId: readStoredSelectedModel(),
+    models,
+  });
 }
 
 export function persistSelectedModel(model: string) {
@@ -125,6 +154,31 @@ export function readImageGenSettings(): ImageGenSettings {
 export function persistImageGenSettings(settings: ImageGenSettings) {
   try {
     localStorage.setItem(IMAGE_GEN_SETTINGS_KEY, JSON.stringify(settings));
+  } catch {
+    // ignore storage access errors
+  }
+}
+
+/**
+ * The picker's display preference: "list" unless the user explicitly chose
+ * "grid". Any other stored value (a future mode, a corrupted write) is not a
+ * view this build can render, so it degrades to the default rather than
+ * throwing or rendering nothing.
+ */
+export function readModelPickerView(): PickerView {
+  try {
+    return localStorage.getItem(MODEL_PICKER_VIEW_KEY) === "grid"
+      ? "grid"
+      : "list";
+  } catch {
+    // ignore storage access errors
+    return "list";
+  }
+}
+
+export function persistModelPickerView(view: PickerView) {
+  try {
+    localStorage.setItem(MODEL_PICKER_VIEW_KEY, view);
   } catch {
     // ignore storage access errors
   }

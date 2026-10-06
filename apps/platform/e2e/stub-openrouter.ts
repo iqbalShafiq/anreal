@@ -37,9 +37,33 @@ const state: StubState = { requests: [], turns: new Map() };
  * run look like a later turn of the first (turn counters continue). The spec
  * never repeats a prompt verbatim, and /__reset clears counters between tests.
  */
+/**
+ * Conversation key = hash of the LAST user message text (the current prompt).
+ * The agent replays the full session memory on every request, so input[0] is
+ * context rather than the prompt.
+ *
+ * Tool results arrive as `role: "user"` items that carry no text, so the search
+ * must skip text-less user items: reading one as "the prompt" changed the hash
+ * every turn, reset the turn counter to 1, and silently degraded every
+ * multi-turn scenario to `fallback`.
+ */
 function hashConversation(body: { input?: unknown }): string {
   const anchor = lastUserText(body).slice(0, 600);
   return createHash("sha1").update(anchor).digest("hex").slice(0, 12);
+}
+
+function userTextOf(record: Record<string, unknown>): string {
+  if (typeof record.content === "string") return record.content;
+  if (Array.isArray(record.content)) {
+    return record.content
+      .map((part) => {
+        if (!part || typeof part !== "object") return "";
+        const p = part as Record<string, unknown>;
+        return typeof p.text === "string" ? p.text : "";
+      })
+      .join(" ");
+  }
+  return "";
 }
 
 function readJsonBody(req: IncomingMessage): Promise<unknown> {
@@ -66,17 +90,9 @@ function lastUserText(body: { input?: unknown }): string {
     if (!item || typeof item !== "object") continue;
     const record = item as Record<string, unknown>;
     if (record.role !== "user") continue;
-    if (typeof record.content === "string") return record.content;
-    if (Array.isArray(record.content)) {
-      return record.content
-        .map((part) => {
-          if (!part || typeof part !== "object") return "";
-          const p = part as Record<string, unknown>;
-          return typeof p.text === "string" ? p.text : "";
-        })
-        .join(" ");
-    }
-    return "";
+    const text = userTextOf(record);
+    if (text.length === 0) continue;
+    return text;
   }
   return "";
 }

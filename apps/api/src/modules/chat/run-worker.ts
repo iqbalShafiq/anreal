@@ -23,6 +23,7 @@ import { reconstructChatRunInput } from "./build-run-input.js";
 import {
   createChatClientStream,
   toChatResumableEvent,
+  UserFacingStreamError,
   type ChatAppEvent,
   type ChatClientEvent,
   type ChatResumableEvent,
@@ -55,11 +56,35 @@ import {
   type SteeringStore,
 } from "./steering.js";
 import { removeFailedPromptForRetry } from "./remove-failed-prompt.js";
+import {
+  tapAgentStreamUsage,
+  type TapAgentUsageContext,
+} from "../usage/tap-agent-usage.js";
 
 export { CHAT_RUN_QUEUE, type ChatRunJobData } from "./run-queue.js";
 
 const SAFE_ERROR_MESSAGE = "Something went wrong while answering. Send again.";
 const SAFE_CANCEL_MESSAGE = "The answer was stopped.";
+
+/**
+ * Run errors whose message is authored for the user and carries no internal
+ * detail, so it survives the generic safe-error collapse. Everything else keeps
+ * the opaque fallback: provider payloads and stack-shaped errors must never
+ * reach the transcript.
+ */
+const USER_FACING_RUN_ERROR_CODES = new Set([
+  // A provider connection was deleted while this run was queued.
+  "PROVIDER_CONNECTION_MISSING",
+  // The connection's stored credential can no longer be decrypted; the user
+  // can only fix it by re-entering the key in Settings → Providers.
+  "PROVIDER_CREDENTIAL_UNREADABLE",
+]);
+
+export function isUserFacingRunError(error: unknown): boolean {
+  if (!isRecord(error)) return false;
+  const code = error.code;
+  return typeof code === "string" && USER_FACING_RUN_ERROR_CODES.has(code);
+}
 const STOP_POLL_MS = 150;
 
 export { RUN_OWNER_WAL_KEY, RUN_CREATED_KEY } from "../../lib/resumable-stream-store.js";
@@ -118,6 +143,14 @@ export type ChatRunWorkerDependencies = {
     attachments?: readonly unknown[];
   }) => Promise<void>;
   activeRuns?: ActiveRunRegistry;
+  /**
+   * Wraps the outgoing native event stream to record an AgentUsageEvent on
+   * terminal events (unread badges / usage audit rely on this).
+   */
+  tapUsage?: <T>(
+    source: AsyncIterable<T>,
+    ctx: TapAgentUsageContext,
+  ) => AsyncIterable<T>;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -131,12 +164,26 @@ function requireUserPrompt(message: Message): UserMessage {
 
 function safeErrorEvent(error?: unknown): AgentStreamEvent {
   const cancellation = isRecord(error) && error.code === "CHAT_RUN_CANCELLED";
+  const userFacing = !cancellation && isUserFacingRunError(error) && error instanceof Error;
+  // The user-facing and cancellation messages are authored here, so they are
+  // delivered as a `UserFacingStreamError` marker. That is the only shape the
+  // client-stream adapter lets through un-masked; the opaque case stays a plain
+  // object and is masked downstream, byte-identical to the adapter default.
+  const shapedError = cancellation
+    ? new UserFacingStreamError(SAFE_CANCEL_MESSAGE, "CHAT_RUN_CANCELLED")
+    : userFacing
+      ? new UserFacingStreamError(
+          (error as Error).message,
+          isRecord(error) && typeof error.code === "string" ? error.code : undefined,
+        )
+      : null;
   return {
     type: "error",
-    error: {
-      code: cancellation ? "CHAT_RUN_CANCELLED" : "CHAT_RUN_FAILED",
-      message: cancellation ? SAFE_CANCEL_MESSAGE : SAFE_ERROR_MESSAGE,
-    },
+    error:
+      shapedError ?? {
+        code: "CHAT_RUN_FAILED",
+        message: SAFE_ERROR_MESSAGE,
+      },
     usage: {
       inputTokens: 0,
       outputTokens: 0,
@@ -149,7 +196,14 @@ function safeErrorEvent(error?: unknown): AgentStreamEvent {
 
 function safeError(error: unknown): Error {
   const cancellation = isRecord(error) && error.code === "CHAT_RUN_CANCELLED";
-  const result = new Error(cancellation ? SAFE_CANCEL_MESSAGE : SAFE_ERROR_MESSAGE);
+  const userFacing = !cancellation && isUserFacingRunError(error) && error instanceof Error;
+  const result = new Error(
+    cancellation
+      ? SAFE_CANCEL_MESSAGE
+      : userFacing
+        ? (error as Error).message
+        : SAFE_ERROR_MESSAGE,
+  );
   result.name = cancellation ? "ChatRunCancelledError" : "ChatRunError";
   Object.assign(result, {
     code: cancellation ? "CHAT_RUN_CANCELLED" : "CHAT_RUN_FAILED",
@@ -452,11 +506,14 @@ async function appendSafeTerminal(
   streamId: string,
   runId: string,
   cancellation = false,
+  error?: unknown,
 ): Promise<void> {
   const stream = createChatClientStream({
     runId,
     metadata: undefined,
-    events: toAsync([safeErrorEvent(cancellation ? { code: "CHAT_RUN_CANCELLED" } : undefined)]),
+    events: toAsync([
+      safeErrorEvent(cancellation ? { code: "CHAT_RUN_CANCELLED" } : error),
+    ]),
   });
   for await (const event of stream) await appendClientEvent(store, streamId, event);
 }
@@ -590,6 +647,15 @@ export function createChatRunProcessor(input?: ChatRunWorkerDependencies) {
     let resumeOverrideTaken = false;
     let interactionPersistenceFailed = false;
     let runCleanup: (() => Promise<void>) | null = null;
+    let finalizeLive: (() => Promise<void>) | null = null;
+    let liveFinalized = false;
+    const finalizeLiveOnce = async (): Promise<void> => {
+      if (!finalizeLive || liveFinalized) return;
+      liveFinalized = true;
+      await finalizeLive().catch((error) => {
+        console.error("[chat-run] live session finalize failed", error);
+      });
+    };
     try {
       startOwnerWal();
       monitorStop();
@@ -667,6 +733,7 @@ export function createChatRunProcessor(input?: ChatRunWorkerDependencies) {
       const runInput = reconstructed.value;
       waitRegistry = runInput.waitRegistry;
       runCleanup = runInput.cleanup ?? null;
+      finalizeLive = runInput.finalizeLiveSessions ?? null;
       if (cancelled) cancelOwnedWaitJobs(cancelReason);
       if (!(await deps.sessionExists(parsed.sessionId, parsed.userId))) {
         throw Object.assign(new Error("session deleted"), { code: "CHAT_RUN_CANCELLED" });
@@ -749,6 +816,12 @@ export function createChatRunProcessor(input?: ChatRunWorkerDependencies) {
               if (isRootTerminal(raw)) {
                 sawRoot = true;
                 terminal = raw.type;
+                // A provider failure is terminal and its message is sanitized
+                // before it can reach any client, so the raw cause has to be
+                // recorded here or a failed run leaves no server-side trace.
+                if (raw.type === "error") {
+                  console.error("[chat-run] agent error", raw.error);
+                }
               }
               yield sanitizeNativeEvent(raw);
               for (const appEvent of appEvents.drain()) yield appEvent;
@@ -772,7 +845,14 @@ export function createChatRunProcessor(input?: ChatRunWorkerDependencies) {
             modelId: parsed.recipe.model.id,
             reasoningEffort: parsed.recipe.model.reasoningEffort,
           },
-          events: observedEvents,
+          events: (deps.tapUsage ?? tapAgentStreamUsage)(observedEvents, {
+            userId: parsed.userId,
+            sessionId: parsed.sessionId,
+            provider: parsed.recipe.model.id.split("/")[0] ?? "unknown",
+            model: parsed.recipe.model.id,
+            reasoningEffort: parsed.recipe.model.reasoningEffort ?? null,
+            agentId: parsed.recipe.agentId,
+          }),
           onInteraction: async (outcome) => {
             try {
               if (deps.persistInteraction) {
@@ -816,11 +896,18 @@ export function createChatRunProcessor(input?: ChatRunWorkerDependencies) {
 
       const closeStatus = terminal === "error" ? "error" : "completed";
       waitRegistry.abortAll(cancelled ? cancelReason : "run ended");
+      // Live browse sessions must publish their `stopped` event while the
+      // stream is still running; closing the stream first would strand the
+      // UI on a frozen live card.
+      await finalizeLiveOnce();
       await deps.streamStore.close({ streamId, status: closeStatus });
       await releaseOwnedActiveRun();
       await clearOwnedStopFlag();
       if (terminal === "error") throw safeError(cancelled ? { code: "CHAT_RUN_CANCELLED" } : undefined);
     } catch (error) {
+      // The user-facing message is deliberately opaque, so the raw cause must
+      // be logged here or it is lost entirely. Server-side only.
+      console.error("[chat-run] run failed", error);
       appEvents.end();
       if (resumePolicy && !policyConsumed && nativeStream === null) {
         await deps.releaseInteractionPolicy({
@@ -831,7 +918,8 @@ export function createChatRunProcessor(input?: ChatRunWorkerDependencies) {
       const statusNow = await deps.streamStore.status({ streamId }).catch(() => ({ status: "running" as const, lastEventId: 0 }));
       if (statusNow.status === "running") {
         try {
-          await appendSafeTerminal(deps.streamStore, streamId, streamId, cancelled);
+          await finalizeLiveOnce();
+          await appendSafeTerminal(deps.streamStore, streamId, streamId, cancelled, error);
           await deps.streamStore.close({ streamId, status: "error" });
         } catch (terminalError) {
           console.error("[chat-run] safe terminal append failed", terminalError);

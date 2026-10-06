@@ -123,6 +123,7 @@ Factory agent yang dipakai API:
    | `CONTEXT7_URL` | Endpoint MCP context7 (default `https://mcp.context7.com/mcp`) |
    | `DATABASE_URL` | Koneksi Postgres (default cocok dengan Docker Compose) |
    | `BETTER_AUTH_SECRET` | Secret cookie session (wajib; `openssl rand -base64 32`) |
+   | `PROVIDER_CREDENTIALS_KEY` | Enkripsi API key provider milik user saat disimpan (AES-256-GCM, 32 bytes as 64 hex chars; `openssl rand -hex 32`). Wajib di production; dev/test fallback ke ephemeral key sehingga credential tidak bertahan setelah restart. **Terpisah** dari `MCP_CREDENTIALS_KEY` — keduanya tidak bisa saling menggantikan |
    | `BETTER_AUTH_URL` | Base URL API auth (default `http://localhost:3001`) |
    | `PLATFORM_ORIGIN` | Origin frontend web untuk CORS + trustedOrigins (default `http://localhost:3000`) |
    | `TRUSTED_ORIGINS` | Origin tambahan (comma-separated) yang boleh memanggil API dari browser / webview — Expo web, preview, custom scheme mobile, dll. Native HTTP client biasanya tidak mengirim `Origin` |
@@ -315,6 +316,36 @@ Tools ini di-inject ke agent saat handle chat:
 | `generate_image` | Generate gambar dari prompt; param (model, aspect ratio, quality, background) hanya diisi saat user minta, selainnya pakai default session |
 | `edit_image` | Edit gambar generated sebelumnya (via `referenceImageId`) — dikirim sebagai `input_references` (data URL) |
 | `request_clarification` | Tanya user saat request ambigu (max 5 pertanyaan, tipe single/multiple choice/free text) |
+| `view_site_page` | Lihat site pinned: cuplikan teks + screenshot Playwright (vision: bytes inline, text-only: via `view_image`); cache permanen per versi |
+| `browse_site` | Browse interaktif site pinned: `open`/`scroll`/`click`/`snapshot`/`close` satu aksi per call; user menonton frame live + cursor Playwright di kartu atas composer |
+
+### Agent site viewing (screenshot Playwright)
+
+`view_site_page` membuka site dari registry scope, membaca `index.html` (cuplikan ≤6000 char, baca terbatas 256 KB) dan mengambil screenshot lewat **Playwright** (`playwright-core`). Hasilnya di-cache permanen per `(siteId, version)` di manifest site — versi site immutable, jadi tidak ada stale.
+
+| Aspek | Detail |
+| --- | --- |
+| Browser | `chromium.launch({ channel: "chrome" })` (Chrome sistem) dengan fallback Chromium bawaan; kalau belum ada, jalankan `pnpm --filter @anreal/api exec playwright install chromium` |
+| Env | Tidak ada key baru; origin internal mengikuti `BETTER_AUTH_URL`/`PORT` (`getApiOrigin()`) |
+| Batas | Viewport 1440×900, fullPage → fallback viewport PNG → JPEG (cap 5 MB), tinggi ≤16.000 px, timeout navigasi 15 dtk / total 30 dtk |
+| Konkurensi | Maks 2 capture paralel (FIFO) + single-flight per `(siteId, version)` |
+| Pengiriman ke model | Bytes diantrekan ke pending vision buffer (pola sama dengan `web_search` images) untuk model vision; model text-only memakai `view_image(imageId)` |
+| Error | Capture gagal → cuplikan teks tetap dikembalikan + `captureError` + `retryable: true` (agent bisa menjawab parsial / retry) |
+
+### Agent live browse (`browse_site`)
+
+`browse_site` menjalankan **sesi browser persisten** di worker untuk site pinned: agent membuka sesi lalu scroll/klik satu aksi per tool call, dan setiap aksi mengembalikan screenshot baru (`imageId`; vision inline, text-only via `view_image`). Selama sesi hidup, frame browser di-stream sebagai JPEG ephemeral (Redis TTL 30 dtk, throttle ≥300 ms) dan disajikan lewat `GET /api/sites/live/:sessionId/frame` (auth + ownership sesi; 204 bila tidak ada frame). UI menampilkan kartu **Live** di atas composer dengan cursor + label aksi bawaan Playwright (`page.screencast` + `showActions({ cursor: "pointer" })`).
+
+| Aspek | Detail |
+| --- | --- |
+| Aksi | `open` → `scroll`/`click`/`snapshot` → `close`; `click` butuh tepat satu `selector` atau `text`; maks 12 aksi/sesi |
+| Idle | 120 dtk tanpa aksi → auto-close (sweeper 30 dtk); sesi juga ditutup saat run berakhir |
+| Keamanan | Hanya origin API lokal (`getApiOrigin()`); navigasi top-level keluar diblokir (`blocked: true`), dialog auto-dismiss, download/popup ditolak |
+| Browser | Berbagi semaphore dengan capture screenshot (maks 2 browser total) |
+| Frame | JPEG ≤1024×640 q60, Redis `site-live:<sessionId>`, TTL 30 dtk; event kecil `siteLiveView` (started/stopped) lewat stream chat |
+| Error | Sesi tidak ada → error "call open first"; screenshot gagal → `captureError` + `retryable` (sesi tetap hidup) |
+
+Contoh prompt: *“Buka site yang saya pin, scroll ke bawah, klik link Kontak, lalu jelaskan isinya.”* — agent memanggil `browse_site` dan user menonton prosesnya secara live.
 
 Contoh prompt: *“Hitung mean dan standar deviasi dari [12, 15, 18, 20, 22]”* — agent akan memanggil `descriptive_stats`.
 
@@ -367,7 +398,113 @@ Katalog model ada di tabel `chat_model` (diseed oleh `pnpm --filter @anreal/api 
 | `imageCapabilities` | JSONB — `quality`, `background`, `n` (min/max), `aspectRatios`/`resolutions` sesuai model |
 | harga, `iconSvg`, dll. | Metadata katalog untuk UI pemilih model |
 
-`GET /api/models` menyajikan katalog ke UI; seed melakukan **upsert** per model (created/updated dihitung, tidak ada duplikat).
+`GET /api/models` menyajikan katalog ke UI; seed melakukan **upsert** per model (created/updated dihitung, tidak ada duplikat). Response endpoint ini kini **digabung** dengan model milik connection BYOK pemanggil: setiap baris membawa `source` (`"catalog"` atau `"connection"`) dan `connectionId` (terisi hanya untuk baris `connection`).
+
+## BYOK provider connections
+
+Selain katalog model yang di-seed, tiap user bisa membawa **API key provider sendiri** (BYOK). BYOK mencakup **model chat/teks** dan **model image**: user mendaftarkan provider **connection** beserta model di atasnya, dan model-model itu ikut muncul di pemilih model composer. Model chat muncul di picker chat; model image muncul di picker model image dan, saat dipilih, dipakai **menggantikan key server bersama**. Kalau user belum punya satu pun model image BYOK, tidak ada yang berubah: generation image tetap dilayani key `OPENAI_*` bersama.
+
+**Menambah model.** Menu model di composer juga punya baris **"Add a model…"** yang membuka form **Settings → Providers** yang sama — hanya ada satu form, bukan dua — sehingga model bisa ditambahkan dari composer maupun dari Settings → Providers. Model yang ditambahkan dari salah satu tempat itu bisa dipakai untuk chat maupun kelima peran background (memory compaction, profile summary, site builder, vision helper, scheduled chat). Satu pengecualian: peran **Image understanding** hanya menerima model yang mendeklarasikan image input — model text-only tidak akan muncul di picker-nya (lihat catatan di bawah).
+
+**Connection, vendor, dan model.** Kosakatanya tiga lapis, dan dulu ambigu:
+
+- **Connection** — gateway/rute yang user tambahkan ("My Gateway", "OpenCode", "OpenRouter"). Satu connection melayani **model dari banyak vendor** sekaligus.
+- **Vendor** — siapa yang membuat model itu (`openai`, `google`, `deepseek`, `meta`, `xai`, atau apa pun yang user deklarasikan).
+- **Model** — model spesifiknya.
+
+"Kompatibel dengan API mana" **bukan lapisan keempat**: itu provider kind + API shape milik connection, yang mendeskripsikan **rute**-nya, bukan model satu per satu. Alur input-nya tetap dua tingkat — sebuah **connection** (provider kind + base URL opsional + API key + custom headers opsional), lalu **model** di atasnya (upstream model id, display name, context window, reasoning efforts, icon opsional); **vendor** adalah atribut yang user deklarasikan pada model itu. Semua connection dan model di-scope ke user pembuatnya — user lain tidak bisa melihat atau memakainya.
+
+**Vendor dideklarasikan, bukan diturunkan.** Gateway menamai model secara tidak konsisten, dan itulah alasan field ini ada: **OpenRouter** memberi prefix vendor (`openai/gpt-4o`, `anthropic/claude-sonnet-4`), sedangkan **OpenCode Zen** memberi prefix **dirinya sendiri** — `opencode/gpt-5.5` dengan `gpt-5.5` sebagai id modelnya yang polos. Jadi prefix tidak bisa dipercaya. Editor **menyarankan** vendor ketika prefix-nya cocok dengan vendor yang sudah dikenal katalog, tetapi keputusannya tetap milik user.
+
+**`vendorLabel` hanya facet filter.** Ia tidak pernah memengaruhi routing, konstruksi model, atau apa pun yang dilakukan sebuah run — mendeklarasikan vendor tidak mengubah cara request dikirim; ia hanya memberi label pada model agar bisa difilter dan diurutkan di picker.
+
+**Perilaku picker model.** Search selalu terlihat; **Filter** dan **Sort** adalah tombol ikon di sebelahnya yang membuka kontrolnya secara inline, dan masing-masing menampilkan titik kecil saat nilainya berbeda dari default. Chip dan threshold **diturunkan dari katalog**, tidak pernah dari daftar tetap — facet yang tidak bisa membedakan tidak ditampilkan sama sekali (satu vendor, atau tidak ada model dengan kemampuan image, berarti tidak ada barisnya). Filter **bergabung**: AND antar grup, OR di dalam satu grup. Sort: **Default** (urutan katalog), **Name**, **Price**, **Context**, dan **Vendor** — sengaja **tidak ada "popular"**, karena aplikasi tidak punya sinyal popularitas dan tidak memalsukannya. Model **tanpa context window yang dideklarasikan** diperlakukan sebagai belum dideklarasikan, bukan sebagai yang terkecil: ia dikeluarkan dari threshold Context dan diurutkan paling akhir di sort Context. Tampilan **list atau grid**, diingat per browser; panel grid lebih lebar dan menampilkan tag kapabilitas di tiap kartu, serta daftar opsinya bergulir setelah **8 baris** (list) atau **3 baris** (grid). Jumlah hasil **diumumkan ke screen reader, bukan ditampilkan**, dan **"Add a model…" tetap di luar area yang bergulir** supaya selalu bisa dijangkau.
+
+**Enkripsi.** API key provider dienkripsi saat disimpan (at rest) memakai AES-256-GCM dengan `PROVIDER_CREDENTIALS_KEY`. Key ini **wajib di production**; di dev/test, jika kosong, app memakai ephemeral key dengan peringatan sekali di console, sehingga credential yang tersimpan **tidak bertahan setelah restart**. Key ini **terpisah** dari `MCP_CREDENTIALS_KEY` — keduanya tidak bisa saling menggantikan.
+
+**API key bersifat write-only.** Tidak ada endpoint yang pernah mengembalikan API key, nilai custom header, atau `credentialsRef`. Sebagai gantinya, sebuah connection melaporkan `hasCredentials: true`. Credential hanya didekripsi di proses API/worker, saat run berjalan, dan tidak pernah masuk ke run recipe yang durable — recipe hanya menyimpan `connectionId`.
+
+**Slug model.** Model id diturunkan sebagai `<connection-slug>/<upstream-id tersanitasi>`, dengan suffix `-2`, `-3`, … sampai unik untuk user itu dan tidak bertabrakan dengan katalog global. Connection slug sendiri tidak boleh memakai namespace yang sudah dimiliki katalog. Daftar namespace terlarang itu **mengikuti katalog**: ia adalah gabungan dari set bawaan (`openai`, `deepseek`, `google`, `xai`, `meta`) dan slug provider aktif di katalog — jadi **menambahkan provider baru ke katalog otomatis menandai namespace-nya terlarang**, tanpa perubahan kode.
+
+**Batas.** Maks **10 connection** per user, **100 model** per user, dan **16 custom header** per connection (nama header ≤128 char, value ≤2048 char). Header bernama `authorization` ditolak — field API key adalah satu-satunya cara autentikasi. Base URL wajib memakai `https`, kecuali `localhost`/`127.0.0.1`.
+
+**Provider kind.** Ada enam: `openai`, `anthropic`, `gemini`, `grok`, `mistral`, dan `compatible` (endpoint apa pun yang OpenAI-compatible — OpenRouter, DeepSeek, Groq, Together, Fireworks, Ollama, vLLM, LM Studio, termasuk shim OpenAI-compat Anthropic/Gemini). Kind `compatible` wajib mengisi base URL. Reasoning effort bersifat adapter-neutral; kosakata per model adalah gabungan `none | minimal | low | medium | high | xhigh | max`.
+
+**Model image.** Model image hanya bisa didaftarkan di atas kind yang punya endpoint image: `compatible` (OpenAI-compatible, berbicara `POST /images` ala OpenRouter), `gemini`, dan `grok`. Connection native `openai`, `anthropic`, dan `mistral` tidak bisa membawa model image — alasannya tetap seperti sebelumnya: API images native OpenAI punya parameter berbeda dan tidak punya `input_references`, sedangkan alur `edit_image` aplikasi mengirim reference image dan membutuhkannya.
+
+**Kapabilitas image divalidasi saat disimpan.** `imageCapabilities` dideklarasikan saat save dan diperiksa terhadap apa yang benar-benar bisa dipenuhi kind itu, sehingga provider tidak pernah menerima request yang akan ditolaknya karena alasan yang sudah dideklarasikan. Bedanya antar kind besar:
+
+- `compatible` memenuhi `sizes`, `quality`, `background`, dan `n` — dengan `n` dibatasi execution limit tool.
+- `gemini` dan `grok` **tidak memenuhi kontrol opsional apa pun**: `quality`, `background`, dan `sizes` ditolak, dan `n` dipatok `1`, karena kedua adapter menurunkan bentuk image dari dimensi piksel, bukan dari opsi yang dikirim.
+- `gemini` dan `grok` juga menolak aspect ratio yang tidak bisa dinyatakan sebagai rasio gcd-reduced — jadi `21:9`, `19.5:9`, dan `9:19.5` tidak bisa dideklarasikan untuk keduanya.
+
+**Batasan yang jujur.** Tiga hal yang akan ditemui user:
+
+1. Connection **Gemini** tidak bisa membawa custom header — klien Gemini tidak punya seam untuk itu — sehingga gateway Gemini yang autentikasi lewat custom header tidak bisa mengautentikasi request image-nya.
+2. Untuk **Gemini**, keluarga **Imagen** (API `generateImages`) **tidak didukung** di versi ini: aplikasi mendorong image Gemini lewat `generateContent` saja. Tidak ada yang menolak id Imagen saat save, tetapi mendaftarkannya menghasilkan request yang dibawa shapes API yang salah — jadi id Imagen tidak didukung.
+3. Custom header Grok sampai ke request, tetapi lewat provider SDK, bukan lewat option wire-level yang dikendalikan aplikasi.
+
+Editor model di Settings → Providers menawarkan output type `image` hanya untuk kind yang mendukungnya, dan kapabilitas image **dikirim ulang penuh di setiap save** — save yang menghilangkannya akan mengosongkannya.
+
+**Model per peran.** Setiap peran background — memory compaction, profile summarization, site builder, vision helper, dan scheduled chat — bisa diarahkan ke model pilihannya sendiri. Detailnya di subsection **Model per peran** di bawah. Yang bisa dipilih per peran lewat katalog gabungan adalah model chat/teks; model image dipilih di picker image-nya sendiri.
+
+**Menguji connection.** `POST /api/providers/test` memvalidasi credential ke provider **tanpa menyimpan apa pun**; endpoint menerima `connectionId` opsional sehingga field key yang dibiarkan kosong akan memakai credential yang tersimpan. Test yang gagal mengembalikan pesan yang mudah dibaca dan bebas credential.
+
+### API providers
+
+Semua endpoint **require auth**, dan setiap respons di-scope ke user pemanggil:
+
+| Method | Path | Keterangan |
+| --- | --- | --- |
+| `GET` | `/api/providers/kinds` | Daftar provider kind + kosakata reasoning effort |
+| `GET` | `/api/providers` | Daftar connection user (tanpa secret) |
+| `POST` | `/api/providers` | Tambah connection |
+| `GET` | `/api/providers/:id` | Detail satu connection |
+| `PATCH` | `/api/providers/:id` | Ubah connection; kalau `apiKey` dihilangkan, key tersimpan tetap dipakai |
+| `DELETE` | `/api/providers/:id` | Hapus connection (cascade ke model-modelnya) |
+| `PATCH` | `/api/providers/:id/enabled` | Enable/disable connection |
+| `POST` | `/api/providers/test` | Validasi credential, tanpa persist |
+| `GET` | `/api/providers/:id/models` | Daftar model di connection |
+| `POST` | `/api/providers/:id/models` | Daftarkan model (auto-slug) |
+| `PATCH` | `/api/providers/:id/models/:modelId` | Ubah model |
+| `DELETE` | `/api/providers/:id/models/:modelId` | Hapus model |
+| `POST` | `/api/providers/:id/models/discover` | Inventory model dari provider |
+| `POST` | `/api/providers/:id/models/prefill` | Metadata yang dideklarasikan adapter |
+
+UI-nya ada di **Settings → Providers**.
+
+### Model per peran
+
+Setiap **peran background** bisa diarahkan ke model pilihannya sendiri lewat **Settings → Account → Model assignments** — satu picker per peran. Pilihan **Default** (opsi kosong) menghapus assignment dan mengembalikan peran itu ke jalur default-nya.
+
+| Peran | Label di UI | Yang diatur |
+| --- | --- | --- |
+| `memoryCompaction` | Memory compaction | Summarizer yang memadatkan memory percakapan lama di dalam satu run |
+| `profileSummary` | Profile summary | Summarizer profil user/proyek yang jalan di background |
+| `siteBuilder` | Site builder | Worker static site builder |
+| `visionHelper` | Image understanding | Model yang mendeskripsikan gambar untuk model chat text-only |
+| `scheduledChat` | Scheduled chats | Model yang dipakai run chat terjadwal (cron) |
+
+**Precedence.** Model sebuah peran diresolusi dengan urutan **assignment user → env var yang ada → default yang ada**. User yang belum pernah menyentuh pengaturan ini berjalan byte-identik seperti sebelum fitur ini ada — properti itulah yang dijaga seluruh desainnya.
+
+**Model chat tidak punya default tingkat akun.** Peran `chat` dihapus: model chat adalah model terakhir yang user pilih di composer, dengan urutan **model tersimpan di browser → model pertama di katalog → default aplikasi**. Sebelum fitur ini, efek reconcile sempat menulis fallback ke `chat.selectedModel`, sehingga nilai tersimpan bisa berarti "user memilih ini" atau "aplikasi yang menulis ini" — default chat yang kalah diam-diam dari nilai tulisan aplikasi sendiri lebih buruk daripada tidak ada default chat.
+
+**Lapisan env var.** Tiga peran masih membaca env var sebagai lapisan tengah: `PROFILE_SUMMARY_MODEL` (profile summary), `SITE_MODEL` (site builder), dan `VISION_HELPER_MODEL` (vision helper). `scheduledChat` tidak punya env var dan jatuh ke default completion model aplikasi (`openai/gpt-6-luna`). `memoryCompaction` tidak punya default sendiri.
+
+**Memory compaction mengikuti model chat** kecuali di-assign eksplisit. Default-nya adalah model chat milik run itu sendiri, bukan model terpisah — karena itu picker-nya menampilkan **"Using the chat model"**. **Vision helper** tanpa `VISION_HELPER_MODEL` memilih otomatis model gambar termurah ("Using the cheapest available image model").
+
+**Assignment yang menggantung turun diam-diam ke default.** Kalau user menghapus connection BYOK atau model yang ditunjuk assignment (atau seed memangkas model katalog), peran itu kembali ke jalur env/default-nya dan server menulis peringatan di log — user tidak diblokir dan tidak ada yang error.
+
+**Vision helper hanya menerima model yang mendeklarasikan image input.** Model text-only ditolak saat assignment disimpan, dengan pesan yang menyebutkannya — bukan gagal belakangan saat ada gambar masuk.
+
+**Tanpa restart.** Assignment diresolusi secara live; untuk `memoryCompaction` bahkan di dalam run yang sedang berjalan, sehingga percakapan aktif bisa memakai compactor model yang baru di tengah percakapan.
+
+Endpoint (semua **require auth**, di-scope ke user pemanggil):
+
+| Method | Path | Keterangan |
+| --- | --- | --- |
+| `GET` | `/api/models/roles` | Satu entri per peran: assignment (`modelId`, `null` bila dikosongkan) + default yang diresolusi (`defaultModelId`) |
+| `PUT` | `/api/models/roles` | Body `{ role, modelId }` — `modelId` adalah id katalog gabungan, atau `null` untuk menghapus assignment |
 
 ## User profiling
 

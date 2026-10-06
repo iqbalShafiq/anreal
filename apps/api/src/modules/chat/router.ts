@@ -124,10 +124,11 @@ function requireSessionId(value: unknown): string | null {
  */
 async function resolveContextUsageEffortFallback(
   modelId: string,
+  userId: string,
   effort: string | null,
 ): Promise<string | null | undefined> {
   const { findActiveModel, listModels } = await import("../models/service.js");
-  const modelInfo = await findActiveModel(modelId);
+  const modelInfo = await findActiveModel(modelId, userId);
   if (!modelInfo) return undefined;
   const catalog = await listModels();
   const ordered = [...catalog.reasoningEfforts].sort((a, b) => a.sortOrder - b.sortOrder);
@@ -661,7 +662,11 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
         error instanceof Error &&
         /does not support reasoning effort/.test(error.message)
       ) {
-        const fallback = await resolveContextUsageEffortFallback(model, reasoningEffort);
+        const fallback = await resolveContextUsageEffortFallback(
+          model,
+          user.id,
+          reasoningEffort,
+        );
         if (fallback !== undefined) {
           return c.json(
             await computeContextUsage({ sessionId, userId: user.id, model, reasoningEffort: fallback }),
@@ -938,6 +943,7 @@ export const chatRouter = new Hono<{ Variables: AuthVariables }>()
     const { findActiveModel } = await import("../models/service.js");
     const selectedModel = await findActiveModel(
       metadata.modelId ?? DEFAULT_COMPLETION_MODEL,
+      user.id,
     );
     const promptMessage = stripUserAttachments(lastMessage, {
       keepImages: selectedModel?.inputModalities.includes("image") === true,

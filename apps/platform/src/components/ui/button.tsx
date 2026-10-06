@@ -4,12 +4,18 @@ export type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
 export type ButtonSize = "sm" | "md" | "icon";
 
 export const BUTTON_BASE_CLASS =
-  "inline-flex cursor-pointer items-center justify-center rounded-xl font-medium transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-ring active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-40";
+  "inline-flex cursor-pointer items-center justify-center whitespace-nowrap rounded-xl font-medium transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-ring active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-40";
 
+/**
+ * `secondary` is the tonal button: a hairline border over a quiet surface, the
+ * app's established pairing for a bordered action (`document-image.tsx`,
+ * `session-history-list.tsx`). `ghost` is the label-only variant — keep the two
+ * distinct, since a bordered button and a text button read very differently.
+ */
 export const BUTTON_VARIANT_CLASSES: Record<ButtonVariant, string> = {
   primary:
     "bg-accent text-canvas shadow-[inset_0_1px_0_rgba(255,255,255,0.25)] hover:bg-accent-hover",
-  secondary: "text-text-muted hover:bg-white/8 hover:text-text",
+  secondary: "border border-hairline bg-surface text-text hover:bg-surface-elevated",
   ghost: "text-text-faint hover:bg-white/[0.06] hover:text-text",
   danger: "text-text-faint hover:bg-danger-soft hover:text-danger",
 };

@@ -320,7 +320,7 @@ export function ToolActivityPanel({ part }: { part: ToolPart }) {
         fields: [
           {
             label: "Message",
-            value: part.error.message || "Tool failed",
+            value: formatToolErrorMessage(part.error.message || "Tool failed"),
           },
         ],
       } satisfies FormattedSection;
@@ -415,4 +415,17 @@ export function ToolActivityPanel({ part }: { part: ToolPart }) {
       )}
     </div>
   );
+}
+
+/**
+ * Keep tool failures readable: schema-argument dumps are noise for the
+ * reader, and very long messages lose the gist in the panel.
+ */
+function formatToolErrorMessage(message: string): string {
+  const text = message.trim();
+  if (!text) return "Tool failed";
+  if (/invalid_union|No matching discriminator/i.test(text)) {
+    return "The tool call arguments did not match the tool schema. The agent will retry with corrected arguments.";
+  }
+  return text.length > 400 ? `${text.slice(0, 400).trimEnd()}…` : text;
 }

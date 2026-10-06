@@ -10,6 +10,13 @@ export type OpenRouterImageGenerationModelOptions = {
   apiKey: string;
   baseUrl: string;
   defaultModel?: string;
+  /**
+   * Connection headers for a gateway that authenticates beyond the key. Merged
+   * over the defaults, so a custom header can override `Authorization` or
+   * `Content-Type`, while the connection key is still sent when the caller
+   * declares no custom `Authorization`.
+   */
+  headers?: Record<string, string>;
   fetchFn?: typeof fetch;
   /** Backoff delays (ms) between retries of transient failures. Default [1000, 2000]. */
   retryDelaysMs?: number[];
@@ -115,6 +122,7 @@ export class OpenRouterImageGenerationModel
   readonly modelId: string;
   private readonly apiKey: string;
   private readonly baseUrl: string;
+  private readonly headers: Record<string, string>;
   private readonly fetchFn: typeof fetch;
   private readonly retryDelaysMs: number[];
 
@@ -122,6 +130,7 @@ export class OpenRouterImageGenerationModel
     this.apiKey = options.apiKey;
     this.baseUrl = options.baseUrl.replace(/\/+$/, "");
     this.modelId = options.defaultModel ?? "openai/gpt-5-image-mini";
+    this.headers = options.headers ?? {};
     this.fetchFn = options.fetchFn ?? fetch;
     this.retryDelaysMs = options.retryDelaysMs ?? DEFAULT_RETRY_DELAYS_MS;
   }
@@ -158,8 +167,12 @@ export class OpenRouterImageGenerationModel
         response = await this.fetchFn(`${this.baseUrl}/images`, {
           method: "POST",
           headers: {
+            // Defaults first, then the connection's own headers over the top:
+            // a custom header must be able to override a default, and the
+            // connection key stays present when no custom one is declared.
             Authorization: `Bearer ${this.apiKey}`,
             "Content-Type": "application/json",
+            ...this.headers,
           },
           body: JSON.stringify(body),
           ...(abortSignal ? { signal: abortSignal } : {}),

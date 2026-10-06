@@ -29,10 +29,10 @@ import { VIEW_IMAGE_TOOL_DEFINITIONS } from "./vision-helper.js";
 
 function recipe(overrides: Record<string, unknown> = {}) {
   const value = {
-    version: 6,
+    version: 8,
     agentId: CHAT_AGENT_ID,
     identity: { sessionId: "session-1", userId: "user-1", projectId: null },
-    model: { id: "openai/gpt-5.6-luna", reasoningEffort: null },
+    model: { id: "openai/gpt-5.6-luna", connectionId: null, reasoningEffort: null },
     memoryPolicy: {
       version: 1,
       savePolicy: "turn",
@@ -435,6 +435,7 @@ describe("run recipe reconstruction capability boundary", () => {
     ).toEqual(
       expect.arrayContaining([expect.stringMatching(/do not write user-facing prose/i)]),
     );
-    expect(researcherOptions?.middlewares).toHaveLength(1);
+    // Wait-budget middleware plus the vision bridge middleware.
+    expect(researcherOptions?.middlewares).toHaveLength(2);
   });
 });

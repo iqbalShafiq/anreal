@@ -683,8 +683,154 @@ export const profileDtoSchema = {
   },
 } as const;
 
-export const modelInfoSchema = {
+/**
+ * A user-owned provider connection. Deliberately has no `apiKey` or
+ * `credentialsRef` property: the credential is write-only and is reported only
+ * as `hasCredentials`.
+ */
+export const providerConnectionSchema = {
   type: "object",
+  required: [
+    "id",
+    "kind",
+    "label",
+    "slug",
+    "isActive",
+    "sortOrder",
+    "hasCredentials",
+  ],
+  properties: {
+    id: { type: "string" },
+    kind: {
+      type: "string",
+      enum: ["openai", "anthropic", "gemini", "grok", "mistral", "compatible"],
+    },
+    label: { type: "string" },
+    slug: {
+      type: "string",
+      description: "Prefixes every model id on this connection.",
+    },
+    baseUrl: { type: ["string", "null"] },
+    api: { type: ["string", "null"], enum: ["chat", "responses", null] },
+    isActive: { type: "boolean" },
+    sortOrder: { type: "integer" },
+    hasCredentials: {
+      type: "boolean",
+      description: "Always true in practice; the key itself is never returned.",
+    },
+    createdAt: { type: "string" },
+    updatedAt: { type: "string" },
+  },
+};
+
+/** Server-owned descriptor for one provider kind. */
+export const providerKindSchema = {
+  type: "object",
+  required: [
+    "kind",
+    "label",
+    "credentialPlaceholder",
+    "supportsBaseUrl",
+    "requiresBaseUrl",
+    "apiVariants",
+    "defaultApi",
+    "imageStyle",
+    "imageLimits",
+  ],
+  properties: {
+    kind: { type: "string" },
+    label: { type: "string" },
+    credentialPlaceholder: { type: "string" },
+    supportsBaseUrl: { type: "boolean" },
+    requiresBaseUrl: { type: "boolean" },
+    apiVariants: { type: "array", items: { type: "string" } },
+    defaultApi: { type: ["string", "null"] },
+    imageStyle: {
+      type: "string",
+      enum: ["openrouter-images", "gemini-native", "grok-native", "none"],
+    },
+    /**
+     * The image controls this kind can honour, derived from the same rules the
+     * save path validates against. Null when `imageStyle` is `none`. The client
+     * reads these instead of mirroring the tool's capabilities.
+     */
+    imageLimits: {
+      type: ["object", "null"],
+      additionalProperties: false,
+      required: [
+        "nMax",
+        "sizing",
+        "supportsQuality",
+        "supportsBackground",
+        "representableAspectRatios",
+      ],
+      properties: {
+        nMax: {
+          type: "integer",
+          minimum: 1,
+          description:
+            "Highest accepted n.max. The image tool's execution cap for OpenRouter-shaped kinds; 1 for the native kinds, which pin it on the wire.",
+        },
+        sizing: {
+          type: "string",
+          enum: ["sizes", "resolutions"],
+          description: "The one sizing key this kind accepts.",
+        },
+        supportsQuality: { type: "boolean" },
+        supportsBackground: { type: "boolean" },
+        representableAspectRatios: {
+          type: ["array", "null"],
+          items: { type: "string" },
+          description:
+            "For gcd-derived kinds, exactly the aspect ratios the adapter can reach; null when the kind has no such constraint.",
+        },
+      },
+    },
+  },
+};
+
+/** A model registered on a user connection. Carries no credential material. */
+export const providerModelSchema = {
+  type: "object",
+  required: [
+    "id",
+    "slug",
+    "upstreamId",
+    "name",
+    "label",
+    "outputType",
+    "reasoningEfforts",
+    "isActive",
+    "connectionId",
+  ],
+  properties: {
+    id: { type: "string" },
+    slug: {
+      type: "string",
+      description: "The model id used everywhere else in the API.",
+    },
+    upstreamId: { type: "string" },
+    name: { type: "string" },
+    label: { type: "string" },
+    hint: { type: ["string", "null"] },
+    description: { type: ["string", "null"] },
+    iconSvg: { type: "string" },
+    outputType: { type: "string", enum: ["text", "image"] },
+    contextWindowTokens: { type: ["integer", "null"] },
+    maxInputTokens: { type: ["integer", "null"] },
+    maxOutputTokens: { type: ["integer", "null"] },
+    reasoningEfforts: { type: "array", items: { type: "string" } },
+    capabilities: { type: ["object", "null"] },
+    imageCapabilities: { type: ["object", "null"] },
+    isActive: { type: "boolean" },
+    sortOrder: { type: "integer" },
+    connectionId: { type: "string" },
+    createdAt: { type: "string" },
+    updatedAt: { type: "string" },
+  },
+};
+
+export const modelInfoSchema = {  type: "object",
   required: [
     "modelId",
     "label",
@@ -721,6 +867,34 @@ export const modelInfoSchema = {
     imageCapabilities: { type: ["object", "null"], additionalProperties: true },
     inputModalities: { type: "array", items: { type: "string" } },
     sortOrder: { type: "integer" },
+  },
+} as const;
+
+/** One role's current model assignment plus the model it falls back to. */
+export const modelRoleInfoSchema = {
+  type: "object",
+  required: ["role", "modelId", "defaultModelId"],
+  properties: {
+    role: {
+      type: "string",
+      enum: [
+        "memoryCompaction",
+        "profileSummary",
+        "siteBuilder",
+        "visionHelper",
+        "scheduledChat",
+      ],
+    },
+    modelId: {
+      type: ["string", "null"],
+      description:
+        "The merged catalog model id assigned to this role, or null when no assignment is stored and the default applies.",
+    },
+    defaultModelId: {
+      type: ["string", "null"],
+      description:
+        "The model the role falls back to when nothing is assigned. Null for roles with no default of their own (`memoryCompaction`), and for `visionHelper` when `VISION_HELPER_MODEL` is unset.",
+    },
   },
 } as const;
 
@@ -815,5 +989,9 @@ export const openApiComponents = {
     StorageUsage: storageUsageSchema,
     Profile: profileDtoSchema,
     ModelInfo: modelInfoSchema,
+    ModelRoleInfo: modelRoleInfoSchema,
+    ProviderConnection: providerConnectionSchema,
+    ProviderKind: providerKindSchema,
+    ProviderModel: providerModelSchema,
   },
 };

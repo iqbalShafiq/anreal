@@ -358,6 +358,63 @@ describe("OpenRouterImageGenerationModel", () => {
   });
 });
 
+describe("OpenRouterImageGenerationModel connection headers", () => {
+  const success = { data: [{ b64_json: Buffer.from("X", "utf8").toString("base64") }] };
+
+  it("merges connection headers into the request headers", async () => {
+    const fetchMock = mockFetch(success);
+    const model = makeModel({ headers: { "X-Api-Key": "secret-header" } });
+
+    await model.imageGeneration({ prompt: "p", width: 256, height: 256 });
+
+    expect(fetchMock.mock.calls[0]![1].headers).toEqual({
+      Authorization: `Bearer ${API_KEY}`,
+      "Content-Type": "application/json",
+      "X-Api-Key": "secret-header",
+    });
+  });
+
+  it("lets a custom header override a default of the same name", async () => {
+    const fetchMock = mockFetch(success);
+    const model = makeModel({
+      headers: { Authorization: "Custom abc123", "X-Gateway": "acme" },
+    });
+
+    await model.imageGeneration({ prompt: "p", width: 256, height: 256 });
+
+    expect(fetchMock.mock.calls[0]![1].headers).toEqual({
+      Authorization: "Custom abc123",
+      "Content-Type": "application/json",
+      "X-Gateway": "acme",
+    });
+  });
+
+  it("still sends the connection key when no custom Authorization is declared", async () => {
+    const fetchMock = mockFetch(success);
+    const model = makeModel({ headers: { "X-Gateway": "acme" } });
+
+    await model.imageGeneration({ prompt: "p", width: 256, height: 256 });
+
+    expect(fetchMock.mock.calls[0]![1].headers).toMatchObject({
+      Authorization: `Bearer ${API_KEY}`,
+      "Content-Type": "application/json",
+      "X-Gateway": "acme",
+    });
+  });
+
+  it("sends exactly the two defaults when no headers are configured", async () => {
+    const fetchMock = mockFetch(success);
+    const model = makeModel();
+
+    await model.imageGeneration({ prompt: "p", width: 256, height: 256 });
+
+    expect(fetchMock.mock.calls[0]![1].headers).toEqual({
+      Authorization: `Bearer ${API_KEY}`,
+      "Content-Type": "application/json",
+    });
+  });
+});
+
 describe("mapOpenRouterImageError", () => {
   it("maps auth failures to a configuration message", () => {
     expect(mapOpenRouterImageError({ status: 401 })).toBe(

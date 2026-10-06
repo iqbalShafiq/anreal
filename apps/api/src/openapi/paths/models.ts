@@ -1,10 +1,71 @@
-import { modelInfoSchema } from "../components.js";
+import { modelInfoSchema, modelRoleInfoSchema } from "../components.js";
 import {
   badRequest,
   bearerOrCookie,
   jsonResponse,
+  jsonSchema,
   unauthorized,
 } from "../helpers.js";
+
+const ROLE_ENUM = [
+  "memoryCompaction",
+  "profileSummary",
+  "siteBuilder",
+  "visionHelper",
+  "scheduledChat",
+];
+
+const roleAssignmentBody = {
+  type: "object",
+  additionalProperties: false,
+  required: ["role", "modelId"],
+  properties: {
+    role: {
+      type: "string",
+      enum: ROLE_ENUM,
+      description: "The background role to assign.",
+    },
+    modelId: {
+      type: ["string", "null"],
+      maxLength: 256,
+      description:
+        "A merged catalog model id — a global catalog model or one of your connection models — or null to clear the assignment and use the role's default.",
+    },
+  },
+};
+
+const roleAssignmentExample = {
+  role: "siteBuilder",
+  modelId: "my-openrouter/openai-gpt-5.6-luna",
+};
+
+const roleInfoExample = {
+  role: "siteBuilder",
+  modelId: "my-openrouter/openai-gpt-5.6-luna",
+  defaultModelId: "meta/muse-spark-1.3-contributor",
+};
+
+const rolesExample = {
+  roles: [
+    { role: "memoryCompaction", modelId: null, defaultModelId: null },
+    {
+      role: "profileSummary",
+      modelId: "openai/gpt-5.6-luna",
+      defaultModelId: "openai/gpt-6-luna",
+    },
+    {
+      role: "siteBuilder",
+      modelId: null,
+      defaultModelId: "meta/muse-spark-1.3-contributor",
+    },
+    { role: "visionHelper", modelId: null, defaultModelId: null },
+    {
+      role: "scheduledChat",
+      modelId: null,
+      defaultModelId: "openai/gpt-6-luna",
+    },
+  ],
+};
 
 export const modelsPaths = {
   "/api/models": {
@@ -103,6 +164,93 @@ export const modelsPaths = {
           },
         ),
         "400": badRequest({ error: "outputType must be 'text' or 'image'" }),
+        "401": unauthorized,
+      },
+    },
+  },
+  "/api/models/roles": {
+    get: {
+      operationId: "listModelRoleAssignments",
+      tags: ["Models"],
+      summary: "List per-role model assignments",
+      description:
+        "One entry per background role, in the order the settings UI presents them. `modelId` is the assignment you saved (a global catalog id or one of your connection model ids), or null when the role runs on its default; `defaultModelId` is the model it falls back to. Assignments are scoped to the signed-in user.",
+      security: bearerOrCookie,
+      responses: {
+        "200": jsonResponse(
+          "Role assignments.",
+          {
+            type: "object",
+            required: ["roles"],
+            properties: {
+              roles: { type: "array", items: modelRoleInfoSchema },
+            },
+          },
+          { default: { summary: "All five roles", value: rolesExample } },
+        ),
+        "401": unauthorized,
+      },
+    },
+    put: {
+      operationId: "setModelRoleAssignment",
+      tags: ["Models"],
+      summary: "Assign a model to a role",
+      description:
+        "Saves the model a background role should run on. `modelId` must resolve to a model you can use — a global catalog model or one of your connection models; anything else is rejected with a 400 and a field-level `issues` array. Send `modelId: null` to clear the assignment and fall back to the role's default. The `visionHelper` role only accepts models that take image input.",
+      security: bearerOrCookie,
+      requestBody: {
+        required: true,
+        content: jsonSchema(roleAssignmentBody, {
+          assign: {
+            summary: "Assign a connection model",
+            value: roleAssignmentExample,
+          },
+          clear: {
+            summary: "Clear the assignment",
+            value: { role: "siteBuilder", modelId: null },
+          },
+        }),
+      },
+      responses: {
+        "200": jsonResponse("The saved assignment.", modelRoleInfoSchema, {
+          default: { summary: "Assigned", value: roleInfoExample },
+        }),
+        "400": jsonResponse(
+          "The request is malformed, or the model is not assignable to the role.",
+          {
+            type: "object",
+            required: ["error"],
+            properties: {
+              error: { type: "string" },
+              issues: {
+                type: "array",
+                items: {
+                  type: "object",
+                  required: ["path", "message"],
+                  properties: {
+                    path: { type: "string" },
+                    message: { type: "string" },
+                  },
+                },
+              },
+            },
+          },
+          {
+            roleError: {
+              summary: "Unknown or non-assignable model",
+              value: {
+                error: "Unknown model: nobody/else",
+                issues: [
+                  { path: "modelId", message: "Unknown model: nobody/else" },
+                ],
+              },
+            },
+            malformedBody: {
+              summary: "Malformed body",
+              value: { error: "Invalid role assignment" },
+            },
+          },
+        ),
         "401": unauthorized,
       },
     },

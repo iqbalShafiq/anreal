@@ -25,6 +25,13 @@ describe("buildSiteBuilderPrompt", () => {
       expect(prompt).toContain(section);
     }
   });
+
+  it("carries the user's verbatim request and the definition of done", () => {
+    const prompt = buildSiteBuilderPrompt(BRIEF, "Warmer earth tones, please.");
+    expect(prompt).toContain("Warmer earth tones, please.");
+    expect(prompt).toContain("Definition of done");
+    expect(prompt).toContain("dist stylesheet contains the page's classes");
+  });
 });
 
 describe("createSiteBuilderAgent", () => {
@@ -48,5 +55,12 @@ describe("createSiteBuilderAgent", () => {
   it("bans placeholders and backend code in the instructions", () => {
     expect(SITE_BUILDER_INSTRUCTIONS).toContain("lorem ipsum");
     expect(SITE_BUILDER_INSTRUCTIONS.toLowerCase()).toContain("no backend");
+  });
+
+  it("teaches the styling pipeline and the build verification", () => {
+    expect(SITE_BUILDER_INSTRUCTIONS).toContain("reachable from that import");
+    expect(SITE_BUILDER_INSTRUCTIONS).toContain("dist/assets");
+    expect(SITE_BUILDER_INSTRUCTIONS).toContain("grep -o");
+    expect(SITE_BUILDER_INSTRUCTIONS).toContain("no half-styled rebuilds");
   });
 });

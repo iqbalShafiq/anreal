@@ -16,6 +16,7 @@ import {
 import type { CompletionModel } from "@anvia/core";
 import { prisma } from "../../utils/prisma.js";
 import type { Prisma } from "../../generated/prisma/client.js";
+import { buildRoleCompletionModel } from "../models/roles.js";
 import type { PendingReconsideration } from "./queue.js";
 
 export type ProfileConfig = {
@@ -40,6 +41,22 @@ export function profileConfig(): ProfileConfig {
       Number.isFinite(concurrency) && concurrency > 0 ? Math.floor(concurrency) : 3,
     model: createCompletionModel(modelId ?? DEFAULT_COMPLETION_MODEL),
   };
+}
+
+/**
+ * The model the profile summarizer runs on: the user's `profileSummary`
+ * assignment when set, otherwise exactly the env/default model the worker has
+ * always built through `profileConfig()`.
+ */
+export async function resolveProfileSummaryModel(
+  userId: string,
+): Promise<CompletionModel> {
+  const assigned = await buildRoleCompletionModel(
+    prisma,
+    userId,
+    "profileSummary",
+  );
+  return assigned ?? profileConfig().model;
 }
 
 function profileWhere(scope: ProfileScope): { userId: string; projectId?: string } {
@@ -286,7 +303,7 @@ export async function summarizeProfileForScope(
   }
 
   const { sections, usage } = await summarizeProfileDelta({
-    model: profileConfig().model,
+    model: await resolveProfileSummaryModel(scope.userId),
     existing: existing ?? { sections: EMPTY_PROFILE_SECTIONS, explicitFacts: [] },
     delta,
     ...(reconsiderations ? { reconsiderations } : {}),

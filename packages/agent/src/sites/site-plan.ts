@@ -1,10 +1,7 @@
 import type { CompletionModel, Usage } from "@anvia/core";
 import { CompletionStructuredOutputError, generateCompletion } from "@anvia/core/completion";
+import { REASONING_EFFORT_CONTROL_ID } from "@anvia/core/completion";
 import { z } from "zod";
-import {
-  metaMuseReasoningEffort,
-  providerOptionsForReasoning,
-} from "../providers/openai.js";
 
 export const SITE_BRIEF_MAX_PROMPT_CHARS = 2_000;
 
@@ -90,16 +87,17 @@ export async function parseSiteBrief(input: {
   const jsonInstructions = contextName
     ? `${SITE_BRIEF_JSON_INSTRUCTIONS}\nCurrent site under discussion: "${contextName}". If the request modifies it (rewording, sections, style of the same site), return its exact siteName; only invent a new name for a genuinely different site.`
     : SITE_BRIEF_JSON_INSTRUCTIONS;
-  const providerOptions =
-    !input.model.capabilities.reasoning
-      ? undefined
-      : input.modelId.startsWith("meta/")
-        ? metaMuseReasoningEffort("minimal")
-        : providerOptionsForReasoning("minimal");
+  // The brief parser runs at minimal effort. Send the control only when the
+  // model declares it, so a model without reasoning support is not rejected.
+  const briefReasoningControl = input.model.controls?.[REASONING_EFFORT_CONTROL_ID];
+  const controls =
+    briefReasoningControl && briefReasoningControl.options.length > 0
+      ? { [REASONING_EFFORT_CONTROL_ID]: "minimal" }
+      : undefined;
   const base = {
     model: input.model,
     prompt,
-    ...(providerOptions ? { providerOptions } : {}),
+    ...(controls ? { controls } : {}),
     ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
   };
   try {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildReportPdf } from "./service.js";
+import { buildReportPdf, countPdfPages, stripRawHtml } from "./service.js";
 import { chartSpecToSvg } from "../charts/snapshot.js";
 
 describe("buildReportPdf", () => {
@@ -11,6 +11,20 @@ describe("buildReportPdf", () => {
     });
     expect(pdf.byteLength).toBeGreaterThan(1000);
     expect(String.fromCharCode(...pdf.slice(0, 5))).toBe("%PDF-");
+  });
+
+  it("renders GFM pipe tables as PDF content", async () => {
+    const pdf = await buildReportPdf({
+      title: "Tabel",
+      markdown: [
+        "| Region | Revenue | Units |",
+        "| --- | --- | --- |",
+        "| West | 10660 | 215 |",
+        "| South | 10630 | 203 |",
+      ].join("\n"),
+    });
+    expect(String.fromCharCode(...pdf.slice(0, 5))).toBe("%PDF-");
+    expect(pdf.byteLength).toBeGreaterThan(1000);
   });
 
   it("embeds a chart snapshot SVG without going blank", async () => {
@@ -51,5 +65,104 @@ describe("buildReportPdf", () => {
     });
     expect(String.fromCharCode(...pdf.slice(0, 5))).toBe("%PDF-");
     expect(pdf.byteLength).toBeGreaterThan(1000);
+  });
+
+  it("places inline ![alt](assetId) refs at their position in the flow", async () => {
+    const svg = chartSpecToSvg({
+      kind: "bar",
+      labels: ["A", "B"],
+      series: [{ name: "sum(x)", values: [3, 7] }],
+      title: "Chart",
+    });
+    const pdf = await buildReportPdf({
+      title: "Inline",
+      markdown: "# Section\n\nText before.\n\n![Revenue by region](asset-1)\n\nText after.",
+      svgAssets: [svg],
+      svgAssetIds: ["asset-1"],
+    });
+    expect(String.fromCharCode(...pdf.slice(0, 5))).toBe("%PDF-");
+    expect(pdf.byteLength).toBeGreaterThan(1000);
+  });
+
+  it("still renders unreferenced assets at the end", async () => {
+    const svg = chartSpecToSvg({
+      kind: "bar",
+      labels: ["A", "B"],
+      series: [{ name: "sum(x)", values: [3, 7] }],
+      title: "Chart",
+    });
+    const pdf = await buildReportPdf({
+      title: "Leftover",
+      markdown: "No image refs here.",
+      svgAssets: [svg],
+      svgAssetIds: ["asset-1"],
+    });
+    expect(countPdfPages(pdf)).toBeGreaterThanOrEqual(1);
+    expect(pdf.byteLength).toBeGreaterThan(1000);
+  });
+
+  it("renders a table whose body repeats the header only once", async () => {
+    const pdf = await buildReportPdf({
+      title: "Tabel",
+      markdown: [
+        "| Region | Revenue | Units |",
+        "| --- | --- | --- |",
+        "| Region | Revenue | Units |",
+        "| West | 10660 | 215 |",
+      ].join("\n"),
+    });
+    expect(String.fromCharCode(...pdf.slice(0, 5))).toBe("%PDF-");
+    expect(pdf.byteLength).toBeGreaterThan(1000);
+  });
+
+  it("suppresses raw HTML the model sneaks into markdown", async () => {
+    const pdf = await buildReportPdf({
+      title: "Html",
+      markdown: "# Judul\n\n<div style=\"page-break-after: always;\"></div>\n\nIsi bersih.",
+    });
+    expect(String.fromCharCode(...pdf.slice(0, 5))).toBe("%PDF-");
+    expect(pdf.byteLength).toBeGreaterThan(1000);
+  });
+
+  it("flows a long report across pages and reports the real page count", async () => {
+    const rows = Array.from(
+      { length: 70 },
+      (_, i) => `| Row ${i + 1} | ${(i + 1) * 137} | ${i % 7} |`,
+    ).join("\n");
+    const svg = chartSpecToSvg({
+      kind: "bar",
+      labels: ["A", "B"],
+      series: [{ name: "sum(x)", values: [3, 7] }],
+      title: "Chart",
+    });
+    const pdf = await buildReportPdf({
+      title: "Laporan Panjang",
+      markdown: `# Tabel besar\n\n| Item | Nilai | Grup |\n| --- | --- | --- |\n${rows}`,
+      svgAssets: [svg],
+      svgCaptions: ["Tren nilai"],
+    });
+    const pages = countPdfPages(pdf);
+    expect(pages).toBeGreaterThan(1);
+    expect(pdf.byteLength).toBeGreaterThan(3000);
+  });
+});
+
+describe("countPdfPages", () => {
+  it("reads the count from the pages tree", () => {
+    const bytes = new TextEncoder().encode(
+      "%PDF-1.4\n1 0 obj << /Type /Pages /Kids [2 0 R] /Count 5 >> endobj",
+    );
+    expect(countPdfPages(bytes)).toBe(5);
+  });
+
+  it("falls back to one page when no tree is present", () => {
+    expect(countPdfPages(new TextEncoder().encode("%PDF-1.4"))).toBe(1);
+  });
+});
+
+describe("stripRawHtml", () => {
+  it("removes page-break divs, stray tags, and collapses whitespace", () => {
+    expect(stripRawHtml('<div style="page-break-after: always;"></div>')).toBe("");
+    expect(stripRawHtml("Baris<br>dua <span>tiga</span>")).toBe("Baris dua tiga");
   });
 });

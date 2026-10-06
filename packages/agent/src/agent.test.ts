@@ -15,6 +15,22 @@ import { BASE_INSTRUCTIONS } from "./prompts/base-instructions.js";
 const model = {
   provider: "test",
   modelId: "test/model",
+  controls: {
+    reasoningEffort: {
+      type: "select",
+      label: "Reasoning effort",
+      options: ["low", "medium", "high", "max"],
+      defaultValue: "medium",
+    },
+  },
+  completion: async () => {
+    throw new Error("not called");
+  },
+} as unknown as CompletionModel;
+
+const modelWithoutReasoning = {
+  provider: "test",
+  modelId: "test/no-reasoning",
   completion: async () => {
     throw new Error("not called");
   },
@@ -58,9 +74,8 @@ describe("createAgent", () => {
       { id: "project", text: "Project A" },
       { id: "context-1", text: "Second fact" },
     ]);
-    expect(agent.providerOptions).toEqual({
-      reasoning: { effort: "max", summary: "auto" },
-    });
+    expect(agent.controls).toEqual({ reasoningEffort: "max" });
+    expect(agent.providerOptions).toBeUndefined();
     expect(agent.defaultMaxTurns).toBe(12);
     expect(agent.memory).toMatchObject({ store: memory, savePolicy: "turn" });
     expect(agent.observability).toEqual(observability);
@@ -81,6 +96,36 @@ describe("createAgent", () => {
     expect(first).not.toBe(second);
     expect(first.context).toEqual([{ id: "project", text: "Project A" }]);
     expect(second.context).toEqual([{ id: "project", text: "Project B" }]);
+  });
+
+  it("omits controls entirely when the model declares no reasoning control", () => {
+    const agent = createAgent({
+      agentId: "chat-agent",
+      model: modelWithoutReasoning,
+      reasoningEffort: "high",
+    });
+
+    expect(agent.controls).toBeUndefined();
+  });
+
+  it("falls back to the model's declared default for an unsupported effort", () => {
+    const agent = createAgent({
+      agentId: "chat-agent",
+      model,
+      reasoningEffort: "none",
+    });
+
+    expect(agent.controls).toEqual({ reasoningEffort: "medium" });
+  });
+
+  it("passes provider options through when the caller supplies them", () => {
+    const agent = createAgent({
+      agentId: "chat-agent",
+      model,
+      providerOptions: { reasoning: { summary: "auto" } },
+    });
+
+    expect(agent.providerOptions).toEqual({ reasoning: { summary: "auto" } });
   });
 
   it("forwards declarative guardrails to the native Agent", () => {

@@ -11,6 +11,7 @@ import { Switch } from "#/components/ui/switch";
 export function ManagementRow({
   title,
   subtitle,
+  warning,
   leading,
   enabled,
   onToggle,
@@ -24,6 +25,8 @@ export function ManagementRow({
 }: {
   title: string;
   subtitle?: string;
+  /** Render a warning line under the subtitle (e.g. an unreadable secret). */
+  warning?: ReactNode;
   leading?: ReactNode;
   enabled: boolean;
   onToggle: () => void;
@@ -42,6 +45,11 @@ export function ManagementRow({
         <p className="truncate text-sm font-medium text-text">{title}</p>
         {subtitle ? (
           <p className="truncate text-[11px] text-text-faint">{subtitle}</p>
+        ) : null}
+        {warning ? (
+          <p className="truncate text-[11px] text-amber-400/90" role="alert">
+            {warning}
+          </p>
         ) : null}
       </div>
       <Switch

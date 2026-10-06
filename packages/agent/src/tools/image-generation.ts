@@ -27,7 +27,7 @@ import {
 
 const MAX_PROMPT_LENGTH = 4000;
 /** Upper bound the model may request directly (the execution cap is capability-aware). */
-const MAX_MODEL_IMAGES = 10;
+export const MAX_MODEL_IMAGES = 10;
 const MAX_REFERENCE_BYTES = 10 * 1024 * 1024;
 
 const PROMPT_DESCRIPTION =
@@ -164,6 +164,52 @@ export type ImageGenSettings = {
   n?: number;
 };
 
+/**
+ * The per-request values the tool resolved against the model's declared
+ * capability, handed to the injected option builder.
+ */
+export type ImageProviderOptionParams = {
+  /** The exact pixel size, when the capability is OpenAI/OpenRouter-shaped. */
+  size?: string;
+  /** The wire aspect ratio, when the capability is native-shaped. */
+  aspectRatio?: string;
+  /** The provider resolution, when the capability is native-shaped. */
+  resolution?: string;
+  quality?: string;
+  background?: string;
+  n?: number;
+};
+
+/**
+ * Build the adapter-shaped `providerOptions` for a resolved request. The tool
+ * owns `model` and `input_references`; this builder owns only the keys that
+ * differ per adapter, so a BYOK target can drop the ones its adapter
+ * overwrites (`packages/agent/src/providers/image-options.ts`).
+ */
+export type ImageProviderOptionsBuilder = (
+  params: ImageProviderOptionParams,
+) => Record<string, unknown>;
+
+/**
+ * The OpenRouter-shaped builder the tool has always used. It is also the
+ * default, so a run with no BYOK image model receives byte-identical options
+ * to before this builder was injectable.
+ */
+export function defaultImageProviderOptions(
+  params: ImageProviderOptionParams,
+): Record<string, unknown> {
+  return {
+    ...(params.size ? { size: params.size } : {}),
+    ...(params.aspectRatio ? { aspect_ratio: params.aspectRatio } : {}),
+    ...(params.resolution ? { resolution: params.resolution } : {}),
+    ...(params.quality ? { quality: params.quality } : {}),
+    ...(params.background
+      ? { background: params.background, output_format: "png" }
+      : {}),
+    ...(params.n !== undefined ? { n: params.n } : {}),
+  };
+}
+
 export type GeneratedImageRecord = {
   id: string;
   mediaType: string;
@@ -230,6 +276,12 @@ export type ImageGenerationToolScope = {
   } | null>;
   /** Capabilities for a model id; null when unknown (allow defaults). */
   capabilities(modelId: string): ImageCapabilitySet | null;
+  /**
+   * Build the adapter-shaped `providerOptions`. Defaults to the
+   * OpenRouter-shaped builder; a BYOK target injects its own, dispatched by
+   * the connection kind's `imageStyle`.
+   */
+  imageProviderOptions?: ImageProviderOptionsBuilder;
   defaultSettings?: ImageGenSettings;
   /** Max size of an edit reference image in bytes (default 10 MB). */
   maxBytes?: number;
@@ -257,15 +309,28 @@ export type GenerateImageResult = {
  * `size` and MUST match a model's accepted list — the tool validates against
  * the model's `sizes` capability and falls back to "auto" when a ratio is
  * not available, so the request is never rejected with an invalid size.
+ *
+ * They are also the dimensions the `imageStyle`-native adapters receive, and
+ * those derive the ratio from `${width/gcd}:${height/gcd}` (Grok
+ * `@anvia/grok` dist/index.js:190-201, filtered through `SUPPORTED_ASPECT_RATIOS`
+ * with anything unrecognised collapsing to `"auto"`; Gemini `@anvia/gemini`
+ * dist/index.js:1391-1395, unfiltered). So each entry's gcd reduction must
+ * equal its key or the ratio silently changes on the wire. Three entries cannot
+ * satisfy that — `21:9`, `9:19.5` and `19.5:9` are not reduced integer
+ * fractions — and the per-kind allow-list
+ * (`apps/api/src/modules/provider-connections/service.ts`) refuses to let a
+ * native kind advertise them. `auto` is a sentinel, not a ratio.
  */
-const ASPECT_SIZES: Record<string, { width: number; height: number }> = {
+export const ASPECT_SIZES: Record<string, { width: number; height: number }> = {
   "1:1": { width: 1024, height: 1024 },
   "3:2": { width: 1536, height: 1024 },
   "2:3": { width: 1024, height: 1536 },
   "4:3": { width: 1152, height: 864 },
   "3:4": { width: 864, height: 1152 },
-  "16:9": { width: 1344, height: 768 },
-  "9:16": { width: 768, height: 1344 },
+  // gcd(1280, 720) = 80 → 16:9 (the old 1344x768 had gcd 192 and reduced to 7:4).
+  "16:9": { width: 1280, height: 720 },
+  // gcd(720, 1280) = 80 → 9:16 (the old 768x1344 reduced to 4:7).
+  "9:16": { width: 720, height: 1280 },
   "21:9": { width: 1344, height: 576 },
   "9:19.5": { width: 720, height: 1560 },
   "19.5:9": { width: 1560, height: 720 },
@@ -285,6 +350,38 @@ export function aspectRatioToSize(
     );
   }
   return dimensions;
+}
+
+function greatestCommonDivisor(left: number, right: number): number {
+  let a = left;
+  let b = right;
+  while (b !== 0) {
+    [a, b] = [b, a % b];
+  }
+  return a;
+}
+
+/**
+ * The ratio string a gcd-derived native adapter derives from a request for
+ * `aspectRatio`, or `null` when the key is unknown or is the `auto` sentinel.
+ * Mirrors `@anvia/grok` (dist/index.js:190-201) and `@anvia/gemini`
+ * (dist/index.js:1391-1395), which both reduce `${width/gcd}:${height/gcd}`.
+ */
+export function aspectRatioReduction(aspectRatio: string): string | null {
+  const dimensions = ASPECT_SIZES[aspectRatio];
+  if (!dimensions) return null;
+  const divisor = greatestCommonDivisor(dimensions.width, dimensions.height);
+  return `${dimensions.width / divisor}:${dimensions.height / divisor}`;
+}
+
+/**
+ * Whether a native kind can reach the adapter with `aspectRatio` as its own
+ * literal string. `auto` is a sentinel the adapters reduce to `1:1`, so it is
+ * not a ratio a declaration can promise; unknown keys cannot be sized at all.
+ */
+export function isRepresentableAspectRatio(aspectRatio: string): boolean {
+  if (aspectRatio === "auto") return false;
+  return aspectRatioReduction(aspectRatio) === aspectRatio;
 }
 
 /**
@@ -589,14 +686,18 @@ async function runGeneration(
     };
   }
 
+  const buildProviderOptions =
+    scope.imageProviderOptions ?? defaultImageProviderOptions;
   const additionalParams = {
     model: resolvedModelId,
-    ...(size ? { size } : {}),
-    ...(wireAspectRatio ? { aspect_ratio: wireAspectRatio } : {}),
-    ...(resolution ? { resolution } : {}),
-    ...(quality ? { quality } : {}),
-    ...(background ? { background, output_format: "png" } : {}),
-    ...(n !== undefined ? { n } : {}),
+    ...buildProviderOptions({
+      ...(size ? { size } : {}),
+      ...(wireAspectRatio ? { aspectRatio: wireAspectRatio } : {}),
+      ...(resolution ? { resolution } : {}),
+      ...(quality ? { quality } : {}),
+      ...(background ? { background } : {}),
+      ...(n !== undefined ? { n } : {}),
+    }),
     ...extraParams,
   };
 

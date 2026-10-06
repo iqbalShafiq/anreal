@@ -100,7 +100,7 @@ describe("ChatRouteView site panel", () => {
     render(<ChatRouteView {...baseProps} sessionId="session-a" />);
     await screen.findByLabelText("Site build");
     expect(screen.getByText(/v2 · /)).toBeTruthy();
-    expect(screen.getByRole("status").textContent).toContain("Pratinjau segera hadir.");
+    expect(screen.getByRole("status").textContent).toContain("Preview coming up shortly.");
   });
 
   it("clears the previous session panel when switching sessions", async () => {
@@ -120,7 +120,7 @@ describe("ChatRouteView site panel", () => {
     bySessionPayloads.set("session-a", { sites: [siteEntry(1, 1)] });
     render(<ChatRouteView {...baseProps} sessionId="session-a" />);
     await screen.findByLabelText("Site build");
-    expect(screen.queryByRole("button", { name: /Versi/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Version/ })).toBeNull();
 
     act(() => {
       capturedSiteEvent?.({
@@ -135,32 +135,32 @@ describe("ChatRouteView site panel", () => {
       });
     });
 
-    const trigger = await screen.findByRole("button", { name: /Versi/ });
+    const trigger = await screen.findByRole("button", { name: /Version/ });
     act(() => {
       trigger.click();
     });
-    const listbox = await screen.findByRole("listbox", { name: "Versi" });
+    const listbox = await screen.findByRole("listbox", { name: "Version" });
     const options = Array.from(listbox.querySelectorAll("[data-option-value]")).map((o) => o.textContent);
-    expect(options).toEqual(["v2 (stabil)", "v1"]);
+    expect(options).toEqual(["v2 (stable)", "v1"]);
   });
 
   it("follows the stable pointer for download after rollback", async () => {
     bySessionPayloads.set("session-a", { sites: [siteEntry(2, 2)] });
     render(<ChatRouteView {...baseProps} sessionId="session-a" />);
     await screen.findByLabelText("Site build");
-    expect(screen.getAllByText("Unduh zip")[0].getAttribute("href")).toContain("/v2/download");
+    expect(screen.getAllByText("Download zip")[0].getAttribute("href")).toContain("/v2/download");
 
-    const select = await screen.findByRole("button", { name: /Versi/ });
+    const select = await screen.findByRole("button", { name: /Version/ });
     act(() => {
       select.click();
     });
-    const listbox = await screen.findByRole("listbox", { name: "Versi" });
+    const listbox = await screen.findByRole("listbox", { name: "Version" });
     const option = listbox.querySelector('[data-option-value="1"]');
     expect(option).not.toBeNull();
     fireEvent.click(option!);
     screen.getByRole("button", { name: "Rollback" }).click();
     await waitFor(() => {
-      expect(screen.getAllByText("Unduh zip")[0].getAttribute("href")).toContain("/v1/download");
+      expect(screen.getAllByText("Download zip")[0].getAttribute("href")).toContain("/v1/download");
     });
   });
 });

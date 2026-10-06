@@ -30,7 +30,8 @@ export type WorkspaceViewMode =
   | "project-workspace"
   | "documents-index";
 
-const RECENT_PROJECTS_MAX = 5;
+/** The sidebar keeps this short; the projects index holds the full list. */
+const RECENT_PROJECTS_MAX = 4;
 
 export function ChatSidebar({
   user,
@@ -353,13 +354,14 @@ export function ChatSidebar({
                         }}
                         title={project.name}
                         aria-current={selected ? "page" : undefined}
-                        className={`flex w-full min-h-9 cursor-pointer items-center rounded-xl px-3.5 py-2.5 text-left text-[13px] leading-snug transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] active:scale-[0.99] ${
+                        className={`flex w-full min-h-9 cursor-pointer items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-left text-[13px] leading-snug transition duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] active:scale-[0.99] ${
                           selected
                             ? "glass-pane font-medium text-text"
                             : "text-text-muted hover:bg-white/[0.035] hover:text-text"
                         }`}
                       >
-                        <span className="truncate">{project.name}</span>
+                        <FolderKanban className="size-4 shrink-0" strokeWidth={1.75} />
+                        <span className="min-w-0 flex-1 truncate">{project.name}</span>
                       </button>
                     </li>
                   );

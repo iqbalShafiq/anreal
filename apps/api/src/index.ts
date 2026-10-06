@@ -2,10 +2,12 @@ import { serve } from "@hono/node-server";
 import { createApp, startRunStaleWatchdog } from "./app.js";
 import { getListenHostname, listLanIpv4Addresses } from "./lib/origins.js";
 import { resolveCredentialsKey } from "./modules/mcp-servers/credentials.js";
+import { resolveCredentialsKey as resolveProviderCredentialsKey } from "./modules/provider-connections/credentials.js";
 
 const app = createApp();
-// Fail fast in production when the MCP credential vault has no key.
+// Fail fast in production when a credential vault has no key.
 resolveCredentialsKey();
+resolveProviderCredentialsKey();
 const port = Number(process.env.PORT ?? 3001);
 const hostname = getListenHostname();
 startRunStaleWatchdog();

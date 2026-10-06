@@ -1,5 +1,7 @@
 import type { ContextSnippetSourceRole } from "#/lib/chat/context-snippet-text";
 import type { StageInteractionInput } from "#/lib/chat/interaction-response";
+import type { ProviderHeaderValue } from "#/lib/dynamic-headers";
+import { MODEL_ROLE_KEYS, type ModelRoleKey } from "#/lib/model-role-labels";
 
 const DEFAULT_API_PORT = 3001;
 
@@ -694,6 +696,8 @@ export interface SessionDocument {
   origin?: string | null;
   parentDocumentId?: string | null;
   originUrl?: string | null;
+  /** `report` documents render through the PDF report preview. */
+  kind?: string | null;
 }
 
 export type UserLibraryDocument = {
@@ -1049,6 +1053,11 @@ export type ModelInfo = {
   description: string | null;
   iconSvg: string;
   provider: { slug: string; name: string };
+  /**
+   * Who made the model, declared for BYOK rows and `null` for catalog rows.
+   * A filter facet only — never consulted by the run path.
+   */
+  vendorLabel: string | null;
   contextWindowTokens: number;
   maxInputTokens: number | null;
   maxOutputTokens: number | null;
@@ -1062,6 +1071,10 @@ export type ModelInfo = {
     longPromptOutputMultiplier: number | null;
   };
   reasoningEfforts: string[];
+  /** "catalog" for the seeded registry, "connection" for a user BYOK model. */
+  source: "catalog" | "connection";
+  /** Set only for connection models. */
+  connectionId: string | null;
   /** "text" | "image" — chat model or image generator. */
   outputType: "text" | "image";
   /** Image-gen capability descriptors (from OpenRouter discovery). */
@@ -1085,6 +1098,57 @@ export type ModelCatalog = {
 
 let modelsCache: ModelCatalog | null = null;
 
+/**
+ * Listeners told to refetch when a provider write changes the merged catalog.
+ * Held here, at the API-client seam, because there are two independent entry
+ * points into the add-model form and a hook can forget to invalidate.
+ */
+const modelsCacheListeners = new Set<() => void>();
+
+/**
+ * Drop the cached catalog and notify subscribers so they refetch. Call this
+ * only after a catalog-changing write has succeeded — a rejected write must
+ * leave the cache as it was.
+ */
+export function invalidateModelsCache(): void {
+  modelsCache = null;
+  // The image picker caches its own catalog (fetchImageModels). A provider
+  // write can add, change, or remove an image model, so the cache is dropped
+  // here too — otherwise a freshly registered BYOK image model would not be
+  // selectable (and so could not be pinned as the session's image model)
+  // until a full reload.
+  imageModelsPromise = null;
+  // Snapshot before iterating: a listener may unsubscribe during notification.
+  for (const listener of [...modelsCacheListeners]) listener();
+}
+
+/** Subscribe to catalog invalidation; returns an unsubscribe function. */
+export function subscribeModelsCache(listener: () => void): () => void {
+  modelsCacheListeners.add(listener);
+  return () => {
+    modelsCacheListeners.delete(listener);
+  };
+}
+
+/**
+ * Normalise one row from an older or newer server before it reaches the
+ * picker. `source` and `connectionId` already had this treatment; `vendorLabel`
+ * joins them because `vendorOf` reads `.length` on it and an `undefined` from a
+ * pre-`vendorLabel` deploy would throw.
+ */
+export function normalizeModelRow(model: ModelInfo): ModelInfo {
+  return {
+    ...model,
+    // Rows that predate the source field are treated as catalog entries so a
+    // mixed deploy does not drop models from the picker.
+    source: model.source === "connection" ? "connection" : "catalog",
+    connectionId:
+      typeof model.connectionId === "string" ? model.connectionId : null,
+    vendorLabel:
+      typeof model.vendorLabel === "string" ? model.vendorLabel : null,
+  };
+}
+
 export async function listModels(input?: {
   force?: boolean;
 }): Promise<ModelCatalog> {
@@ -1105,13 +1169,15 @@ export async function listModels(input?: {
   const catalog: ModelCatalog = {
     // Chat model picker shows text models only — image generators live in
     // the composer's image-gen settings (fetchImageModels).
-    models: (data as ModelCatalog).models.filter(
-      (model): model is ModelInfo =>
-        !!model &&
-        typeof model.modelId === "string" &&
-        typeof model.label === "string" &&
-        model.outputType !== "image",
-    ),
+    models: (data as ModelCatalog).models
+      .filter(
+        (model): model is ModelInfo =>
+          !!model &&
+          typeof model.modelId === "string" &&
+          typeof model.label === "string" &&
+          model.outputType !== "image",
+      )
+      .map(normalizeModelRow),
     reasoningEfforts: Array.isArray(
       (data as ModelCatalog).reasoningEfforts,
     )
@@ -1120,6 +1186,53 @@ export async function listModels(input?: {
   };
   modelsCache = catalog;
   return catalog;
+}
+
+/** One role's saved model assignment plus the model it falls back to. */
+export type ModelRoleInfo = {
+  role: ModelRoleKey;
+  /** The merged catalog id assigned to the role, or null for the default. */
+  modelId: string | null;
+  /** The model the role falls back to; null when it has no default. */
+  defaultModelId: string | null;
+};
+
+function isModelRoleInfo(value: unknown): value is ModelRoleInfo {
+  return (
+    isRecord(value) &&
+    typeof value.role === "string" &&
+    (MODEL_ROLE_KEYS as readonly string[]).includes(value.role) &&
+    (value.modelId === null || typeof value.modelId === "string") &&
+    (value.defaultModelId === null ||
+      typeof value.defaultModelId === "string")
+  );
+}
+
+export async function listModelRoles(): Promise<ModelRoleInfo[]> {
+  const response = await apiFetch(`${API_BASE}/api/models/roles`);
+  if (!response.ok) await throwSkillError(response, "Failed to load model roles");
+  const data: unknown = await response.json();
+  if (!isRecord(data) || !Array.isArray(data.roles)) {
+    throw new Error("Unexpected model roles response shape");
+  }
+  return data.roles.filter(isModelRoleInfo);
+}
+
+export async function setModelRole(
+  role: ModelRoleKey,
+  modelId: string | null,
+): Promise<ModelRoleInfo> {
+  const response = await apiFetch(`${API_BASE}/api/models/roles`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ role, modelId }),
+  });
+  if (!response.ok) await throwSkillError(response, "Failed to save model role");
+  const data: unknown = await response.json();
+  if (!isModelRoleInfo(data)) {
+    throw new Error("Unexpected model role response shape");
+  }
+  return data;
 }
 
 export type ContextUsageInfo = {
@@ -2107,4 +2220,520 @@ export async function testMcpConnection(input: McpServerInput): Promise<McpTestR
   });
   if (!response.ok) throw new Error("Failed to test MCP connection");
   return (await response.json()) as McpTestResult;
+}
+
+// ─── Provider connections (BYOK) ────────────────────────────────────────────
+
+/** The per-kind image limits the server publishes (see the API's `/kinds`). */
+export type ProviderKindImageLimits = {
+  nMax: number;
+  sizing: "sizes" | "resolutions";
+  supportsQuality: boolean;
+  supportsBackground: boolean;
+  /** Non-null only for gcd-derived kinds: the ratios the adapter can reach. */
+  representableAspectRatios: string[] | null;
+};
+
+export type ProviderKindInfo = {
+  kind: string;
+  label: string;
+  credentialPlaceholder: string;
+  supportsBaseUrl: boolean;
+  requiresBaseUrl: boolean;
+  apiVariants: ("chat" | "responses")[];
+  defaultApi: "chat" | "responses" | null;
+  imageStyle: "openrouter-images" | "gemini-native" | "grok-native" | "none";
+  imageLimits: ProviderKindImageLimits | null;
+};
+
+export type ProviderConnection = {
+  id: string;
+  kind: string;
+  label: string;
+  slug: string;
+  baseUrl: string | null;
+  api: string | null;
+  isActive: boolean;
+  sortOrder: number;
+  hasCredentials: boolean;
+  /** Whether the stored key still decrypts; "unreadable" needs re-entry. */
+  credentialsStatus: "ok" | "unreadable";
+  createdAt: string;
+  updatedAt: string;
+};
+
+/** One row of a connection's registered models. Never carries credentials. */
+export type ProviderModelRow = {
+  id: string;
+  slug: string;
+  upstreamId: string;
+  name: string;
+  label: string;
+  hint: string | null;
+  description: string | null;
+  /**
+   * Who made the model, declared for a BYOK row and `null` when undeclared.
+   * A filter facet only — never consulted by the run path.
+   */
+  vendorLabel: string | null;
+  iconSvg: string;
+  outputType: "text" | "image";
+  contextWindowTokens: number | null;
+  maxInputTokens: number | null;
+  maxOutputTokens: number | null;
+  reasoningEfforts: string[];
+  capabilities: Record<string, unknown> | null;
+  imageCapabilities: ImageModelCapabilities | null;
+  isActive: boolean;
+  sortOrder: number;
+  connectionId: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/** One entry of a provider's own model listing (discovery). */
+export type ListedProviderModel = {
+  id: string;
+  name?: string;
+  description?: string;
+  type?: string;
+  createdAt?: string;
+  ownedBy?: string;
+  contextLength?: number;
+};
+
+export type ProviderConnectionInput = {
+  kind: string;
+  label: string;
+  slug?: string;
+  baseUrl?: string | null;
+  api?: string | null;
+  /** Write-only. Never returned by any endpoint; omit on update to keep it. */
+  apiKey?: string;
+  /**
+   * Custom gateway headers. A string is sent literally; `{ dynamic }` names a
+   * run-time source (the closed vocabulary in `#/lib/dynamic-headers`) that the
+   * API resolves at the provider seam. The API re-validates every value.
+   */
+  headers?: Record<string, ProviderHeaderValue>;
+};
+
+export type ProviderModelInput = {
+  upstreamId: string;
+  name?: string;
+  label?: string;
+  hint?: string | null;
+  description?: string | null;
+  /**
+   * Who made the model, declared by the user for a BYOK row. A filter facet
+   * only — never consulted by the run path. Sent in full on every save: the
+   * update path replaces it on each PATCH, so an omitted field clears the
+   * stored vendor.
+   */
+  vendorLabel?: string;
+  iconSvg?: string;
+  outputType?: "text" | "image";
+  /**
+   * Image capability declaration for an image model. Validated against the
+   * kind's published limits server-side; a text model must not carry it. Sent
+   * in full on every save — a PATCH that omits it writes null.
+   */
+  imageCapabilities?: ImageModelCapabilities;
+  contextWindowTokens?: number | null;
+  maxInputTokens?: number | null;
+  maxOutputTokens?: number | null;
+  reasoningEfforts?: string[];
+};
+
+/**
+ * The adapter's own declaration for an upstream id, read server-side so the
+ * API key never reaches the browser. `providerReported: false` means the
+ * adapter has no limits entry, so the context window must come from the user.
+ */
+export type ProviderModelPrefill = {
+  name: string;
+  contextWindowTokens: number | null;
+  maxInputTokens: number | null;
+  maxOutputTokens: number | null;
+  reasoningEfforts: string[];
+  defaultReasoningEffort: string | null;
+  capabilities: Record<string, unknown> | null;
+  providerReported: boolean;
+};
+
+function toStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
+}
+
+function numberOrNull(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function nullableString(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+function isProviderKindInfo(value: unknown): value is ProviderKindInfo {
+  return (
+    isRecord(value) &&
+    typeof value.kind === "string" &&
+    typeof value.label === "string" &&
+    typeof value.credentialPlaceholder === "string" &&
+    typeof value.supportsBaseUrl === "boolean" &&
+    typeof value.requiresBaseUrl === "boolean" &&
+    Array.isArray(value.apiVariants)
+  );
+}
+
+/** Parse the published per-kind image limits; null when absent or malformed. */
+function parseImageLimits(value: unknown): ProviderKindImageLimits | null {
+  if (!isRecord(value)) return null;
+  const sizing = value.sizing;
+  if (sizing !== "sizes" && sizing !== "resolutions") return null;
+  if (typeof value.nMax !== "number" || !Number.isSafeInteger(value.nMax)) {
+    return null;
+  }
+  const ratios = value.representableAspectRatios;
+  if (ratios !== null && !Array.isArray(ratios)) return null;
+  return {
+    nMax: value.nMax,
+    sizing,
+    supportsQuality: value.supportsQuality === true,
+    supportsBackground: value.supportsBackground === true,
+    representableAspectRatios: Array.isArray(ratios)
+      ? toStringArray(ratios)
+      : null,
+  };
+}
+
+function isProviderConnection(value: unknown): value is ProviderConnection {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.kind === "string" &&
+    typeof value.label === "string" &&
+    typeof value.slug === "string" &&
+    typeof value.hasCredentials === "boolean" &&
+    typeof value.isActive === "boolean" &&
+    typeof value.sortOrder === "number"
+  );
+}
+
+/**
+ * A row from an older server omits `credentialsStatus`; default it to "ok"
+ * so the settings list cannot mislabel an unknown row as broken.
+ */
+export function normalizeProviderConnection(
+  row: ProviderConnection,
+): ProviderConnection {
+  return {
+    ...row,
+    credentialsStatus:
+      row.credentialsStatus === "unreadable" ? "unreadable" : "ok",
+  };
+}
+
+function isProviderModelRow(value: unknown): value is ProviderModelRow {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.slug === "string" &&
+    typeof value.upstreamId === "string" &&
+    typeof value.name === "string" &&
+    typeof value.label === "string" &&
+    typeof value.connectionId === "string"
+  );
+}
+
+/**
+ * Normalise one provider-model row before it reaches the settings editor. A row
+ * from an older server omits `vendorLabel`, and the field is typed `string |
+ * null` — the same treatment `normalizeModelRow` gives the catalog, so a reader
+ * that eventually calls `.length` on it cannot crash on a mixed deploy.
+ */
+export function normalizeProviderModelRow(
+  row: ProviderModelRow,
+): ProviderModelRow {
+  return {
+    ...row,
+    vendorLabel: typeof row.vendorLabel === "string" ? row.vendorLabel : null,
+  };
+}
+
+export async function listProviderKinds(): Promise<{
+  kinds: ProviderKindInfo[];
+  effortVocabulary: string[];
+}> {
+  const response = await apiFetch(`${API_BASE}/api/providers/kinds`);
+  if (!response.ok) await throwSkillError(response, "Failed to load provider kinds");
+  const data: unknown = await response.json();
+  if (!isRecord(data) || !Array.isArray(data.kinds)) {
+    throw new Error("Unexpected provider kinds response shape");
+  }
+  return {
+    kinds: data.kinds.filter(isProviderKindInfo).map((kind) => ({
+      ...kind,
+      // A server without the field publishes none; the editor then simply
+      // offers no image registration for that kind.
+      imageLimits: parseImageLimits((kind as { imageLimits?: unknown }).imageLimits),
+    })),
+    effortVocabulary: toStringArray(data.effortVocabulary),
+  };
+}
+
+export async function listProviderConnections(): Promise<ProviderConnection[]> {
+  const response = await apiFetch(`${API_BASE}/api/providers`);
+  if (!response.ok) {
+    await throwSkillError(response, "Failed to load provider connections");
+  }
+  const data: unknown = await response.json();
+  if (!Array.isArray(data)) {
+    throw new Error("Unexpected provider connections response shape");
+  }
+  return data.filter(isProviderConnection).map(normalizeProviderConnection);
+}
+
+export async function createProviderConnection(
+  input: ProviderConnectionInput,
+): Promise<ProviderConnection> {
+  const response = await apiFetch(`${API_BASE}/api/providers`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) {
+    await throwSkillError(response, "Failed to save provider connection");
+  }
+  const data: unknown = await response.json();
+  if (!isProviderConnection(data)) {
+    throw new Error("Unexpected provider connection response shape");
+  }
+  invalidateModelsCache();
+  return normalizeProviderConnection(data);
+}
+
+export async function updateProviderConnection(
+  id: string,
+  input: ProviderConnectionInput,
+): Promise<ProviderConnection> {
+  const response = await apiFetch(
+    `${API_BASE}/api/providers/${encodeURIComponent(id)}`,
+    {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    },
+  );
+  if (!response.ok) {
+    await throwSkillError(response, "Failed to save provider connection");
+  }
+  const data: unknown = await response.json();
+  if (!isProviderConnection(data)) {
+    throw new Error("Unexpected provider connection response shape");
+  }
+  invalidateModelsCache();
+  return normalizeProviderConnection(data);
+}
+
+export async function deleteProviderConnection(id: string): Promise<void> {
+  const response = await apiFetch(
+    `${API_BASE}/api/providers/${encodeURIComponent(id)}`,
+    { method: "DELETE" },
+  );
+  if (!response.ok) {
+    await throwSkillError(response, "Failed to delete provider connection");
+  }
+  invalidateModelsCache();
+}
+
+/** Flip a connection's active flag; mirrors `setMcpServerEnabled`. */
+export async function setProviderConnectionEnabled(
+  id: string,
+  isEnabled: boolean,
+): Promise<ProviderConnection> {
+  const response = await apiFetch(
+    `${API_BASE}/api/providers/${encodeURIComponent(id)}/enabled`,
+    {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ isEnabled }),
+    },
+  );
+  if (!response.ok) {
+    await throwSkillError(response, "Failed to update provider connection");
+  }
+  const data: unknown = await response.json();
+  if (!isProviderConnection(data)) {
+    throw new Error("Unexpected provider connection response shape");
+  }
+  invalidateModelsCache();
+  return normalizeProviderConnection(data);
+}
+
+export async function discoverProviderModels(
+  connectionId: string,
+): Promise<ListedProviderModel[]> {
+  const response = await apiFetch(
+    `${API_BASE}/api/providers/${encodeURIComponent(connectionId)}/models/discover`,
+    { method: "POST" },
+  );
+  if (!response.ok) {
+    await throwSkillError(response, "Failed to load the provider's models");
+  }
+  const data: unknown = await response.json();
+  if (!isRecord(data) || !Array.isArray(data.data)) {
+    throw new Error("Unexpected provider model listing response shape");
+  }
+  return data.data.filter(
+    (item): item is ListedProviderModel =>
+      isRecord(item) && typeof item.id === "string",
+  );
+}
+
+export async function listProviderModels(
+  connectionId: string,
+): Promise<ProviderModelRow[]> {
+  const response = await apiFetch(
+    `${API_BASE}/api/providers/${encodeURIComponent(connectionId)}/models`,
+  );
+  if (!response.ok) {
+    await throwSkillError(response, "Failed to load provider models");
+  }
+  const data: unknown = await response.json();
+  if (!Array.isArray(data)) {
+    throw new Error("Unexpected provider models response shape");
+  }
+  return data.filter(isProviderModelRow).map(normalizeProviderModelRow);
+}
+
+export async function createProviderModel(
+  connectionId: string,
+  input: ProviderModelInput,
+): Promise<ProviderModelRow> {
+  const response = await apiFetch(
+    `${API_BASE}/api/providers/${encodeURIComponent(connectionId)}/models`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    },
+  );
+  if (!response.ok) {
+    await throwSkillError(response, "Failed to save provider model");
+  }
+  const data: unknown = await response.json();
+  if (!isProviderModelRow(data)) {
+    throw new Error("Unexpected provider model response shape");
+  }
+  invalidateModelsCache();
+  return normalizeProviderModelRow(data);
+}
+
+export async function updateProviderModel(
+  connectionId: string,
+  modelId: string,
+  input: ProviderModelInput,
+): Promise<ProviderModelRow> {
+  const response = await apiFetch(
+    `${API_BASE}/api/providers/${encodeURIComponent(connectionId)}/models/${encodeURIComponent(modelId)}`,
+    {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    },
+  );
+  if (!response.ok) {
+    await throwSkillError(response, "Failed to save provider model");
+  }
+  const data: unknown = await response.json();
+  if (!isProviderModelRow(data)) {
+    throw new Error("Unexpected provider model response shape");
+  }
+  invalidateModelsCache();
+  return normalizeProviderModelRow(data);
+}
+
+export async function deleteProviderModel(
+  connectionId: string,
+  modelId: string,
+): Promise<void> {
+  const response = await apiFetch(
+    `${API_BASE}/api/providers/${encodeURIComponent(connectionId)}/models/${encodeURIComponent(modelId)}`,
+    { method: "DELETE" },
+  );
+  if (!response.ok) {
+    await throwSkillError(response, "Failed to delete provider model");
+  }
+  invalidateModelsCache();
+}
+
+export async function prefillProviderModel(
+  connectionId: string,
+  input: { upstreamId: string; reasoningEfforts?: string[] | null },
+): Promise<ProviderModelPrefill> {
+  const response = await apiFetch(
+    `${API_BASE}/api/providers/${encodeURIComponent(connectionId)}/models/prefill`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    },
+  );
+  if (!response.ok) {
+    await throwSkillError(response, "Failed to read the model's metadata");
+  }
+  const data: unknown = await response.json();
+  if (!isRecord(data) || typeof data.name !== "string") {
+    throw new Error("Unexpected provider prefill response shape");
+  }
+  return {
+    name: data.name,
+    contextWindowTokens: numberOrNull(data.contextWindowTokens),
+    maxInputTokens: numberOrNull(data.maxInputTokens),
+    maxOutputTokens: numberOrNull(data.maxOutputTokens),
+    reasoningEfforts: toStringArray(data.reasoningEfforts),
+    defaultReasoningEffort: nullableString(data.defaultReasoningEffort),
+    capabilities: isRecord(data.capabilities) ? data.capabilities : null,
+    providerReported: data.providerReported === true,
+  };
+}
+
+/**
+ * Probe a connection without persisting anything. A blank `apiKey` with a
+ * `connectionId` reuses that owned connection's stored credential server-side,
+ * so an empty key field does not force re-entry. Editor fields the test does
+ * not need may be sent and are ignored.
+ */
+export async function testProviderConnection(input: {
+  kind: string;
+  baseUrl?: string | null;
+  api?: string | null;
+  apiKey?: string | null;
+  /**
+   * Same shape as `ProviderConnectionInput.headers`, including `{ dynamic }`
+   * markers: a new connection whose required header is dynamic can only pass
+   * the test-before-save gate if the probe carries the marker.
+   */
+  headers?: Record<string, ProviderHeaderValue>;
+  connectionId?: string;
+}): Promise<{ ok: true; modelCount: number }> {
+  const response = await apiFetch(`${API_BASE}/api/providers/test`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) {
+    await throwSkillError(response, "Failed to test provider connection");
+  }
+  const data: unknown = await response.json();
+  if (
+    !isRecord(data) ||
+    data.ok !== true ||
+    typeof data.modelCount !== "number"
+  ) {
+    throw new Error("Unexpected provider test response shape");
+  }
+  return { ok: true, modelCount: data.modelCount };
 }

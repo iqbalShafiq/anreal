@@ -69,7 +69,7 @@ export async function computeContextUsage(input: {
   model: string;
   reasoningEffort: string | null;
 }): Promise<ContextUsageInfo> {
-  const modelInfo = await findActiveModel(input.model);
+  const modelInfo = await findActiveModel(input.model, input.userId);
   if (!modelInfo) {
     throw new Error("model catalog entry is unavailable");
   }

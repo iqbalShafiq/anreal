@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useId,
   useRef,
@@ -8,7 +9,9 @@ import {
 } from "react";
 import {
   Activity,
+  ArrowLeft,
   HardDrive,
+  KeyRound,
   Sparkles,
   UserRound,
   X,
@@ -17,6 +20,11 @@ import {
 import { InsetScrollbar } from "#/components/chat/inset-scrollbar";
 import { ReasoningEffortIcon } from "#/components/composer/model-reasoning-switcher";
 import { PersonalizationSection } from "#/components/settings/personalization-section";
+import { ModelRolesSection } from "#/components/settings/model-roles-section";
+import {
+  ProvidersSection,
+  type ProviderDetailHandle,
+} from "#/components/settings/providers-section";
 import { useProfilePersonalization } from "#/hooks/use-profile";
 import {
   getUserUsageSummary,
@@ -32,11 +40,17 @@ import {
   type ReasoningEffort,
 } from "#/lib/chat/models";
 
-type SettingsSection = "account" | "usage" | "personalization";
+export type SettingsSection =
+  | "account"
+  | "usage"
+  | "personalization"
+  | "providers";
 
 export type SettingsModalProps = {
   open: boolean;
   user: SessionUser;
+  section: SettingsSection;
+  onSectionChange: (section: SettingsSection) => void;
   onClose: () => void;
   restoreFocusRef?: RefObject<HTMLElement | null>;
 };
@@ -77,6 +91,8 @@ function percent(part: number, total: number): number {
 export function SettingsModal({
   open,
   user,
+  section,
+  onSectionChange,
   onClose,
   restoreFocusRef,
 }: SettingsModalProps) {
@@ -84,10 +100,20 @@ export function SettingsModal({
   const closeRef = useRef<HTMLButtonElement>(null);
   const contentScrollRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
-  const [section, setSection] = useState<SettingsSection>("account");
   const [usage, setUsage] = useState<UserUsageSummary | null>(null);
   const [usageLoading, setUsageLoading] = useState(false);
   const [usageError, setUsageError] = useState<string | null>(null);
+  /**
+   * Set while a section is showing a detail view (currently the provider
+   * editor). The whole section nav is then replaced by a single Back item that
+   * calls the section's own exit action. The setter is stable so the section's
+   * report effect cannot loop.
+   */
+  const [detail, setDetail] = useState<ProviderDetailHandle | null>(null);
+  const handleDetailChange = useCallback(
+    (next: ProviderDetailHandle | null) => setDetail(next),
+    [],
+  );
 
   const profiles = useProfilePersonalization(
     open && section === "personalization",
@@ -119,7 +145,6 @@ export function SettingsModal({
 
   useEffect(() => {
     if (!open) {
-      setSection("account");
       setUsage(null);
       setUsageError(null);
       return;
@@ -195,24 +220,43 @@ export function SettingsModal({
           className="flex shrink-0 gap-1 border-b border-white/[0.06] p-2 sm:w-44 sm:flex-col sm:border-b-0 sm:border-r sm:border-white/[0.06] sm:p-2.5"
           aria-label="Settings sections"
         >
-          <SettingsNavButton
-            active={section === "account"}
-            icon={<UserRound className="size-4" strokeWidth={1.75} />}
-            label="Account"
-            onClick={() => setSection("account")}
-          />
-          <SettingsNavButton
-            active={section === "usage"}
-            icon={<Zap className="size-4" strokeWidth={1.75} />}
-            label="Usage"
-            onClick={() => setSection("usage")}
-          />
-          <SettingsNavButton
-            active={section === "personalization"}
-            icon={<Sparkles className="size-4" strokeWidth={1.75} />}
-            label="Personalization"
-            onClick={() => setSection("personalization")}
-          />
+          {detail ? (
+            // A detail view replaces the whole nav: one way back, no other
+            // section to wander into mid-edit.
+            <SettingsNavButton
+              active={false}
+              icon={<ArrowLeft className="size-4" strokeWidth={1.75} />}
+              label="Back"
+              onClick={detail.onBack}
+            />
+          ) : (
+            <>
+              <SettingsNavButton
+                active={section === "account"}
+                icon={<UserRound className="size-4" strokeWidth={1.75} />}
+                label="Account"
+                onClick={() => onSectionChange("account")}
+              />
+              <SettingsNavButton
+                active={section === "usage"}
+                icon={<Zap className="size-4" strokeWidth={1.75} />}
+                label="Usage"
+                onClick={() => onSectionChange("usage")}
+              />
+              <SettingsNavButton
+                active={section === "personalization"}
+                icon={<Sparkles className="size-4" strokeWidth={1.75} />}
+                label="Personalization"
+                onClick={() => onSectionChange("personalization")}
+              />
+              <SettingsNavButton
+                active={section === "providers"}
+                icon={<KeyRound className="size-4" strokeWidth={1.75} />}
+                label="Providers"
+                onClick={() => onSectionChange("providers")}
+              />
+            </>
+          )}
         </nav>
 
         {/* Same scroll treatment as chat room: hide native bar + InsetScrollbar */}
@@ -244,6 +288,8 @@ export function SettingsModal({
                     <dd className="text-text">{user.email}</dd>
                   </div>
                 </dl>
+
+                <ModelRolesSection active={open} />
               </div>
             ) : section === "usage" ? (
               <div className="flex flex-col gap-6 animate-fade-in">
@@ -278,6 +324,11 @@ export function SettingsModal({
                   </>
                 ) : null}
               </div>
+            ) : section === "providers" ? (
+              <ProvidersSection
+                active={section === "providers"}
+                onDetailChange={handleDetailChange}
+              />
             ) : (
               <PersonalizationSection
                 data={profiles.data}

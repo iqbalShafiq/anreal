@@ -23,6 +23,42 @@ describe("strict Anvia v1 message part presentation", () => {
     ]);
   });
 
+  it("renders user file attachments as chips outside the bubble while image context stays inline", () => {
+    const message = parseUIMessage({
+      id: "user-1",
+      role: "user",
+      parts: [
+        { id: "text-1", type: "text", text: "Take a look at this file" },
+        {
+          id: "file-1",
+          type: "attachment",
+          attachment: {
+            id: "attachment-1",
+            type: "document",
+            name: "sales.csv",
+          },
+        },
+        {
+          id: "image-1",
+          type: "attachment",
+          attachment: {
+            id: "attachment-2",
+            type: "image",
+            name: "shot.png",
+            mediaType: "image/png",
+            data: "aGk=",
+          },
+        },
+      ],
+    });
+
+    expect(message.parts.map((part) => isRenderablePart(part, message.role))).toEqual([
+      true,
+      false,
+      true,
+    ]);
+  });
+
   it("hides Deep Research progress data parts from the transcript", () => {
     const message = parseUIMessage({
       id: "assistant-1",
@@ -71,6 +107,25 @@ describe("strict Anvia v1 message part presentation", () => {
           type: "data",
           name: "siteBuildProgress",
           data: { siteId: "site-1", version: 1, phase: "building", message: "x" },
+        },
+      ],
+    });
+
+    expect(message.parts.map((part) => isRenderablePart(part, message.role))).toEqual([
+      false,
+    ]);
+  });
+
+  it("hides live browse view events from the transcript", () => {
+    const message = parseUIMessage({
+      id: "assistant-1",
+      role: "assistant",
+      parts: [
+        {
+          id: "live-1",
+          type: "data",
+          name: "siteLiveView",
+          data: { state: "started", siteId: "site-1", label: "Kedai" },
         },
       ],
     });

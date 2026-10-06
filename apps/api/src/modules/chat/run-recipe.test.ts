@@ -8,14 +8,14 @@ import {
 } from "./run-recipe.js";
 
 const fixture = {
-  version: 6 as const,
+  version: 8 as const,
   agentId: CHAT_AGENT_ID,
   identity: {
     sessionId: "session-1",
     userId: "user-1",
     projectId: "project-1",
   },
-  model: { id: "openai/gpt-5.6-luna", reasoningEffort: "high" as const },
+  model: { id: "openai/gpt-5.6-luna", connectionId: null, reasoningEffort: "high" as const },
   memoryPolicy: {
     version: 1 as const,
     savePolicy: "turn" as const,

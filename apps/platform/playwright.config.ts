@@ -1,4 +1,10 @@
 import { defineConfig, devices } from "@playwright/test";
+import { resolveApiOrigin } from "./e2e/api-origin";
+
+// One source of truth for the API origin, shared with `e2e/global-setup.ts`.
+// Hardcoding it here is what desynced the webServer probe from the stack the
+// dev command actually started.
+const apiOrigin = resolveApiOrigin();
 
 export default defineConfig({
   testDir: "./e2e",
@@ -17,9 +23,11 @@ export default defineConfig({
     trace: "on-first-retry",
   },
   webServer: {
-    command:
-      "node e2e/stub-openrouter.ts & OPENAI_BASE_URL=http://127.0.0.1:18765/api/v1 OPENAI_API_KEY=e2e-key TAVILY_API_KEY=dummy SITE_ENABLED=false pnpm --dir ../.. dev",
-    url: "http://localhost:3001/api/auth/get-session",
+    // A Node script instead of an inline shell line: the old command used
+    // `VAR=value cmd &` syntax, which cmd.exe cannot parse, so on Windows the
+    // stack never started.
+    command: "node e2e/start-dev-stack.ts",
+    url: `${apiOrigin}/api/auth/get-session`,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
   },

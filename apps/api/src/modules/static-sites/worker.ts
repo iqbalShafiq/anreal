@@ -19,7 +19,9 @@ import {
   SITE_BUILD_TIMEOUT_MS,
   assertSafeSiteId,
   readSiteManifest,
+  resolveSiteBuildModel,
   siteBuildConfig,
+  siteBuildModelId,
   siteDataDir,
   writeSiteManifest,
   writeSitesIndex,
@@ -166,8 +168,11 @@ export async function processSiteBuildJob(
   job: { data: SiteBuildJobData },
   deps: SiteBuildDeps = {},
 ): Promise<void> {
-  const config = siteBuildConfig();
   const { siteId, sessionId, userId, prompt, version } = job.data;
+  // Only the resolved model and the env/default id are used; constructing the
+  // whole config here would build a second completion model that is discarded.
+  const model = await resolveSiteBuildModel(userId);
+  const modelId = siteBuildModelId();
   assertSafeSiteId(siteId);
   const startedAt = Date.now();
   const baseDir = join(siteDataDir(), siteId, `v${version}`);
@@ -189,7 +194,7 @@ export async function processSiteBuildJob(
     stableVersion: runExisting?.stableVersion ?? null,
     versions: { ...(runExisting?.versions ?? {}), [version]: { status: "running", updatedAt: runUpdatedAt } },
   });
-  await progress("starting", "Menyiapkan sandbox build.");
+  await progress("starting", "Preparing the build sandbox.");
 
   const createSession = deps.createSandboxSession ?? defaultCreateSandboxSession;
   let session: SandboxSession | undefined;
@@ -203,11 +208,11 @@ export async function processSiteBuildJob(
       // normalizeSandboxPath): the site scaffold lives under `site/`.
       await ops.writeTextFile({ path: `site/${path}`, text });
     }
-    await progress("planning", "Menyusun brief situs.");
+    await progress("planning", "Drafting the site brief.");
 
     const brief = job.data.brief ?? (await parseSiteBrief({
-      model: config.model,
-      modelId: config.modelId,
+      model,
+      modelId,
       prompt,
       abortSignal: AbortSignal.timeout(SITE_BUILD_TIMEOUT_MS),
     })).brief;
@@ -225,7 +230,7 @@ export async function processSiteBuildJob(
     }
     const runAgent: BuilderAgentRunner = deps.runBuilderAgent ??
       (async ({ prompt: agentPrompt, tools: agentTools }) => {
-        const agent = createSiteBuilderAgent({ model: config.model, tools: agentTools as never[] });
+        const agent = createSiteBuilderAgent({ model, tools: agentTools as never[] });
         const stream = agent.stream({
           prompt: agentPrompt,
           session: { sessionId, userId },
@@ -245,13 +250,13 @@ export async function processSiteBuildJob(
         return { text };
       });
 
-    await progress("building", "Membangun halaman per section.");
+    await progress("building", "Building the pages section by section.");
     await runAgent({
-      prompt: buildSiteBuilderPrompt(brief),
+      prompt: buildSiteBuilderPrompt(brief, prompt),
       tools: [...tools] as { name: string }[],
     });
 
-    await progress("bundling", "Menjalankan production build.");
+    await progress("bundling", "Running the production build.");
     const install = await ops.exec({ command: "npm", args: ["install", "--no-audit", "--no-fund"], cwd: "site", timeoutMs: 240_000 });
     if (install.status !== "exited" || install.exitCode !== 0) {
       throw new Error(`npm install failed: ${decodeOutput(install.stderr) || decodeOutput(install.stdout)}`.slice(0, 2000));
@@ -261,7 +266,7 @@ export async function processSiteBuildJob(
       throw new Error(`vite build failed: ${decodeOutput(build.stderr) || decodeOutput(build.stdout)}`.slice(0, 2000));
     }
 
-    await progress("preview", "Menyiapkan pratinjau.");
+    await progress("preview", "Preparing the preview.");
     const previewUrl = `/api/sites/${siteId}/v${version}/preview/index.html`;
 
     await mkdir(baseDir, { recursive: true });
@@ -333,7 +338,7 @@ export async function processSiteBuildJob(
       stableVersion: failedExisting?.stableVersion ?? null,
       versions: { ...(failedExisting?.versions ?? {}), [version]: { status: "failed", updatedAt: failedUpdatedAt } },
     });
-    await progress("failed", "Build gagal.");
+    await progress("failed", "Build failed.");
     throw error;
   } finally {
     await session?.destroy()?.catch((error) => {
@@ -459,7 +464,7 @@ export async function markSiteBuildFailed(
       siteId,
       version: existing.version,
       phase: "failed",
-      message: "Build gagal.",
+      message: "Build failed.",
     },
   }).catch((publishError) => {
     console.warn(`[sites] failed publish failed ${siteId}`, publishError);

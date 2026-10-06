@@ -29,12 +29,53 @@ const viewSitePageInput = z.object({
 const viewSitePageSpec = {
   name: "view_site_page",
   description:
-    "View a workspace site's content and appearance. Always returns a bounded text excerpt plus provenance (siteId, version, imageId, capturedAt). Vision models receive the screenshot bytes directly; text-only models must pass imageId to view_image for a description. Never ask the user for screenshots.",
+    "View a workspace site's content and appearance. Use it once the version is Ready — a version that is still queued or building answers with a retryable note instead of a screenshot, so wait for the build panel to flip to Ready (or ask the user to ping you) before reviewing. Always returns a bounded text excerpt plus provenance (siteId, version, imageId, capturedAt). Vision models receive the screenshot bytes directly; text-only models must pass imageId to view_image for a description. Never ask the user for screenshots.",
   inputSchema: viewSitePageInput,
+} as const;
+
+const browseSiteInput = z.object({
+  siteId: z
+    .string()
+    .min(1)
+    .max(120)
+    .describe("Site id from a pin or list_artifacts (type site)"),
+  version: z
+    .number()
+    .int()
+    .min(1)
+    .optional()
+    .describe("Site version to browse. Omit to use the current stable version."),
+  action: z
+    .enum(["open", "scroll", "click", "snapshot", "close"])
+    .describe("One action per call. open starts the session; close ends it."),
+  selector: z
+    .string()
+    .min(1)
+    .max(500)
+    .optional()
+    .describe("click only: CSS selector of the target element."),
+  text: z
+    .string()
+    .min(1)
+    .max(200)
+    .optional()
+    .describe("click only: visible text of the target element (first match)."),
+  to: z
+    .enum(["top", "bottom"])
+    .optional()
+    .describe("scroll only: jump to the top or bottom instead of one viewport."),
+});
+
+const browseSiteSpec = {
+  name: "browse_site",
+  description:
+    "Browse a workspace site interactively: open a live session, then scroll or click one step at a time. Every action returns a fresh screenshot (imageId) plus page title/url; vision models receive the pixels, text-only models pass imageId to view_image. Open only once the build version is ready — opening while the build runs fails without a screenshot. Call snapshot before concluding and close when done. Links that leave the local preview origin are blocked. Never ask the user for screenshots.",
+  inputSchema: browseSiteInput,
 } as const;
 
 export const SITE_VIEW_TOOL_DEFINITIONS: ToolDefinition[] = [
   createStaticToolDefinition(viewSitePageSpec),
+  createStaticToolDefinition(browseSiteSpec),
 ];
 
 export type ViewSitePageResult = {
@@ -86,9 +127,12 @@ export function createViewSitePageTools(
         ...(version !== undefined ? { version } : {}),
         ...(question !== undefined ? { question } : {}),
       });
-      deps.onFocus?.({ artifactId: result.siteId, artifactType: "site", label: result.title });
-      let imageBytesIncluded = false;
-      if (result.imageId && deps.includeImageBytes !== false && deps.pushVisionImage) {
+      // A not-ready version answers with a retryable partial result (empty
+      // imageId); do not flash an artifact-focus chip for it.
+      if (result.imageId) {
+        deps.onFocus?.({ artifactId: result.siteId, artifactType: "site", label: result.title });
+      }
+      let imageBytesIncluded = false;      if (result.imageId && deps.includeImageBytes !== false && deps.pushVisionImage) {
         try {
           await deps.pushVisionImage({ imageId: result.imageId });
           imageBytesIncluded = true;
@@ -102,4 +146,65 @@ export function createViewSitePageTools(
     },
   });
   return [viewSitePage];
+}
+
+export type BrowseSiteResult = {
+  siteId: string;
+  version: number;
+  action: "open" | "scroll" | "click" | "snapshot" | "close";
+  title: string;
+  url: string;
+  imageId: string;
+  blocked: boolean;
+  note: string | null;
+  actionsUsed: number;
+  actionsRemaining: number;
+  sessionState: "open" | "closed";
+  captureError: string | null;
+  retryable: boolean;
+};
+
+export function createBrowseSiteTools(deps: {
+  act: (input: {
+    siteId: string;
+    version?: number;
+    action: BrowseSiteResult["action"];
+    selector?: string;
+    text?: string;
+    to?: "top" | "bottom";
+  }) => Promise<BrowseSiteResult>;
+  onFocus?: ArtifactFocusHandler;
+  /** Mirrors createViewSitePageTools: vision models get bytes, text-only do not. */
+  includeImageBytes?: boolean;
+  pushVisionImage?: (image: { imageId: string }) => Promise<void> | void;
+}): AnyTool[] {
+  const browseSite = createTool({
+    ...browseSiteSpec,
+    execute: async ({ siteId, version, action, selector, text, to }) => {
+      const result = await deps.act({
+        siteId,
+        ...(version !== undefined ? { version } : {}),
+        action,
+        ...(selector !== undefined ? { selector } : {}),
+        ...(text !== undefined ? { text } : {}),
+        ...(to !== undefined ? { to } : {}),
+      });
+      if (action === "open" && result.imageId) {
+        deps.onFocus?.({ artifactId: result.siteId, artifactType: "site", label: result.title });
+      }
+      let imageBytesIncluded = false;
+      if (result.imageId && deps.includeImageBytes !== false && deps.pushVisionImage) {
+        try {
+          await deps.pushVisionImage({ imageId: result.imageId });
+          imageBytesIncluded = true;
+        } catch (error) {
+          console.warn(
+            `[browse-site] vision queue skipped for ${result.imageId}: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }
+      return { ...result, imageBytesIncluded };
+    },
+  });
+  return [browseSite];
 }

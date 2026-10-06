@@ -64,7 +64,7 @@ const renderedChartSchema = z.discriminatedUnion("kind", [
 const createPdfReportSpec = {
   name: "create_pdf_report",
   description:
-    "Build a PDF report from markdown plus chart/image asset ids (SVG chart snapshots, PNG, or JPEG) and a citation map. Saves as a derived report document in scope.",
+    "Build a PDF report from markdown plus chart/image asset ids (SVG chart snapshots from snapshot_chart, PNG, or JPEG) and a citation map. Pass every snapshot_chart imageId in assetIds so the charts render, and place each chart where it belongs with markdown image syntax ![short caption](imageId) on its own line under the relevant section; referenced charts get numbered figure captions, unreferenced assets are appended at the end. Saves as a derived report document in scope.",
   inputSchema: z.object({
     title: z.string().min(1).max(120),
     markdown: z.string().min(1).max(100_000),

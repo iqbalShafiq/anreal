@@ -12,6 +12,7 @@ import { FeaturesPopover, type FeatureCountSummary } from "#/components/composer
 import { MessageQueueDock } from "#/components/composer/message-queue-dock";
 import { ModelReasoningSwitcher } from "#/components/composer/model-reasoning-switcher";
 import { GeneratedImageThumbnail } from "#/components/images/generated-image-thumbnail";
+import { useSettingsDialogOptional } from "#/components/settings/settings-dialog";
 import type {
   ContextSnippet,
   ContextUsageInfo,
@@ -206,6 +207,9 @@ export function ChatComposer({
   /** Owner-scoped error rendered inside the normal composer shell. */
   externalError?: { key: number; message: string } | null;
 }) {
+  // Optional: the share surface renders the composer without a Settings
+  // provider, so the "Add a model…" row is simply omitted there.
+  const settingsDialog = useSettingsDialogOptional();
   const active = isActiveComposerStatus(chatStatus);
   const busy = isIngesting || active || locked;
   const modelsReady =
@@ -599,6 +603,11 @@ export function ChatComposer({
               onOpenSkills={onOpenSkills}
               onOpenMcp={onOpenMcp}
             />
+            {/* The composer entry passes no trigger (its row lives inside the
+                Select), so SettingsModal's close handler focuses nothing and
+                the native dialog restores focus to `body` — unlike the
+                account-menu entry, which passes its own trigger. Wiring the
+                switcher's trigger through is a known follow-up. */}
             <ModelReasoningSwitcher
               models={models}
               reasoningEfforts={reasoningEfforts}
@@ -607,6 +616,11 @@ export function ChatComposer({
               disabled={locked || readOnly || busy || modelsUnavailable}
               onModelChange={onModelChange}
               onReasoningChange={onReasoningChange}
+              onAddModel={
+                settingsDialog
+                  ? () => settingsDialog.openSettings("providers")
+                  : undefined
+              }
             />
           </div>
 

@@ -8,8 +8,13 @@ import type { CompletionModel } from "@anvia/core";
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { SITE_MODEL_DEFAULT } from "../models/role-defaults.js";
+import { buildRoleCompletionModel } from "../models/roles.js";
+import { prisma } from "../../utils/prisma.js";
 
-export const DEFAULT_SITE_MODEL: CompletionModelId = "meta/muse-spark-1.3-contributor";
+// The literal lives in the neutral role-defaults module (which the role
+// resolver also reads) so the two never drift and no import cycle forms.
+export const DEFAULT_SITE_MODEL: CompletionModelId = SITE_MODEL_DEFAULT;
 // Budget per agent stream: real high-effort builder runs measured >5min
 // (v2 attempt aborted at ~307s on 2026-09-22), so allow 10min.
 export const SITE_BUILD_TIMEOUT_MS = 600_000;
@@ -66,9 +71,18 @@ export function siteBuildEnabled(): boolean {
   return process.env.SITE_ENABLED !== "false";
 }
 
+/**
+ * The env-or-constant builder model id, resolved without constructing a
+ * completion model so callers that only need the id (the worker's brief
+ * parser) never build a throwaway handle.
+ */
+export function siteBuildModelId(): CompletionModelId {
+  return parseCompletionModel(process.env.SITE_MODEL) ?? DEFAULT_SITE_MODEL;
+}
+
 export function siteBuildConfig(): SiteBuildConfig {
   const concurrency = Number(process.env.SITE_CONCURRENCY ?? "2");
-  const modelId = parseCompletionModel(process.env.SITE_MODEL) ?? DEFAULT_SITE_MODEL;
+  const modelId = siteBuildModelId();
   return {
     enabled: siteBuildEnabled(),
     concurrency:
@@ -77,6 +91,17 @@ export function siteBuildConfig(): SiteBuildConfig {
     model: createCompletionModel(modelId),
     dataDir: siteDataDir(),
   };
+}
+
+/**
+ * The builder model for one user's job: the `siteBuilder` assignment when set,
+ * otherwise exactly the env/default model `siteBuildConfig` has always built.
+ */
+export async function resolveSiteBuildModel(
+  userId: string,
+): Promise<CompletionModel> {
+  const assigned = await buildRoleCompletionModel(prisma, userId, "siteBuilder");
+  return assigned ?? siteBuildConfig().model;
 }
 
 function manifestPath(siteId: string, dirOverride?: string): string {

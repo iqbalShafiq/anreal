@@ -1,10 +1,12 @@
 import {
   CLIENT_STREAM_PROTOCOL,
   customAgentEventsToClientStream,
+  maskedClientError,
   parseClientStreamEvent,
   type AgentClientStreamContext,
   type ClientDataSchemas,
   type ClientStream,
+  type ClientStreamError,
   type ClientStreamEvent,
 } from "@anvia/client";
 import type { ClientResumableEvent } from "@anvia/server";
@@ -76,6 +78,12 @@ const siteBuildReadySchema = z.object({
   downloadUrl: boundedString(2000),
 }).strict();
 
+const siteLiveViewSchema = z.object({
+  state: z.enum(["started", "stopped"]),
+  siteId: boundedString(120),
+  label: z.string().max(200).optional(),
+}).strict();
+
 const deepResearchAppEventSchema = z.object({
   type: z.literal("deep_research_progress"),
   phase: deepResearchProgressSchema.shape.phase,
@@ -119,6 +127,12 @@ const artifactFocusAppEventSchema = z.object({
   artifactType: artifactFocusSchema.shape.artifactType,
   label: artifactFocusSchema.shape.label,
 }).strict();
+const siteLiveViewAppEventSchema = z.object({
+  type: z.literal("site_live_view"),
+  state: siteLiveViewSchema.shape.state,
+  siteId: siteLiveViewSchema.shape.siteId,
+  label: siteLiveViewSchema.shape.label,
+}).strict();
 export type ChatMetadata = z.infer<typeof ChatMetadataSchema>;
 export type DeepResearchProgress = z.infer<typeof deepResearchProgressSchema>;
 export type QueuedMessageApplied = z.infer<typeof queuedMessageAppliedSchema>;
@@ -126,6 +140,7 @@ export type ToolWaitProgressEvent = z.infer<typeof toolWaitProgressSchema>;
 export type SiteBuildProgress = z.infer<typeof siteBuildProgressSchema>;
 export type SiteBuildReady = z.infer<typeof siteBuildReadySchema>;
 export type ArtifactFocus = z.infer<typeof artifactFocusSchema>;
+export type SiteLiveView = z.infer<typeof siteLiveViewSchema>;
 
 export type ChatDataMap = {
   deepResearchProgress: DeepResearchProgress;
@@ -134,6 +149,7 @@ export type ChatDataMap = {
   siteBuildProgress: SiteBuildProgress;
   siteBuildReady: SiteBuildReady;
   artifactFocus: ArtifactFocus;
+  siteLiveView: SiteLiveView;
 };
 
 export const ChatDataSchemas = {
@@ -143,6 +159,7 @@ export const ChatDataSchemas = {
   siteBuildProgress: siteBuildProgressSchema,
   siteBuildReady: siteBuildReadySchema,
   artifactFocus: artifactFocusSchema,
+  siteLiveView: siteLiveViewSchema,
 } satisfies ClientDataSchemas<ChatDataMap>;
 
 export type ChatClientEvent = ClientStreamEvent<ChatMetadata, ChatDataMap>;
@@ -191,6 +208,12 @@ export type ChatAppEvent =
       type: "artifact_focus";
       artifactId: string;
       artifactType: ArtifactFocus["artifactType"];
+      label?: string;
+    }
+  | {
+      type: "site_live_view";
+      state: SiteLiveView["state"];
+      siteId: string;
       label?: string;
     }
   ;
@@ -274,6 +297,15 @@ export function mapChatAppEvent(
       });
       return withContext(context, { type: "data", name: "artifactFocus", data }) as ChatClientEvent;
     }
+    case "site_live_view": {
+      siteLiveViewAppEventSchema.parse(event);
+      const data = siteLiveViewSchema.parse({
+        state: event.state,
+        siteId: event.siteId,
+        ...(event.label === undefined ? {} : { label: event.label }),
+      });
+      return withContext(context, { type: "data", name: "siteLiveView", data }) as ChatClientEvent;
+    }
   }
 }
 
@@ -293,6 +325,42 @@ export async function* gateRootInteraction(
   }
 }
 
+/**
+ * Marks an error whose message the server has already authored for the user
+ * (never a raw provider/agent payload). Only instances of this exact class may
+ * pass the client-stream adapter's masking.
+ *
+ * Constructibility is the security boundary: this is a live in-process class,
+ * not a shape. Nothing parsed from Redis, the wire, or a provider SDK is ever
+ * an `instanceof UserFacingStreamError`, so untrusted data cannot forge one by
+ * supplying a matching `message`, `code`, `name`, or `__proto__`.
+ */
+export class UserFacingStreamError extends Error {
+  readonly code: string | undefined;
+  constructor(message: string, code?: string) {
+    super(message);
+    this.name = "UserFacingStreamError";
+    this.code = code;
+  }
+}
+
+/**
+ * Error mapper for the client-stream adapter. `event.error` reaches this
+ * function by reference from the app's own terminal path: user-facing errors
+ * are pre-sanitized and pass through verbatim; everything else is masked with
+ * the adapter's own opaque default, keeping the message byte-identical.
+ */
+export function mapChatStreamError(error: unknown): ClientStreamError {
+  if (error instanceof UserFacingStreamError) {
+    return {
+      name: error.name,
+      message: error.message,
+      ...(error.code === undefined ? {} : { code: error.code }),
+    };
+  }
+  return maskedClientError();
+}
+
 export function createChatClientStream(options: {
   runId: string;
   metadata?: ChatMetadata;
@@ -307,6 +375,7 @@ export function createChatClientStream(options: {
     metadata,
     events: gateRootInteraction(options.events, options.onInteraction) as AsyncIterable<ChatAgentEvent | ChatAppEvent>,
     mapCustomEvent: mapChatAppEvent,
+    mapError: mapChatStreamError,
   });
 }
 

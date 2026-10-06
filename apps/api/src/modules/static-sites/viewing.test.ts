@@ -370,9 +370,17 @@ describe("viewSitePage", () => {
         JSON.stringify({ "u:standalone": [{ siteId: "warkop", siteName: "Warkop", updatedAt: manifest.updatedAt }] }),
         "utf8",
       );
-      await expect(
-        viewSitePage({ userId: "u", sessionId: "sess", sessionProjectId: null, siteId: "warkop", dir }),
-      ).rejects.toThrow(/running — nothing viewable yet/);
+      const result = await viewSitePage({
+        userId: "u",
+        sessionId: "sess",
+        sessionProjectId: null,
+        siteId: "warkop",
+        dir,
+      });
+      expect(result.status).toBe("running");
+      expect(result.imageId).toBe("");
+      expect(result.retryable).toBe(true);
+      expect(String(result.captureError)).toMatch(/still running/);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

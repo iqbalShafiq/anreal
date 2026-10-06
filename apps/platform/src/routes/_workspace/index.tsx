@@ -23,6 +23,7 @@ export const Route = createFileRoute("/_workspace/")({
           throw redirect({
             ...sessionNavigate({ sessionId: remembered, projectId: null }),
             replace: true,
+            viewTransition: true,
           });
         }
       } catch (error) {
@@ -38,6 +39,7 @@ export const Route = createFileRoute("/_workspace/")({
         throw redirect({
           ...sessionNavigate({ sessionId: pick.sessionId, projectId: null }),
           replace: true,
+          viewTransition: true,
         });
       }
     } catch (error) {
@@ -47,6 +49,7 @@ export const Route = createFileRoute("/_workspace/")({
     throw redirect({
       ...sessionNavigate({ sessionId: draft.sessionId, projectId: null }),
       replace: true,
+      viewTransition: true,
     });
   },
   component: RootRedirect,

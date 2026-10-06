@@ -1,0 +1,479 @@
+/**
+ * Pure draft helpers for the BYOK provider-model editor. This mirrors the
+ * server's slug rule in `apps/api/src/lib/provider-slug.ts` so the editor can
+ * show the id it is about to derive; the server remains authoritative and
+ * re-derives the slug on every create/update. React- and fetch-free so it
+ * stays unit-testable in the node environment.
+ */
+
+import type {
+  ImageModelCapabilities,
+  ListedProviderModel,
+  ProviderModelInput,
+  ProviderModelPrefill,
+} from "#/lib/api";
+import type { ProviderHeaderValue } from "#/lib/dynamic-headers";
+
+const SLUG_MAX = 96;
+
+/** The lowercase-hyphen rule the server enforces for connection slugs. */
+export const CONNECTION_SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+/**
+ * Lowercase, keep `[a-z0-9._-]`, collapse everything else into single hyphens.
+ * Mirrors `sanitizeSlugPart` on the server, including the empty-result fallback.
+ */
+function sanitizeSlugPart(value: string, fallback: string): string {
+  const cleaned = value
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/-{2,}/g, "-")
+    .replace(/^[-._]+/, "")
+    .replace(/[-._]+$/, "");
+  const bounded = cleaned.slice(0, SLUG_MAX);
+  const trimmed = bounded.replace(/[-._]+$/, "");
+  return trimmed.length > 0 ? trimmed : fallback;
+}
+
+/**
+ * Preview of the id the server will derive for `<connection>/<model>`.
+ * Mirrors `deriveModelSlug`: the connection part falls back to `provider`, the
+ * model part to `custom`, and the whole thing is capped at 96 chars.
+ */
+export function slugPreview(connectionSlug: string, upstreamId: string): string {
+  const prefix = sanitizeSlugPart(connectionSlug, "provider");
+  const model = sanitizeSlugPart(upstreamId, "custom");
+  const room = Math.max(1, SLUG_MAX - prefix.length - 1);
+  const trimmedModel = model.slice(0, room).replace(/[-._]+$/, "");
+  return `${prefix}/${trimmedModel.length > 0 ? trimmedModel : "custom"}`;
+}
+
+/**
+ * The display name the editor prefills from a model id: words are split at
+ * hyphens, underscores, slashes, and whitespace, then each is capitalised —
+ * `deepseek-v4-flash-vision-exp` becomes `Deepseek V4 Flash Vision Exp`. A dot
+ * inside a word is kept (`v4.1` stays `V4.1`), and a separator-only id yields
+ * the empty string rather than a stray word.
+ */
+export function displayNameFromModelId(id: string): string {
+  const words = id.match(/[A-Za-z0-9]+(?:\.[A-Za-z0-9]+)*/g) ?? [];
+  return words
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(" ");
+}
+
+/**
+ * Compare the user's selected efforts against the adapter's declared set.
+ * `unsupported` lists selections the adapter does not accept; `missing` lists
+ * adapter values the user has not selected. Both preserve their source order.
+ */
+export function effortDiff(
+  selected: string[],
+  adapterEfforts: string[],
+): { unsupported: string[]; missing: string[] } {
+  const adapter = new Set(adapterEfforts);
+  const chosen = new Set(selected);
+  return {
+    unsupported: selected.filter((value) => !adapter.has(value)),
+    missing: adapterEfforts.filter((value) => !chosen.has(value)),
+  };
+}
+
+/**
+ * Prefill a model editor draft from one discovery listing: display name (the
+ * id when the provider omits a name), context window, and the adapter's
+ * declared effort vocabulary. A non-null adapter default is added when the
+ * declaration does not already include it.
+ */
+export function draftFromListedModel(input: {
+  listed: Pick<ListedProviderModel, "id" | "name" | "contextLength">;
+  adapterEfforts: string[];
+  defaultEffort: string | null;
+}): {
+  upstreamId: string;
+  name: string;
+  contextWindowTokens: number | null;
+  reasoningEfforts: string[];
+} {
+  const reasoningEfforts = [...input.adapterEfforts];
+  if (input.defaultEffort && !reasoningEfforts.includes(input.defaultEffort)) {
+    reasoningEfforts.push(input.defaultEffort);
+  }
+  return {
+    upstreamId: input.listed.id,
+    name: input.listed.name?.trim() || input.listed.id,
+    contextWindowTokens: input.listed.contextLength ?? null,
+    reasoningEfforts,
+  };
+}
+
+/** Whether a slug matches the server's connection-slug rule. */
+export function isValidConnectionSlug(slug: string): boolean {
+  return CONNECTION_SLUG_RE.test(slug);
+}
+
+/**
+ * The slug the server would derive from a label, mirroring
+ * `deriveConnectionSlug` in `apps/api/src/lib/provider-slug.ts`. Used to
+ * pre-fill the slug field until the user edits it.
+ */
+export function deriveConnectionSlug(label: string): string {
+  return sanitizeSlugPart(label, "provider");
+}
+
+/**
+ * The vendor an upstream id's prefix names, when that prefix is one of the
+ * vendors the catalog already knows — otherwise `null`. This is only ever a
+ * suggestion the editor offers; the vendor is declared by the user, never
+ * derived, because the prefix cannot be trusted: OpenRouter prefixes the vendor
+ * (`openai/gpt-4o`) while OpenCode Zen prefixes itself (`opencode/gpt-5.5`,
+ * with a bare `gpt-5.5` as the id). A gateway's own name must never become a
+ * vendor, so a prefix outside `knownVendors` — including `opencode` — yields no
+ * suggestion. Matched case-insensitively and returned in the catalog's casing.
+ */
+export function vendorSuggestion(
+  upstreamId: string,
+  knownVendors: readonly string[],
+): string | null {
+  const slash = upstreamId.indexOf("/");
+  if (slash <= 0) return null;
+  const prefix = upstreamId.slice(0, slash).trim().toLowerCase();
+  if (prefix.length === 0) return null;
+  return (
+    knownVendors.find((vendor) => vendor.toLowerCase() === prefix) ?? null
+  );
+}
+
+/**
+ * Client-side slug check so a typo fails in the form, not mid-save. The server
+ * stays authoritative for reserved namespaces; this only enforces the shape.
+ */
+export function connectionSlugError(slug: string): string | null {
+  if (slug.length === 0) return null;
+  return isValidConnectionSlug(slug)
+    ? null
+    : "Slug must be lowercase letters, numbers, and hyphens, e.g. my-openrouter";
+}
+
+/**
+ * A new connection may only be saved after a successful Test. Save-time
+ * provider validation is not implemented server-side, so the UI carries the
+ * gate; an existing connection saves freely.
+ */
+export function canSaveConnection(input: {
+  isNew: boolean;
+  testPassed: boolean;
+}): boolean {
+  return input.isNew ? input.testPassed : true;
+}
+
+/**
+ * Warn when a Gemini connection declares custom headers. `@anvia/gemini`'s
+ * client options are `{ apiKey, vertexAi?, client? }` with no header or fetch
+ * seam — the adapter builds the Google SDK itself — so a Gemini connection's
+ * headers are silently ignored, for text models as well as images. The form
+ * lets the user act on it here rather than discovering unauthenticated requests
+ * later. Non-blocking: the connection is still valid, so this only informs.
+ * `kind` is the selected provider kind and `headers` the headers the form would
+ * submit; a non-Gemini kind is never warned about. The parameter accepts the
+ * dynamic marker shape too — only the presence of any header matters here.
+ */
+export function geminiHeaderWarning(
+  kind: string,
+  headers: Record<string, ProviderHeaderValue>,
+): string | null {
+  if (kind !== "gemini") return null;
+  if (Object.keys(headers).length === 0) return null;
+  return "Gemini connections cannot send custom headers, so these will not be used. The API key is the only credential that reaches Gemini.";
+}
+
+/** Editable model-form state; numbers live as text so inputs stay controlled. */
+export type ModelDraft = {
+  name: string;
+  contextWindowTokens: string;
+  maxInputTokens: string;
+  maxOutputTokens: string;
+  reasoningEfforts: string[];
+  providerReported: boolean;
+};
+
+function numberField(value: number | null): string {
+  return value === null ? "" : String(value);
+}
+
+/**
+ * Seed the model editor from the server's prefill. A non-null adapter default
+ * is added when the declaration does not already include it, and every limit
+ * becomes a form string so the inputs stay controlled.
+ */
+export function modelDraftFromPrefill(prefill: ProviderModelPrefill): ModelDraft {
+  const reasoningEfforts = [...prefill.reasoningEfforts];
+  const fallback = prefill.defaultReasoningEffort;
+  if (fallback && !reasoningEfforts.includes(fallback)) {
+    reasoningEfforts.push(fallback);
+  }
+  return {
+    name: prefill.name,
+    contextWindowTokens: numberField(prefill.contextWindowTokens),
+    maxInputTokens: numberField(prefill.maxInputTokens),
+    maxOutputTokens: numberField(prefill.maxOutputTokens),
+    reasoningEfforts,
+    providerReported: prefill.providerReported,
+  };
+}
+
+/**
+ * The output type the model editor submits. A new model defaults to text; an
+ * existing row keeps whatever it carries, so editing never silently rewrites an
+ * image model to text.
+ */
+export function modelOutputType(
+  existing: "text" | "image" | null | undefined,
+): "text" | "image" {
+  return existing === "image" ? "image" : "text";
+}
+
+/**
+ * One line warning when the user's reasoning set diverges from the adapter's
+ * declared set, or `null` when they agree or the adapter declares nothing.
+ */
+export function effortWarning(
+  selected: string[],
+  adapterEfforts: string[],
+): string | null {
+  if (adapterEfforts.length === 0) return null;
+  const { unsupported, missing } = effortDiff(selected, adapterEfforts);
+  if (unsupported.length === 0 && missing.length === 0) return null;
+  const parts: string[] = [];
+  if (unsupported.length > 0) {
+    parts.push(`the adapter does not accept ${unsupported.join(", ")}`);
+  }
+  if (missing.length > 0) {
+    parts.push(`the adapter also declares ${missing.join(", ")}`);
+  }
+  return `Custom reasoning set: ${parts.join("; ")}.`;
+}
+
+/** The image capability style a kind carries, from `GET /api/providers/kinds`. */
+export type ImageStyle =
+  | "openrouter-images"
+  | "gemini-native"
+  | "grok-native"
+  | "none";
+
+/** One option of the output-type selector. */
+export type ImageOutputTypeOption = {
+  value: "text" | "image";
+  label: string;
+};
+
+/**
+ * The output-type choices for a connection's kind. `text` is always offered;
+ * `image` is offered only when the kind has an image endpoint, so the selector
+ * can never submit an image row the server would refuse.
+ */
+export function imageOutputTypeOptions(
+  imageStyle: ImageStyle,
+): ImageOutputTypeOption[] {
+  const options: ImageOutputTypeOption[] = [
+    { value: "text", label: "Text" },
+  ];
+  if (imageStyle !== "none") {
+    options.push({ value: "image", label: "Image" });
+  }
+  return options;
+}
+
+/**
+ * The reasoning set to submit for an output type. The server forces `[]` for an
+ * image model, so the UI drops the value too rather than showing a selection
+ * the server will discard.
+ */
+export function reasoningEffortsForOutputType(
+  outputType: "text" | "image",
+  efforts: string[],
+): string[] {
+  return outputType === "image" ? [] : efforts;
+}
+
+/**
+ * The image controls a kind can honour, as published by the server
+ * (`GET /api/providers/kinds` → `imageLimits`). This is the same shape the
+ * editor reads off `ProviderKindInfo.imageLimits`; the platform keeps no copy
+ * of the tool's cap, size table, or ratio rule — it consumes the server's.
+ */
+export type ImageCapabilityLimits = {
+  /** The highest `n.max` the server will accept for this kind. */
+  nMax: number;
+  /** The one sizing key the kind accepts; the other is never emitted. */
+  sizing: "sizes" | "resolutions";
+  supportsQuality: boolean;
+  supportsBackground: boolean;
+  /**
+   * Non-null only for the gcd-derived kinds: exactly the ratios the adapter
+   * can reach, computed server-side from the tool's own table and rule. Null
+   * means the kind has no gcd constraint.
+   */
+  representableAspectRatios: string[] | null;
+};
+
+/** Editable image-capability state; list fields live as comma-separated text. */
+export type ImageCapabilityDraft = {
+  nMax: string;
+  aspectRatios: string;
+  sizes: string;
+  resolutions: string;
+  quality: string;
+  background: string;
+};
+
+function listText(values: readonly string[] | undefined): string {
+  return values && values.length > 0 ? values.join(", ") : "";
+}
+
+function parseList(value: string): string[] {
+  return value
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+}
+
+/** Seed the capability editor from an existing row's declaration. */
+export function imageCapabilityDraft(
+  capabilities: {
+    n?: { min: number; max: number };
+    aspectRatios?: string[];
+    sizes?: string[];
+    resolutions?: string[];
+    quality?: string[];
+    background?: string[];
+  } | null,
+): ImageCapabilityDraft {
+  if (!capabilities) {
+    return {
+      nMax: "",
+      aspectRatios: "",
+      sizes: "",
+      resolutions: "",
+      quality: "",
+      background: "",
+    };
+  }
+  return {
+    nMax: capabilities.n ? String(capabilities.n.max) : "",
+    aspectRatios: listText(capabilities.aspectRatios),
+    sizes: listText(capabilities.sizes),
+    resolutions: listText(capabilities.resolutions),
+    quality: listText(capabilities.quality),
+    background: listText(capabilities.background),
+  };
+}
+
+/** A built declaration, or a field-level error the editor shows instead of saving. */
+export type ImageCapabilityBuild =
+  | { ok: true; value: ImageModelCapabilities }
+  | { ok: false; error: string };
+
+/**
+ * Build the capability set to submit for a draft, applying the kind's published
+ * limits so the editor cannot express a value the server's allow-list would
+ * reject. Only the kind's own sizing key is emitted; `quality`/`background` are
+ * dropped for kinds that do not honour them; `n.max` is bounded to the kind's
+ * cap; and a gcd-derived kind's aspect ratios are checked against the list the
+ * server published from the tool's own rule.
+ */
+export function imageCapabilityPayload(
+  draft: ImageCapabilityDraft,
+  limits: ImageCapabilityLimits,
+): ImageCapabilityBuild {
+  const aspectRatios = parseList(draft.aspectRatios);
+  if (aspectRatios.length === 0) {
+    return { ok: false, error: "Declare at least one aspect ratio." };
+  }
+  if (limits.representableAspectRatios !== null) {
+    const allowed = new Set(limits.representableAspectRatios);
+    const unreachable = aspectRatios.filter((ratio) => !allowed.has(ratio));
+    if (unreachable.length > 0) {
+      return {
+        ok: false,
+        error: `This provider kind cannot generate ${unreachable.join(", ")}.`,
+      };
+    }
+  }
+
+  const sizingValues = parseList(
+    limits.sizing === "sizes" ? draft.sizes : draft.resolutions,
+  );
+  if (sizingValues.length === 0) {
+    return {
+      ok: false,
+      error:
+        limits.sizing === "sizes"
+          ? "Declare at least one size."
+          : "Declare at least one resolution.",
+    };
+  }
+
+  const parsedN = Number(draft.nMax.trim());
+  const nMax =
+    Number.isSafeInteger(parsedN) && parsedN >= 1 ? parsedN : limits.nMax;
+  const value: Record<string, unknown> = {
+    n: { min: 1, max: Math.min(nMax, limits.nMax) },
+    aspectRatios,
+    [limits.sizing]: sizingValues,
+  };
+  const quality = limits.supportsQuality ? parseList(draft.quality) : [];
+  if (quality.length > 0) value.quality = quality;
+  const background = limits.supportsBackground
+    ? parseList(draft.background)
+    : [];
+  if (background.length > 0) value.background = background;
+  return { ok: true, value };
+}
+
+/**
+ * The body the model editor submits. Kept pure so the full-set resend is
+ * pinned by a test: a partial PATCH that omits `imageCapabilities` writes
+ * `null`, so an image row always carries the whole capability set (when it has
+ * one), even on a save where the user changed nothing. A text row never carries
+ * the field at all. `vendorLabel` gets the same full-resend treatment — the
+ * update path replaces it on every PATCH, so an omitted field silently clears
+ * the stored vendor — but it is a property of the model, not its output type,
+ * so it is sent for text and image rows alike.
+ */
+export function modelSavePayload(input: {
+  upstreamId: string;
+  name: string;
+  iconSvg: string;
+  outputType: "text" | "image";
+  contextWindowTokens: number | null;
+  maxInputTokens: number | null;
+  maxOutputTokens: number | null;
+  reasoningEfforts: string[];
+  imageCapabilities: ImageModelCapabilities | null;
+  vendorLabel?: string | null;
+}): ProviderModelInput {
+  const trimmedName = input.name.trim();
+  const trimmedIcon = input.iconSvg.trim();
+  const trimmedVendor = (input.vendorLabel ?? "").trim();
+  const isImage = input.outputType === "image";
+  return {
+    upstreamId: input.upstreamId,
+    ...(trimmedName.length > 0 ? { name: trimmedName } : {}),
+    ...(trimmedIcon.length > 0 ? { iconSvg: trimmedIcon } : {}),
+    outputType: input.outputType,
+    contextWindowTokens: input.contextWindowTokens,
+    maxInputTokens: input.maxInputTokens,
+    maxOutputTokens: input.maxOutputTokens,
+    // The server forces [] for an image model; the UI must not submit a set it
+    // will discard.
+    reasoningEfforts: reasoningEffortsForOutputType(
+      input.outputType,
+      input.reasoningEfforts,
+    ),
+    ...(trimmedVendor.length > 0 ? { vendorLabel: trimmedVendor } : {}),
+    ...(isImage && input.imageCapabilities
+      ? { imageCapabilities: input.imageCapabilities }
+      : {}),
+  };
+}

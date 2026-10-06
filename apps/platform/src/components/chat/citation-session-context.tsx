@@ -6,6 +6,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { ReportPdfPreview } from "#/components/artifacts/report-pdf-preview";
 import { DocumentPreviewModal } from "#/components/documents/document-preview-modal";
 import type { SessionDocument } from "#/lib/api";
 import type { MessageCitation } from "#/lib/chat/citations";
@@ -32,6 +33,8 @@ export type DocumentPreviewTarget = {
   sizeBytes?: number;
   pageCount?: number;
   firstPageSummary?: string;
+  /** `report` documents render through the PDF report preview. */
+  kind?: string;
   nonce: number;
 };
 
@@ -52,9 +55,12 @@ const CitationSessionContext =
 
 export function CitationSessionProvider({
   sessionDocuments,
+  sessionId,
   children,
 }: {
   sessionDocuments: SessionDocument[];
+  /** Session owning these documents; required for report PDF previews. */
+  sessionId?: string;
   children: ReactNode;
 }) {
   const [focusTarget, setFocusTarget] = useState<DocumentFocusTarget | null>(
@@ -79,6 +85,7 @@ export function CitationSessionProvider({
       if (!resolvedId) return;
 
       const sessionDoc = sessionDocuments.find((d) => d.id === resolvedId);
+      const reportKind = input.kind || sessionDoc?.kind || undefined;
 
       setPreviewTarget({
         documentId: resolvedId,
@@ -116,6 +123,7 @@ export function CitationSessionProvider({
                 input.firstPageSummary || sessionDoc?.firstPageSummary,
             }
           : {}),
+        ...(reportKind ? { kind: reportKind } : {}),
         nonce: Date.now(),
       });
     },
@@ -201,13 +209,23 @@ export function CitationSessionProvider({
   return (
     <CitationSessionContext.Provider value={value}>
       {children}
-      <DocumentPreviewModal
-        open={previewTarget != null}
-        document={previewDocument}
-        initialPageIndex={previewTarget?.pageIndex ?? 0}
-        instanceKey={previewTarget?.nonce}
-        onClose={closeDocumentPreview}
-      />
+      {previewTarget?.kind === "report" && sessionId ? (
+        <ReportPdfPreview
+          open={previewTarget != null}
+          reportId={previewTarget.documentId}
+          sessionId={sessionId}
+          filename={previewTarget.filename}
+          onClose={closeDocumentPreview}
+        />
+      ) : (
+        <DocumentPreviewModal
+          open={previewTarget != null}
+          document={previewDocument}
+          initialPageIndex={previewTarget?.pageIndex ?? 0}
+          instanceKey={previewTarget?.nonce}
+          onClose={closeDocumentPreview}
+        />
+      )}
     </CitationSessionContext.Provider>
   );
 }

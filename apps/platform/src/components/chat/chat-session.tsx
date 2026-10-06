@@ -34,6 +34,7 @@ import {
 } from "#/components/chat/session-documents-panel";
 import { ChatComposer } from "#/components/composer/chat-composer";
 import { DeepResearchActivityPanel } from "#/components/composer/deep-research-activity-panel";
+import { SiteLiveCard } from "./site-live-card";
 import type { AttachmentReject } from "#/lib/documents/upload-file";
 import {
   API_BASE,
@@ -155,6 +156,8 @@ import {
   readImageGenerationEnabled,
   readSelectedModel,
   readSelectedReasoningEffort,
+  readStoredSelectedModel,
+  resolveInitialModel,
 } from "#/lib/chat-preferences";
 import { useUserSkills } from "#/hooks/use-user-skills";
 import { useUserMcpServers } from "#/hooks/use-user-mcp-servers";
@@ -411,6 +414,13 @@ export function ChatSession({
   const composerInputRef = useRef<HTMLTextAreaElement>(null);
   const composerDockRef = useRef<HTMLDivElement>(null);
   const chatViewportRef = useRef<HTMLDivElement>(null);
+  /**
+   * True only after a real user gesture scrolls the transcript (wheel, touch,
+   * keys, or the custom scrollbar). Auto-follow pauses then so the reader is
+   * never yanked down mid-stream; it resumes on send, Latest, or scrolling
+   * back to the bottom.
+   */
+  const chatDetachedRef = useRef(false);
   const wasActiveRunRef = useRef(false);
   /**
    * Deferred share composer (pre-fork): the thread stays frozen like an
@@ -582,6 +592,11 @@ export function ChatSession({
   const [artifactFocus, setArtifactFocus] = useState<ChatDataMap["artifactFocus"] | null>(
     null,
   );
+  /** Live browse session announced by the worker; frames come from the API. */
+  const [siteLiveView, setSiteLiveView] = useState<ChatDataMap["siteLiveView"] | null>(
+    null,
+  );
+  const [siteLiveViewHidden, setSiteLiveViewHidden] = useState(false);
   const [contextUsage, setContextUsage] = useState<ContextUsageInfo | null>(
     null,
   );
@@ -843,6 +858,10 @@ export function ChatSession({
           case "artifactFocus":
             setArtifactFocus(event.data);
             return;
+          case "siteLiveView":
+            setSiteLiveView(event.data);
+            if (event.data.state === "started") setSiteLiveViewHidden(false);
+            return;
           case "queuedMessageApplied": {
             const item = queuedItemsRef.current.find(
               (entry) => entry.id === event.data.clientMessageId,
@@ -904,6 +923,8 @@ export function ChatSession({
         case "message_end":
           setDeepResearch(resetDeepResearchActivity());
           setToolWait({});
+          setSiteLiveView(null);
+          setSiteLiveViewHidden(false);
           void refreshContextUsage();
           return;
         case "error":
@@ -913,6 +934,8 @@ export function ChatSession({
           // "Waiting" from the last progress event it never finished.
           setToolWait({});
           setDeepResearch(resetDeepResearchActivity());
+          setSiteLiveView(null);
+          setSiteLiveViewHidden(false);
           chatRef.current?.setMessages((messages) =>
             settleStoppedRunTools(
               [...messages],
@@ -990,15 +1013,16 @@ export function ChatSession({
 
   chatRef.current = chat;
 
-  // Approvals the user has not answered yet. They must survive finalization:
-  // a suspended approval also ends its stream, so its tool has no result and
-  // would otherwise be shown as "stopped" beside the prompt asking for it.
+  // Decisions the user has not answered yet (approvals and clarifications).
+  // They must survive finalization: a suspended interaction also ends its
+  // stream, so its tool has no result and would otherwise be shown as
+  // "stopped" beside the prompt asking for it.
   pendingApprovalToolNamesRef.current = [
     ...new Set([
       ...peekPendingApprovalToolNames(window.sessionStorage, sessionId),
       ...(chat.interactions.pending ?? []).flatMap((interaction) => {
         const request = interaction.request as { type?: unknown; toolName?: unknown };
-        return request.type === "tool-approval" &&
+        return (request.type === "tool-approval" || request.type === "tool-question") &&
           typeof request.toolName === "string" &&
           request.toolName.length > 0
           ? [request.toolName]
@@ -1416,17 +1440,24 @@ export function ChatSession({
   }, [sessionId]);
 
   // Reconcile the selected model once the catalog arrives:
-  // stored preference > first active model > default. Always apply the
-  // storage-aware read — at mount the catalog is still empty (loading), so
-  // without this the stored preference would never be restored.
+  // stored preference > first active model > default.
+  // Always apply the storage-aware read — at mount the catalog is still empty
+  // (loading), so without this the stored preference would never be restored.
+  // A fallback is never persisted: a stored value must mean "the user chose
+  // this", never "the app wrote this". Read per render (not memoized) so a
+  // model the user just picked — persisted synchronously by
+  // handleModelChange — is reflected immediately; the effect then only acts
+  // when the recomputed value actually differs, so it cannot loop.
+  const resolvedInitialModel = resolveInitialModel({
+    storedModelId: readStoredSelectedModel(),
+    models,
+  });
   useEffect(() => {
     if (modelsStatus !== "success") return;
-    const next = readSelectedModel(models);
-    if (next !== selectedModelRef.current) {
-      setSelectedModel(next);
-      persistSelectedModel(next);
+    if (resolvedInitialModel !== selectedModelRef.current) {
+      setSelectedModel(resolvedInitialModel);
     }
-  }, [models, modelsStatus]);
+  }, [modelsStatus, resolvedInitialModel]);
 
   const activeModel = useMemo(
     () => modelById(models, selectedModel),
@@ -1441,7 +1472,7 @@ export function ChatSession({
     // On reload React applies the stored model asynchronously; do not map the
     // stored effort through the temporary default model in the intervening
     // render or a pending interaction will resume with mismatched metadata.
-    if (activeModel.modelId !== readSelectedModel(models)) return;
+    if (activeModel.modelId !== resolvedInitialModel) return;
     const base = reasoningInitializedRef.current
       ? selectedReasoningEffortRef.current
       : readSelectedReasoningEffort(activeModel.reasoningEfforts);
@@ -1461,7 +1492,7 @@ export function ChatSession({
         ? current
         : { modelId: activeModel.modelId, reasoningEffort: next },
     );
-  }, [activeModel, models, reasoningEfforts]);
+  }, [activeModel, resolvedInitialModel, reasoningEfforts]);
 
   const resumePolicyReady =
     modelsStatus === "success" &&
@@ -2499,6 +2530,86 @@ export function ChatSession({
     [chat.messages],
   );
 
+  /**
+   * Sending your own message re-arms auto-follow. The viewport only sticks
+   * while it reads as "at bottom", so an instant scroll here flips that state
+   * back before the answer streams. Scrolling up during a run still disengages
+   * (no forced jump) — the floating "Latest" button brings you back.
+   */
+  const userMessageCount = useMemo(
+    () => chat.messages.filter((message) => message.role === "user").length,
+    [chat.messages],
+  );
+  const seenUserMessageCountRef = useRef<number | null>(null);
+  useEffect(() => {
+    const previous = seenUserMessageCountRef.current;
+    seenUserMessageCountRef.current = userMessageCount;
+    if (previous === null || userMessageCount <= previous) return;
+    chatDetachedRef.current = false;
+    const viewport = chatViewportRef.current;
+    if (!viewport) return;
+    const frame = requestAnimationFrame(() => {
+      viewport.scrollTo({ top: viewport.scrollHeight, behavior: "auto" });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [userMessageCount]);
+
+  /**
+   * Follow the streaming answer every frame. Layout shifts (activity cards
+   * collapsing, chart images loading, rails opening) move the transcript
+   * without any user intent and make the library's own "at bottom" heuristic
+   * give up, which is what left the answer streaming below the fold. Pinning
+   * here keeps the tail visible until the reader detaches with a real scroll
+   * gesture.
+   */
+  useEffect(() => {
+    if (chat.status !== "submitted" && chat.status !== "streaming") return;
+    let frame = 0;
+    const tick = () => {
+      const viewport = chatViewportRef.current;
+      if (viewport && !chatDetachedRef.current) {
+        const distance = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+        if (distance > 1) {
+          viewport.scrollTo({ top: viewport.scrollHeight, behavior: "auto" });
+        }
+      }
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [chat.status]);
+
+  /**
+   * Detach only on real scroll intent (wheel, touch, scrolling keys, or the
+   * custom scrollbar drag); re-attach once the reader is back near the bottom.
+   */
+  useEffect(() => {
+    const viewport = chatViewportRef.current;
+    if (!viewport) return;
+    const detach = () => {
+      chatDetachedRef.current = true;
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (["PageUp", "PageDown", "ArrowUp", "ArrowDown", "Home", "End", " "].includes(event.key)) {
+        detach();
+      }
+    };
+    const handleScroll = () => {
+      const distance = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+      if (distance < 80) chatDetachedRef.current = false;
+    };
+    viewport.addEventListener("wheel", detach, { passive: true });
+    viewport.addEventListener("touchstart", detach, { passive: true });
+    viewport.addEventListener("keydown", handleKeyDown);
+    viewport.addEventListener("scroll", handleScroll, { passive: true });
+    return () => {
+      viewport.removeEventListener("wheel", detach);
+      viewport.removeEventListener("touchstart", detach);
+      viewport.removeEventListener("keydown", handleKeyDown);
+      viewport.removeEventListener("scroll", handleScroll);
+    };
+  }, []);
+
   const generatedImages = useMemo(
     () => mergeGeneratedImages(liveGeneratedImages, sessionImages),
     [liveGeneratedImages, sessionImages],
@@ -2736,7 +2847,7 @@ export function ChatSession({
 
   return (
     <ChatProvider<ChatClientMetadata, ChatDataMap> controller={chat}>
-      <CitationSessionProvider sessionDocuments={sessionDocuments}>
+      <CitationSessionProvider sessionDocuments={sessionDocuments} sessionId={sessionId}>
       <ToolWaitProgressProvider value={toolWait}>
       <ChartRegistryProvider messages={chat.messages}>
       {/*
@@ -2841,6 +2952,9 @@ export function ChatSession({
                     Same-thread vs cross-message spacing:
                     - activity chain (tool↔reasoning, any message split): tight mt-1
                     - only jump to a message that *starts with answer text*: mt-4
+                    - a message that *ends* on activity joins the next message's
+                      answer text the same way a tool part inside one message
+                      does, so it gets the same mt-4
                     - around user turns: mt-4
                   */}
                   <ThreadPrimitive.Messages
@@ -2848,8 +2962,9 @@ export function ChatSession({
                       "flex w-full min-w-0 flex-col",
                       "[&>*]:min-w-0",
                       "[&>*+*]:mt-1",
-                      "[&>[data-activity-only]+[data-role=assistant]:not([data-starts-activity])]:mt-4",
-                      "[&>[data-role=tool]+[data-role=assistant]:not([data-starts-activity])]:mt-4",
+                      "[&>[data-activity-only]+[data-role=assistant]:not([data-starts-activity])]:mt-2",
+                      "[&>[data-role=tool]+[data-role=assistant]:not([data-starts-activity])]:mt-2",
+                      "[&>[data-ends-activity]+[data-role=assistant]:not([data-starts-activity])]:mt-2",
                       "[&>[data-role=user]+*]:mt-4",
                       "[&>*+[data-role=user]]:mt-4",
                     ].join(" ")}
@@ -2899,6 +3014,9 @@ export function ChatSession({
                 scrollRef={chatViewportRef}
                 top="calc(3.5rem + 24px)"
                 bottom="calc(var(--composer-dock-h, 7.5rem) + var(--chat-composer-gap, 40px))"
+                onUserScroll={() => {
+                  chatDetachedRef.current = true;
+                }}
               />
 
               {/* Below the composer dock so Add as context cannot cover the field. */}
@@ -2914,7 +3032,24 @@ export function ChatSession({
               >
                 <div className="pointer-events-auto relative mx-auto w-full max-w-[760px] px-3">
                   <ThreadPrimitive.ViewportFooter className="pointer-events-none absolute inset-x-3 bottom-full mb-2 flex justify-center">
-                    <ThreadPrimitive.ScrollToBottom className="pointer-events-auto glass glass-interactive inline-flex min-h-10 cursor-pointer items-center rounded-full px-4 text-sm font-medium text-text-muted transition hover:text-text active:scale-[0.98] data-[state=bottom]:invisible">
+                    <ThreadPrimitive.ScrollToBottom
+                      onClick={(event) => {
+                        // Land exactly at the bottom and re-arm auto-follow.
+                        // The library's smooth scroll can end short while the
+                        // answer is still streaming, leaving the viewport
+                        // "away" and the follow disengaged.
+                        const viewport = chatViewportRef.current;
+                        if (!viewport) return;
+                        event.preventDefault();
+                        chatDetachedRef.current = false;
+                        const pin = () => {
+                          viewport.scrollTo({ top: viewport.scrollHeight, behavior: "auto" });
+                        };
+                        pin();
+                        requestAnimationFrame(pin);
+                      }}
+                      className="pointer-events-auto glass glass-interactive inline-flex min-h-10 cursor-pointer items-center rounded-full px-4 text-sm font-medium text-text-muted transition hover:text-text active:scale-[0.98] data-[state=bottom]:invisible"
+                    >
                       Latest
                     </ThreadPrimitive.ScrollToBottom>
                   </ThreadPrimitive.ViewportFooter>
@@ -2976,10 +3111,10 @@ export function ChatSession({
                   {artifactFocus ? (
                     <div
                       role="status"
-                      className="mb-2 flex items-center gap-2 rounded-xl border border-accent/25 bg-accent/[0.07] px-3 py-2 animate-fade-in"
+                      className="glass glass-chip mb-2 flex items-center gap-2 rounded-xl px-3 py-2 animate-fade-in"
                     >
                       <p className="min-w-0 flex-1 truncate text-[11px] text-text">
-                        Agent menunjuk {artifactFocus.artifactType}
+                        Agent focused {artifactFocus.artifactType}
                         {artifactFocus.label ? `: ${artifactFocus.label}` : ""}
                       </p>
                       <button
@@ -2990,6 +3125,16 @@ export function ChatSession({
                       >
                         Dismiss
                       </button>
+                    </div>
+                  ) : null}
+
+                  {siteLiveView?.state === "started" && !siteLiveViewHidden ? (
+                    <div className="mb-2">
+                      <SiteLiveCard
+                        view={siteLiveView}
+                        sessionId={sessionId}
+                        onHide={() => setSiteLiveViewHidden(true)}
+                      />
                     </div>
                   ) : null}
 

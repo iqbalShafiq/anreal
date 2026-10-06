@@ -1,14 +1,56 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { normalizeToolResultOutput } from "@anvia/core/tool";
 import {
   createRemoteImageAttacher,
   createViewImageTool,
   loadRemoteImage,
+  resolveVisionHelperModel,
   type ViewImageToolOptions,
 } from "./vision-helper.js";
 import type { CompletionModel } from "@anvia/core/completion";
 import type { ToolResultContentPart } from "@anvia/core";
 import type { ImageStore } from "../images/service.js";
+import { prisma } from "../../utils/prisma.js";
+
+const f = vi.hoisted(() => ({
+  createCompletionModel: vi.fn((modelId?: string) => ({ modelId })),
+  findActiveModel: vi.fn(
+    async (_modelId: string, _userId?: string): Promise<unknown> => null,
+  ),
+  listModels: vi.fn(
+    async (_input?: unknown): Promise<unknown> => ({
+      models: [],
+      reasoningEfforts: [],
+    }),
+  ),
+  listRoleAssignments: vi.fn(
+    async (_db: unknown, _userId: string): Promise<unknown[]> => [],
+  ),
+  resolveRoleTarget: vi.fn(
+    async (_db: unknown, _userId: string, _role: string): Promise<unknown> => null,
+  ),
+  buildRoleCompletionModel: vi.fn(
+    async (_db: unknown, _userId: string, _role: string): Promise<unknown> => null,
+  ),
+}));
+
+vi.mock("@anreal/agent", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@anreal/agent")>()),
+  createCompletionModel: f.createCompletionModel,
+}));
+
+vi.mock("../models/service.js", () => ({
+  findActiveModel: f.findActiveModel,
+  listModels: f.listModels,
+}));
+
+vi.mock("../models/roles.js", () => ({
+  listRoleAssignments: f.listRoleAssignments,
+  resolveRoleTarget: f.resolveRoleTarget,
+  buildRoleCompletionModel: f.buildRoleCompletionModel,
+}));
+
+vi.mock("../../utils/prisma.js", () => ({ prisma: { __tag: "prisma" } }));
 
 vi.mock("node:dns/promises", () => ({
   lookup: vi.fn(async () => [{ address: "93.184.216.34", family: 4 }]),
@@ -267,5 +309,147 @@ describe("loadRemoteImage format bounds", () => {
     });
     expect("mediaType" in result).toBe(true);
     expect((result as { mediaType: string }).mediaType).toBe("image/png");
+  });
+});
+
+describe("resolveVisionHelperModel", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.unstubAllEnvs();
+    f.findActiveModel.mockResolvedValue(null);
+    f.listModels.mockResolvedValue({ models: [], reasoningEfforts: [] });
+    f.listRoleAssignments.mockResolvedValue([]);
+    f.resolveRoleTarget.mockResolvedValue(null);
+    f.buildRoleCompletionModel.mockResolvedValue(null);
+  });
+
+  it("uses the user's assignment and scopes the lookup by userId", async () => {
+    const assigned = { modelId: "openai/gpt-6-luna", capabilities: { imageInput: true } };
+    f.listRoleAssignments.mockResolvedValue([
+      { role: "visionHelper", modelId: "openai/gpt-6-luna", defaultModelId: null },
+    ]);
+    f.resolveRoleTarget.mockResolvedValue({
+      modelId: "openai/gpt-6-luna",
+      connectionId: null,
+    });
+    f.buildRoleCompletionModel.mockResolvedValue(assigned);
+
+    await expect(resolveVisionHelperModel("u_1")).resolves.toBe(assigned);
+    expect(f.listRoleAssignments).toHaveBeenCalledWith(prisma, "u_1");
+    expect(f.resolveRoleTarget).toHaveBeenCalledWith(
+      prisma,
+      "u_1",
+      "visionHelper",
+    );
+    expect(f.buildRoleCompletionModel).toHaveBeenCalledWith(
+      prisma,
+      "u_1",
+      "visionHelper",
+    );
+  });
+
+  it("ignores a dangling assignment even when the built handle claims image input", async () => {
+    // The real adapters hardcode `imageInput: true` (only Mistral reports
+    // false), so the handle cannot prove the model accepts images. Here the
+    // resolver folds in a text-only env default because the assignment is
+    // dangling; the built handle still claims imageInput, but it must never
+    // reach view_image — the function must fall through to the dynamic pick.
+    vi.stubEnv("VISION_HELPER_MODEL", "text-only/env-model");
+    f.listRoleAssignments.mockResolvedValue([
+      { role: "visionHelper", modelId: "text-only/assigned", defaultModelId: null },
+    ]);
+    f.resolveRoleTarget.mockResolvedValue({
+      modelId: "text-only/env-model",
+      connectionId: null,
+    });
+    f.buildRoleCompletionModel.mockResolvedValue({
+      modelId: "text-only/assigned",
+      capabilities: { imageInput: true },
+    });
+    f.findActiveModel.mockResolvedValue({ inputModalities: ["text"] });
+    f.listModels.mockResolvedValue({
+      models: [
+        { modelId: "vision-cheap", inputModalities: ["text", "image"], prices: { input: 1 } },
+      ],
+      reasoningEfforts: [],
+    });
+
+    await expect(resolveVisionHelperModel("u_1")).resolves.toEqual({
+      modelId: "vision-cheap",
+    });
+    expect(f.createCompletionModel).toHaveBeenCalledWith("vision-cheap");
+    expect(f.createCompletionModel).not.toHaveBeenCalledWith("text-only/assigned");
+    expect(f.createCompletionModel).not.toHaveBeenCalledWith("text-only/env-model");
+  });
+
+  it("still falls through to the dynamic pick when the assigned model is gone", async () => {
+    f.listRoleAssignments.mockResolvedValue([
+      { role: "visionHelper", modelId: "gone/model", defaultModelId: null },
+    ]);
+    f.buildRoleCompletionModel.mockResolvedValue(null);
+    f.listModels.mockResolvedValue({
+      models: [
+        { modelId: "vision-cheap", inputModalities: ["text", "image"], prices: { input: 1 } },
+      ],
+      reasoningEfforts: [],
+    });
+
+    await expect(resolveVisionHelperModel("u_1")).resolves.toEqual({
+      modelId: "vision-cheap",
+    });
+  });
+
+  it("keeps the env override when it accepts images", async () => {
+    vi.stubEnv("VISION_HELPER_MODEL", "openai/gpt-5-vision");
+    f.findActiveModel.mockResolvedValue({ inputModalities: ["text", "image"] });
+
+    await expect(resolveVisionHelperModel("u_1")).resolves.toEqual({
+      modelId: "openai/gpt-5-vision",
+    });
+    // The env model is looked up inside the caller's scope: a BYOK id can
+    // only resolve with the user id.
+    expect(f.findActiveModel).toHaveBeenCalledWith("openai/gpt-5-vision", "u_1");
+  });
+
+  it("ignores a text-only VISION_HELPER_MODEL and picks the cheapest vision model", async () => {
+    vi.stubEnv("VISION_HELPER_MODEL", "deepseek/deepseek-v4-flash-0731");
+    f.findActiveModel.mockResolvedValue({ inputModalities: ["text"] });
+    f.listModels.mockResolvedValue({
+      models: [
+        { modelId: "text-only", inputModalities: ["text"], prices: { input: 0 } },
+        { modelId: "vision-pricey", inputModalities: ["text", "image"], prices: { input: 5 } },
+        { modelId: "vision-cheap", inputModalities: ["text", "image"], prices: { input: 1 } },
+      ],
+      reasoningEfforts: [],
+    });
+
+    await expect(resolveVisionHelperModel("u_1")).resolves.toEqual({
+      modelId: "vision-cheap",
+    });
+    expect(f.findActiveModel).toHaveBeenCalledWith(
+      "deepseek/deepseek-v4-flash-0731",
+      "u_1",
+    );
+    expect(f.createCompletionModel).toHaveBeenCalledWith("vision-cheap");
+    expect(f.createCompletionModel).not.toHaveBeenCalledWith(
+      "deepseek/deepseek-v4-flash-0731",
+    );
+  });
+
+  it("picks the cheapest vision model when there is no assignment or env override", async () => {
+    f.listModels.mockResolvedValue({
+      models: [
+        { modelId: "vision-only", inputModalities: ["text", "image"], prices: { input: 3 } },
+      ],
+      reasoningEfforts: [],
+    });
+
+    await expect(resolveVisionHelperModel("u_1")).resolves.toEqual({
+      modelId: "vision-only",
+    });
+  });
+
+  it("returns null when no vision model is available", async () => {
+    await expect(resolveVisionHelperModel("u_1")).resolves.toBeNull();
   });
 });

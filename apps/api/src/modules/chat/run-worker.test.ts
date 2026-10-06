@@ -11,7 +11,8 @@ import {
 } from "@anvia/core/agent/interactions";
 import type { ChatResumableEvent } from "./client-events.js";
 import type { StartRunJob, ResumeRunJob } from "./run-queue.js";
-import { CHAT_AGENT_ID } from "./run-recipe.js";
+import { CHAT_AGENT_ID, CHAT_AGENT_RECIPE_VERSION } from "./run-recipe.js";
+import { ProviderCredentialUnreadableError } from "../provider-connections/credentials.js";
 import {
   ActiveRunRegistry,
   createChatRunProcessor,
@@ -23,10 +24,14 @@ const SESSION_ID = "session-1";
 const STREAM_ID = "stream-1";
 
 const recipe = {
-  version: 6 as const,
+  version: CHAT_AGENT_RECIPE_VERSION,
   agentId: CHAT_AGENT_ID,
   identity: { sessionId: SESSION_ID, userId: USER_ID, projectId: null },
-  model: { id: "deepseek/deepseek-v4-flash-0731", reasoningEffort: "max" as const },
+  model: {
+    id: "deepseek/deepseek-v4-flash-0731",
+    connectionId: null,
+    reasoningEffort: "max" as const,
+  },
   memoryPolicy: {
     version: 1 as const,
     savePolicy: "turn" as const,
@@ -326,6 +331,62 @@ describe("Anvia v1 chat worker", () => {
     });
     await createChatRunProcessor(h.dependencies)(startJob());
     expect(cleanup).toHaveBeenCalledTimes(1);
+  });
+
+  it("finalizes live browse sessions before closing the stream", async () => {
+    const order: string[] = [];
+    const stream = fakeStream([responseEvent()]);
+    const h = createDependencies(stream, {
+      reconstruct: (async () => ({
+        agent: {
+          stream() {
+            return stream;
+          },
+        },
+        projectId: null,
+        sessionId: SESSION_ID,
+        userId: USER_ID,
+        waitRegistry: { abortAll() {} },
+        finalizeLiveSessions: async () => {
+          order.push("finalize");
+        },
+      })) as never,
+    });
+    const originalClose = h.store.close;
+    h.store.close = (async (input: never) => {
+      order.push("close");
+      return originalClose(input);
+    }) as never;
+    await createChatRunProcessor(h.dependencies)(startJob());
+    expect(order).toEqual(["finalize", "close"]);
+  });
+
+  it("records usage through the injected tap with run identity", async () => {    const stream = fakeStream([responseEvent()]);
+    const seen: Array<{ ctx: unknown; items: number }> = [];
+    const tapUsage = (
+      source: AsyncIterable<AgentStreamEvent>,
+      ctx: unknown,
+    ): AsyncIterable<AgentStreamEvent> => {
+      const record = { ctx, items: 0 };
+      seen.push(record);
+      return (async function* () {
+        for await (const item of source) {
+          record.items += 1;
+          yield item;
+        }
+      })();
+    };
+    const h = createDependencies(stream, { tapUsage: tapUsage as never });
+    await createChatRunProcessor(h.dependencies)(startJob());
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.ctx).toMatchObject({
+      userId: USER_ID,
+      sessionId: SESSION_ID,
+      provider: "deepseek",
+      model: "deepseek/deepseek-v4-flash-0731",
+      agentId: CHAT_AGENT_ID,
+    });
+    expect(seen[0]!.items).toBeGreaterThan(0);
   });
 
   it("resumes with only the official continuation and response shape", async () => {
@@ -735,5 +796,25 @@ describe("Anvia v1 chat worker", () => {
     expect(clearStopFlag).toHaveBeenCalledTimes(1);
     expect(JSON.stringify(h.store.events)).not.toContain("secret prompt");
     expect(JSON.stringify(h.store.events)).not.toContain("provider details");
+  });
+
+  it("surfaces an unreadable credential as the actionable message, not the opaque one", async () => {
+    // Fails before the agent's first turn, exactly like the reported defect:
+    // reconstruction cannot decrypt the stored provider credential.
+    const h = createDependencies(fakeStream([responseEvent()]), {
+      reconstruct: async () => {
+        throw new ProviderCredentialUnreadableError();
+      },
+    });
+
+    await expect(
+      createChatRunProcessor(h.dependencies)(startJob()),
+    ).rejects.toThrow("Re-enter it in Settings → Providers");
+
+    // The terminal appended to the stream carries the same actionable message
+    // (never the opaque fallback).
+    const serialized = JSON.stringify(h.store.events);
+    expect(serialized).toContain("Re-enter it in Settings → Providers");
+    expect(serialized).not.toContain("Something went wrong while answering");
   });
 });

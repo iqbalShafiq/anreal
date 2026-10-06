@@ -9,6 +9,7 @@ import { documentsRouter } from "./modules/documents/router.js";
 import { imagesRouter } from "./modules/images/router.js";
 import { modelsRouter } from "./modules/models/router.js";
 import { mcpServersRouter } from "./modules/mcp-servers/router.js";
+import { providerConnectionsRouter } from "./modules/provider-connections/router.js";
 import { reportsRouter } from "./modules/reports/router.js";
 import { schedulesRouter } from "./modules/schedules/router.js";
 import { tasksRouter } from "./modules/tasks/router.js";
@@ -36,6 +37,7 @@ export function createApp() {
     .route("/api/documents", documentsRouter)
     .route("/api/images", imagesRouter)
     .route("/api/models", modelsRouter)
+    .route("/api/providers", providerConnectionsRouter)
     .route("/api/mcp-servers", mcpServersRouter)
     .route("/api/projects", projectsRouter)
     .route("/api/profiling", profilingRouter)

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Message } from "@anvia/core/completion";
 import { DEFAULT_COMPLETION_MODEL } from "@anreal/agent";
 import { getStreamStore } from "../../lib/resumable-stream-store.js";
+import { prisma } from "../../utils/prisma.js";
 import { getChatSession, touchChatSession } from "../chat/chat-session.js";
 import { resolveChatAgentRecipe } from "../chat/build-run-input.js";
 import {
@@ -10,6 +11,7 @@ import {
   releaseActiveRun,
   tryAcquireActiveRun,
 } from "../chat/run-queue.js";
+import { resolveRoleTarget } from "../models/roles.js";
 
 export type ScheduledRunResult =
   | { status: "started"; streamId: string }
@@ -32,6 +34,7 @@ export async function startScheduledChatRun(input: {
   const store = getStreamStore();
   let recipe;
   let promptMessage: Message;
+  let scheduledModelId: string;
   try {
     // Deleted session ends the schedule — never auto-create a new one.
     try {
@@ -39,6 +42,11 @@ export async function startScheduledChatRun(input: {
     } catch {
       return { status: "session-missing" };
     }
+    // The scheduledChat role follows the user's assignment; with none, the
+    // resolver returns the same DEFAULT_COMPLETION_MODEL used before.
+    scheduledModelId =
+      (await resolveRoleTarget(prisma, input.userId, "scheduledChat"))?.modelId ??
+      DEFAULT_COMPLETION_MODEL;
     promptMessage = {
       role: "user",
       content: [{ type: "text", text: `[Scheduled task]\n${input.prompt}` }],
@@ -52,7 +60,7 @@ export async function startScheduledChatRun(input: {
     recipe = await resolveChatAgentRecipe({
       sessionId: input.sessionId,
       userId: input.userId,
-      model: DEFAULT_COMPLETION_MODEL,
+      model: scheduledModelId,
       reasoningEffort: null,
       promptMessage,
       webSearchEnabled: false,
@@ -79,7 +87,7 @@ export async function startScheduledChatRun(input: {
       {
         userId: input.userId,
         sessionId: input.sessionId,
-        modelId: DEFAULT_COMPLETION_MODEL,
+        modelId: scheduledModelId,
         reasoningEffort: null,
       },
     );

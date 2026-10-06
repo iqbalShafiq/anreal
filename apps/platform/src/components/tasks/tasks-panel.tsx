@@ -255,9 +255,12 @@ export function TasksPanel({ sessionId }: { sessionId: string }) {
                     {task.description ? (
                       <p className="text-[11px] leading-relaxed text-text-muted">{task.description}</p>
                     ) : null}
-                    <ul className="flex flex-col gap-1">
+                    <ul className="flex flex-col gap-0.5">
                       {task.subtasks.map((sub) => (
-                        <li key={sub.id} className="flex items-center gap-2">
+                        <li
+                          key={sub.id}
+                          className="group flex min-h-8 items-center gap-2.5 rounded-lg px-2 py-1.5 transition duration-150 ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-white/[0.04] focus-within:bg-white/[0.04]"
+                        >
                           <button
                             type="button"
                             role="checkbox"
@@ -269,7 +272,7 @@ export function TasksPanel({ sessionId }: { sessionId: string }) {
                                 toggleSubtasks: [{ id: sub.id, done: !sub.done }],
                               }));
                             }}
-                            className={`inline-flex size-4 shrink-0 cursor-pointer items-center justify-center rounded border transition ${
+                            className={`inline-flex size-4 shrink-0 cursor-pointer items-center justify-center rounded-md border transition duration-150 ease-[cubic-bezier(0.16,1,0.3,1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-ring active:scale-95 ${
                               sub.done
                                 ? "border-accent bg-accent text-canvas"
                                 : "border-white/[0.2] bg-transparent hover:border-accent"
@@ -291,9 +294,9 @@ export function TasksPanel({ sessionId }: { sessionId: string }) {
                                 removeSubtasks: [sub.id],
                               }));
                             }}
-                            className="inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded text-text-faint transition hover:bg-white/[0.08] hover:text-text"
+                            className="inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-text-faint opacity-0 transition duration-150 ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-white/[0.08] hover:text-danger focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-ring active:scale-95 group-hover:opacity-100"
                           >
-                            <X className="size-3" />
+                            <X className="size-3.5" strokeWidth={1.75} />
                           </button>
                         </li>
                       ))}

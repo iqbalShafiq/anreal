@@ -32,6 +32,7 @@ import {
   PINNED_ARTIFACT_INSTRUCTION,
   ARTIFACT_TOOL_DEFINITIONS,
   SITE_VIEW_TOOL_DEFINITIONS,
+  createBrowseSiteTools,
   createViewSitePageTools,
   REPORT_TOOL_DEFINITIONS,
   WORKSPACE_TOOL_DEFINITIONS,
@@ -80,8 +81,12 @@ import {
   WEB_SEARCH_TOOL_DEFINITIONS,
   normalizePageImages,
   OpenRouterImageGenerationModel,
+  createImageGenerationModelFor,
+  normalizedImageOptionsToProviderOptions,
   parseSiteBrief,
-  providerOptionsForReasoning,
+  compactorProviderOptionsFor,
+  createCompletionModelFor,
+  responsesReasoningSummaryOptions,
   renderProfileContextText,
   WEB_SEARCH_INSTRUCTION,
   WEB_SEARCH_TEXT_ONLY_IMAGE_INSTRUCTION,
@@ -96,9 +101,14 @@ import {
   type AgentContextBlock,
   type ToolWaitProgress,
   type ImageCapabilitySet,
+  type ImageProviderOptionsBuilder,
+  type ImageProviderOptionParams,
   type ProfileScope,
+  type ProviderKind,
+  type StreamingCompletionModel,
   type ProfileSectionKey,
   type ReasoningEffort,
+  PROVIDER_KIND_META,
 } from "@anreal/agent";
 import {
   parseMessage,
@@ -106,7 +116,8 @@ import {
   type ToolDefinition,
   type UserContentPart,
 } from "@anvia/core/completion";
-import type { AnyTool, MemoryStore } from "@anvia/core";
+import type { AnyTool, CompletionModel, MemoryStore } from "@anvia/core";
+import type { ImageGenerationModel } from "@anvia/core/image-generation";
 import { createSummaryMemoryCompactor } from "@anvia/core/memory";
 import type { McpServer } from "@anvia/core/mcp";
 import { resolveActiveDocuments } from "../documents/service.js";
@@ -134,6 +145,11 @@ import {
 } from "./memory-policy.js";
 import { findActiveModel } from "../models/service.js";
 import {
+  buildRoleCompletionModel,
+  resolveRoleTarget,
+  type RolesDb,
+} from "../models/roles.js";
+import {
   createPendingVisionImageBuffer,
   injectPendingVisionImages,
   loadActiveContextImageParts,
@@ -155,9 +171,12 @@ import {
   loadProfileData,
   summarizeProfileForScope,
 } from "../profiling/service.js";
+import { decodeProviderCredentials } from "../provider-connections/credentials.js";
+import { resolveConnectionHeaders } from "../provider-connections/dynamic-headers.js";
 import {
   CHAT_AGENT_ID,
   CHAT_AGENT_RECIPE_VERSION,
+  ProviderConnectionMissingError,
   attachChatAgentRecipeClaim,
   chatAgentImageGenSettingsSchema,
   createChatAgentRecipe,
@@ -184,6 +203,8 @@ import { chartSpecToSvg } from "../charts/snapshot.js";
 import { buildReportPdf } from "../reports/service.js";
 import { createReport, editReport } from "../reports/store.js";
 import { publishArtifactFocus } from "./artifact-events.js";
+import { publishSiteLiveView } from "./site-events.js";
+import { getBrowseSessions, setBrowseLiveNotifier } from "../static-sites/browse.js";
 import { createTask, listTasks, updateTask } from "../tasks/service.js";
 
 /** Request facts only (Anvia context). Policy goes in instructions. */
@@ -235,7 +256,7 @@ export function imageGenerationConfig() {
   return apiKey && baseUrl ? { apiKey, baseUrl } : null;
 }
 
-type FrozenImageModelCapability = {
+export type FrozenImageModelCapability = {
   modelId: string;
   capabilities: ImageCapabilitySet;
 };
@@ -335,6 +356,11 @@ export type ChatRunInput = {
   waitRegistry: InFlightToolRegistry;
   /** Close per-run user MCP clients and remove materialized skill dirs. */
   cleanup?: () => Promise<void>;
+  /**
+   * Close live browse sessions while the run stream is still open so the UI
+   * receives the `siteLiveView(stopped)` event. Runs before `cleanup`.
+   */
+  finalizeLiveSessions?: () => Promise<void>;
 };
 
 const USER_MCP_CONNECT_TIMEOUT_MS = 15_000;
@@ -695,6 +721,8 @@ export type SingleUseContextClaimPrisma = {
 };
 
 type RecipeModelResolution = {
+  /** Set when the id resolved to a user connection model. */
+  connectionId?: string | null;
   reasoningEfforts: string[];
   inputModalities: string[];
   contextWindowTokens?: number;
@@ -738,6 +766,7 @@ export type ChatAgentRecipeResolverDependencies = {
   prisma?: Pick<PrismaClient, "chatSession" | "project">;
   findActiveModel?: (
     modelId: string,
+    userId?: string,
   ) => Promise<RecipeModelResolution | null>;
   resolveActiveDocuments?: (input: {
     userId: string;
@@ -755,6 +784,13 @@ export type ChatAgentRecipeResolverDependencies = {
   webSearchConfig?: typeof webSearchConfig;
   imageGenerationConfig?: typeof imageGenerationConfig;
   loadImageModelCapabilities?: () => Promise<FrozenImageModelCapability[]>;
+  /**
+   * The shared image-target predicate; drives build-time availability with the
+   * same branches the worker resolves the run's target with.
+   */
+  imageTargetSource?: (
+    input: ImageTargetSourceInput,
+  ) => Promise<ImageTargetSelection | null>;
   profilingEnabled?: () => boolean;
   loadProfileData?: typeof loadProfileData;
   deepResearchLimits?: typeof deepResearchLimits;
@@ -802,9 +838,551 @@ export type ResolveChatAgentRecipeInput = {
  * These dependencies create live runtime objects only after a validated
  * recipe has crossed the queue boundary; none are serialized in the recipe.
  */
+export type RecipeModelDb = {
+  providerConnection: {
+    findFirst(args: unknown): Promise<unknown | null>;
+  };
+};
+
+interface RecipeConnectionRow {
+  kind: string;
+  baseUrl: string | null;
+  api: string | null;
+  credentialsRef: string;
+  models: { upstreamId: string; reasoningEfforts: string[] }[];
+}
+
+/**
+ * Rebuild the run's completion model. Catalog models keep using the
+ * environment-configured client; a BYOK model resolves its connection here, in
+ * the worker, so no credential ever enters the durable recipe.
+ */
+export async function resolveRecipeCompletionModel(
+  recipe: ChatAgentRecipe,
+  db: RecipeModelDb,
+): Promise<StreamingCompletionModel> {
+  const { id, connectionId } = recipe.model;
+  if (!connectionId) return createCompletionModel(id);
+
+  const row = (await db.providerConnection.findFirst({
+    where: { id: connectionId, userId: recipe.identity.userId },
+    include: {
+      models: {
+        where: { slug: id },
+        select: { upstreamId: true, reasoningEfforts: true },
+      },
+    },
+  })) as RecipeConnectionRow | null;
+
+  const model = row?.models[0];
+  if (!row || !model) throw new ProviderConnectionMissingError(connectionId);
+
+  const credentials = decodeProviderCredentials(row.credentialsRef);
+  const headers = resolveConnectionHeaders(credentials.headers, {
+    sessionId: recipe.identity.sessionId,
+    userId: recipe.identity.userId,
+    requestId: recipe.trace?.traceId ?? crypto.randomUUID(),
+  });
+  const frozen = recipe.staticContext.model;
+  return createCompletionModelFor({
+    kind: row.kind as ProviderKind,
+    // The stored upstream id, not the sanitized slug: the slug lowercases and
+    // rewrites separators, so parsing it back would change the id sent upstream.
+    upstreamId: model.upstreamId,
+    api: row.api as "chat" | "responses" | null,
+    credentials: {
+      apiKey: credentials.apiKey,
+      baseUrl: row.baseUrl,
+      headers,
+    },
+    contextLimits: {
+      contextWindow: frozen.contextWindowTokens,
+      ...(frozen.maxInputTokens !== null
+        ? { maxInputTokens: frozen.maxInputTokens }
+        : {}),
+      ...(frozen.maxOutputTokens !== null
+        ? { maxOutputTokens: frozen.maxOutputTokens }
+        : {}),
+    },
+    reasoningEfforts: model.reasoningEfforts,
+  });
+}
+
+/**
+ * The image rows the BYOK image resolver reads. Narrowed the same way
+ * `RecipeModelDb` is, so a focused test can inject a fake without a live client.
+ */
+export type RecipeImageDb = {
+  providerModel: {
+    findFirst(args: unknown): Promise<unknown | null>;
+  };
+};
+
+/** An owned image-model row joined to its connection's credential reference. */
+export type RecipeImageModelRow = {
+  slug: string;
+  upstreamId: string;
+  outputType: string;
+  imageCapabilities: unknown;
+  connection: {
+    kind: string;
+    baseUrl: string | null;
+    credentialsRef: string;
+  } | null;
+};
+
+/** A BYOK image target resolved at worker time, never frozen into the recipe. */
+export type ByokImageTarget = {
+  /** The slug the run addresses this model by (what the tool resolves). */
+  modelId: string;
+  /** The stored upstream id the provider is addressed by on the wire. */
+  upstreamId: string;
+  kind: ProviderKind;
+  model: ImageGenerationModel<unknown>;
+  /** The user's declared set, already validated at save time. */
+  capabilities: ImageCapabilitySet;
+  /** Adapter-shaped `providerOptions` builder for this kind. */
+  imageProviderOptions: ImageProviderOptionsBuilder;
+};
+
+/**
+ * Whether a connection kind speaks an image endpoint. `PROVIDER_KIND_META` is
+ * the authority, so this never drifts from the factory's own dispatch.
+ */
+function connectionCanGenerateImages(kind: string): boolean {
+  const meta = PROVIDER_KIND_META[kind as ProviderKind];
+  return meta !== undefined && meta.imageStyle !== "none";
+}
+
+/**
+ * The where-clause every BYOK image read shares, so the two paths agree. The
+ * optional `kinds` narrows to the image-capable connection kinds (derived from
+ * `PROVIDER_KIND_META`, never a retyped list) so the fallback read cannot
+ * select a row whose connection has no image endpoint.
+ */
+function ownedImageModelWhere(
+  userId: string,
+  options: { slug?: string; kinds?: readonly string[] } = {},
+) {
+  return {
+    userId,
+    isActive: true,
+    outputType: "image",
+    connection: {
+      isActive: true,
+      ...(options.kinds ? { kind: { in: [...options.kinds] } } : {}),
+    },
+    ...(options.slug !== undefined ? { slug: options.slug } : {}),
+  };
+}
+
+/** The connection kinds that can generate images, derived from the meta. */
+const IMAGE_CAPABLE_KINDS: readonly string[] = (
+  Object.keys(PROVIDER_KIND_META) as ProviderKind[]
+).filter((kind) => connectionCanGenerateImages(kind));
+
+/**
+ * The image option builder for a kind: the structural keys the tool validated
+ * against the declared capability, then the adapter-shaped extras from the
+ * normaliser.
+ *
+ * Only the OpenRouter-shaped kind accepts a pixel `size`, and only it honours a
+ * per-request `model` — its adapter merges `providerOptions` into the body
+ * *after* setting its own `model`, so the tool's slug would otherwise reach the
+ * provider (Review Focus item 5). Emitting the stored `upstreamId` here keeps
+ * the wire id the same one the constructor was given. The native kinds receive
+ * nothing, because their adapters clobber every key a caller could set (see
+ * `providers/image-options.ts`).
+ */
+export function imageProviderOptionsForKind(
+  kind: ProviderKind,
+  upstreamId: string,
+): ImageProviderOptionsBuilder {
+  const style = PROVIDER_KIND_META[kind].imageStyle;
+  return (params: ImageProviderOptionParams) => ({
+    ...(style === "openrouter-images"
+      ? {
+          // The stored upstream id, never the sanitized slug the tool passes.
+          model: upstreamId,
+          ...(params.size ? { size: params.size } : {}),
+        }
+      : {}),
+    ...normalizedImageOptionsToProviderOptions(kind, {
+      ...(params.aspectRatio !== undefined ? { aspectRatio: params.aspectRatio } : {}),
+      ...(params.quality !== undefined ? { quality: params.quality } : {}),
+      ...(params.background !== undefined ? { background: params.background } : {}),
+      ...(params.n !== undefined ? { n: params.n } : {}),
+    }),
+  });
+}
+
+/** The inputs the shared image-target predicate reads. */
+export type ImageTargetSourceInput = {
+  userId: string;
+  /** The session's pinned image model id, or null/undefined when none. */
+  pinnedSlug: string | null | undefined;
+  /** The shared provider env pair, read once by the caller, or null. */
+  envConfig: { apiKey: string; baseUrl: string } | null;
+};
+
+/** Which image source a run uses, decided by the one shared predicate. */
+export type ImageTargetSelection =
+  | { source: "byok"; row: RecipeImageModelRow }
+  | { source: "env" };
+
+/** A BYOK image read that never throws: a failure is "no row", with a warning. */
+async function readOwnedImageRow(
+  db: RecipeImageDb,
+  args: unknown,
+): Promise<RecipeImageModelRow | null> {
+  try {
+    return (await db.providerModel.findFirst(args)) as RecipeImageModelRow | null;
+  } catch (error) {
+    console.warn("[chat] BYOK image-model lookup failed", { error });
+    return null;
+  }
+}
+
+/**
+ * The **single** predicate build-time availability and worker-time target
+ * resolution share, so a recipe that froze `imageGenerationAvailable: true`
+ * always describes a run this worker can build an image target for — the two
+ * reads cannot disagree about what "available" means.
+ *
+ * Branches, in order:
+ * 1. the pinned `imageGenSettings.modelId` resolves as an owned, active BYOK
+ *    image model on an image-capable connection → that model;
+ * 2. else the shared env pair exists → the env target (the pre-BYOK path,
+ *    unchanged: a user with the env pair and no BYOK model is unaffected);
+ * 3. else the user owns any active BYOK image model → the deterministic
+ *    fallback: the **lowest-slug** owned image model (an explicit `orderBy`,
+ *    never database-default ordering), warning with the pinned slug that did
+ *    not resolve. This is the branch that removes the dead run where build time
+ *    froze `true` (user-scoped "owns any BYOK model") but the worker could not
+ *    resolve the pinned catalog id as an owned slug;
+ * 4. else → `null`.
+ *
+ * Never throws: a read failure is treated as "no such row" with a warning, and
+ * the returned row is re-checked for an image-capable connection in JS even
+ * though the query already narrows by kind. Both callers share that contract:
+ * the build-time resolver reads only the *source* (JSON, no credentials), and
+ * the worker builds the model from the returned row.
+ */
+export async function selectImageTargetSource(
+  input: ImageTargetSourceInput & { db: RecipeImageDb },
+): Promise<ImageTargetSelection | null> {
+  const { db, userId, pinnedSlug, envConfig } = input;
+  const includeConnection = {
+    connection: { select: { kind: true, baseUrl: true, credentialsRef: true } },
+  };
+
+  if (pinnedSlug) {
+    const pinned = await readOwnedImageRow(db, {
+      where: ownedImageModelWhere(userId, { slug: pinnedSlug }),
+      include: includeConnection,
+    });
+    if (pinned?.connection && connectionCanGenerateImages(pinned.connection.kind)) {
+      return { source: "byok", row: pinned };
+    }
+  }
+
+  // The env pair wins over the BYOK fallback, exactly as the worker's
+  // `selectRunImageModel` ordering does; the no-BYOK path stays byte-identical.
+  if (envConfig) return { source: "env" };
+
+  // Deterministic fallback: the lowest slug, chosen by an explicit orderBy so
+  // database-default ordering can never decide which model a run uses.
+  const fallback = await readOwnedImageRow(db, {
+    where: ownedImageModelWhere(userId, { kinds: IMAGE_CAPABLE_KINDS }),
+    include: includeConnection,
+    orderBy: { slug: "asc" },
+  });
+  if (
+    !fallback ||
+    !fallback.connection ||
+    !connectionCanGenerateImages(fallback.connection.kind)
+  ) {
+    return null;
+  }
+  console.warn(
+    "[chat] pinned BYOK image model did not resolve; using the user's image model instead",
+    { pinnedSlug: pinnedSlug ?? null, fallbackSlug: fallback.slug },
+  );
+  return { source: "byok", row: fallback };
+}
+
+/**
+ * Resolve the run's BYOK image target at worker time, using the same predicate
+ * as build-time availability (`selectImageTargetSource`). The recipe freezes
+ * only *whether* image generation is available; which target is used is decided
+ * here, exactly as the compactor's role is (no recipe change).
+ *
+ * Returns `null` — never throws — on any missing row, an undecodable credential
+ * reference, or an invalid capability declaration, so a model or connection
+ * deleted mid-run degrades to the shared env path instead of killing the run.
+ * The env branch and "nothing to resolve" both return `null` here: the worker's
+ * `selectRunImageModel` owns building the shared-key model.
+ */
+export async function resolveRecipeImageTarget(
+  recipe: ChatAgentRecipe,
+  db: RecipeImageDb,
+  options: {
+    fetchFn?: typeof fetch;
+    /** The env pair read once by `reconstructChatRunInput`; defaults to a read. */
+    envConfig?: { apiKey: string; baseUrl: string } | null;
+  } = {},
+): Promise<ByokImageTarget | null> {
+  const envConfig =
+    "envConfig" in options ? options.envConfig ?? null : imageGenerationConfig();
+  const selection = await selectImageTargetSource({
+    db,
+    userId: recipe.identity.userId,
+    pinnedSlug: recipe.imageGenSettings?.modelId ?? null,
+    envConfig,
+  });
+  if (selection?.source !== "byok") return null;
+
+  const row = selection.row;
+  const connection = row.connection;
+  if (!connection) return null;
+  const kind = connection.kind as ProviderKind;
+
+  let credentials;
+  try {
+    credentials = decodeProviderCredentials(connection.credentialsRef);
+  } catch (error) {
+    console.warn(
+      "[chat] BYOK image-model credentials could not be decoded; using the shared key",
+      { slug: row.slug, error },
+    );
+    return null;
+  }
+
+  let capabilities: ImageCapabilitySet;
+  try {
+    capabilities = parseImageCapabilities(row.imageCapabilities);
+  } catch (error) {
+    console.warn(
+      "[chat] BYOK image-model capabilities are invalid; using the shared key",
+      { slug: row.slug, error },
+    );
+    return null;
+  }
+
+  let headers: Record<string, string> | null;
+  try {
+    headers = resolveConnectionHeaders(credentials.headers, {
+      sessionId: recipe.identity.sessionId,
+      userId: recipe.identity.userId,
+      requestId: recipe.trace?.traceId ?? crypto.randomUUID(),
+    });
+  } catch (error) {
+    // Preserves this function's documented contract: an unresolvable header
+    // degrades to the shared-key path instead of killing the run. The chat
+    // path throws instead, because a wrong header there is the failure we
+    // are removing. Both are logged server-side.
+    console.warn("[chat] BYOK image headers could not be resolved", {
+      slug: row.slug,
+      error,
+    });
+    return null;
+  }
+
+  let model: ImageGenerationModel<unknown> | null;
+  try {
+    model = createImageGenerationModelFor({
+      kind,
+      // The stored upstream id, never parsed back out of the sanitized slug.
+      modelId: row.upstreamId,
+      apiKey: credentials.apiKey,
+      baseUrl: connection.baseUrl,
+      // Mirrors the completion path (resolveRecipeCompletionModel): a gateway
+      // that authenticates by custom header must authenticate image requests
+      // the same way. The factory forwards them only to the kinds whose client
+      // options declare a `headers` field.
+      headers,
+      ...(options.fetchFn ? { fetchFn: options.fetchFn } : {}),
+    });
+  } catch (error) {
+    console.warn("[chat] BYOK image model could not be built; using the shared key", {
+      slug: row.slug,
+      error,
+    });
+    return null;
+  }
+  if (!model) return null;
+
+  return {
+    modelId: row.slug,
+    upstreamId: row.upstreamId,
+    kind,
+    model,
+    capabilities,
+    imageProviderOptions: imageProviderOptionsForKind(kind, row.upstreamId),
+  };
+}
+
+/**
+ * Choose the image model the run generates with. A pinned BYOK target wins;
+ * otherwise the shared env pair builds exactly the model the run built before
+ * this phase (`OpenRouterImageGenerationModel` with no `defaultModel`).
+ */
+export function selectRunImageModel(input: {
+  envConfig: { apiKey: string; baseUrl: string } | null;
+  byok: ByokImageTarget | null;
+}): ImageGenerationModel<unknown> | null {
+  if (input.byok) return input.byok.model;
+  if (!input.envConfig) return null;
+  return new OpenRouterImageGenerationModel({
+    apiKey: input.envConfig.apiKey,
+    baseUrl: input.envConfig.baseUrl,
+  });
+}
+
+/**
+ * The `capabilities(modelId)` source for the image tools: the frozen catalog,
+ * overridden by a BYOK target's own declaration for its own id (Design ruling
+ * 4 — the save-time allow-list is what makes that declaration safe to trust).
+ */
+export function buildImageCapabilitySource(
+  frozen: readonly FrozenImageModelCapability[],
+  byok: ByokImageTarget | null,
+): Map<string, ImageCapabilitySet> {
+  const source = new Map<string, ImageCapabilitySet>(
+    frozen.map((entry) => [entry.modelId, entry.capabilities]),
+  );
+  if (byok) source.set(byok.modelId, byok.capabilities);
+  return source;
+}
+
+export type ProviderShape = {
+  kind: ProviderKind;
+  api: "chat" | "responses" | null;
+};
+
+/**
+ * Which request shape a resolved target speaks. Catalog targets use the
+ * environment-configured OpenAI-compatible client (`meta/` ids go through Chat
+ * Completions, everything else through Responses); a BYOK target reads its own
+ * connection. Returns null when a BYOK connection has vanished so a caller that
+ * may fall back can, instead of throwing.
+ */
+export async function resolveTargetProviderShape(
+  db: RecipeModelDb,
+  userId: string,
+  target: { modelId: string; connectionId: string | null },
+): Promise<ProviderShape | null> {
+  if (!target.connectionId) {
+    return {
+      kind: "openai",
+      api: target.modelId.startsWith("meta/") ? "chat" : "responses",
+    };
+  }
+  const row = (await db.providerConnection.findFirst({
+    where: { id: target.connectionId, userId },
+    select: { kind: true, api: true },
+  })) as { kind: string; api: string | null } | null;
+  if (!row) return null;
+  return {
+    kind: row.kind as ProviderKind,
+    api: row.api as "chat" | "responses" | null,
+  };
+}
+
+/**
+ * Which request shape the run's model speaks. Catalog models use the
+ * environment-configured OpenAI-compatible client; `meta/` ids go through Chat
+ * Completions, everything else through Responses.
+ */
+export async function resolveRecipeProviderShape(
+  recipe: ChatAgentRecipe,
+  db: RecipeModelDb,
+): Promise<ProviderShape> {
+  const shape = await resolveTargetProviderShape(db, recipe.identity.userId, {
+    modelId: recipe.model.id,
+    connectionId: recipe.model.connectionId,
+  });
+  if (!shape) throw new ProviderConnectionMissingError(recipe.model.connectionId!);
+  return shape;
+}
+
+/** The model and request shape the memory compactor will run with. */
+export type ChatCompactorResolution = {
+  model: CompletionModel;
+  /** Options shaped for `model`'s own provider; undefined when it has none. */
+  providerOptions: ReturnType<typeof compactorProviderOptionsFor>;
+  /** Whether the user's assignment or the run's chat model won. */
+  source: "assignment" | "chat";
+};
+
+/**
+ * Resolve the memory compactor at reconstruction time (not in the frozen
+ * recipe). A user's live `memoryCompaction` assignment wins; otherwise the
+ * run's chat model is reused exactly as before.
+ *
+ * The compactor has no `controls` seam, so its reasoning effort travels as a
+ * provider option shaped for the compactor's *own* provider — an assigned
+ * compactor on a different provider must not inherit the chat model's shape.
+ *
+ * A dangling assignment (deleted model or connection) degrades to the chat
+ * model rather than throwing: the compactor runs inside the run, so an
+ * exception here would kill it. `db` is read only for the assigned target's
+ * shape.
+ */
+export async function resolveChatCompactorModel(input: {
+  db: RecipeModelDb & RolesDb;
+  userId: string;
+  /** The run's already-built chat model; the fallback and the no-assignment path. */
+  chatModel: CompletionModel;
+  /** The chat model's provider shape, already resolved. */
+  chatShape: ProviderShape;
+  /** The run's reasoning effort. */
+  reasoningEffort: ReasoningEffort | null;
+}): Promise<ChatCompactorResolution> {
+  const effort = (input.reasoningEffort ?? "medium") as ReasoningEffort;
+  const chatFallback = (): ChatCompactorResolution => ({
+    model: input.chatModel,
+    providerOptions: compactorProviderOptionsFor(
+      input.chatShape.kind,
+      input.chatShape.api,
+      effort,
+    ),
+    source: "chat",
+  });
+
+  const target = await resolveRoleTarget(input.db, input.userId, "memoryCompaction");
+  if (!target) return chatFallback();
+
+  const assignedModel = await buildRoleCompletionModel(
+    input.db,
+    input.userId,
+    "memoryCompaction",
+  );
+  if (!assignedModel) return chatFallback();
+
+  const assignedShape = await resolveTargetProviderShape(
+    input.db,
+    input.userId,
+    target,
+  );
+  if (!assignedShape) return chatFallback();
+
+  return {
+    model: assignedModel,
+    providerOptions: compactorProviderOptionsFor(
+      assignedShape.kind,
+      assignedShape.api,
+      effort,
+    ),
+    source: "assignment",
+  };
+}
+
 export type ChatRunReconstructionRuntime = {
   createAgent?: typeof createAgent;
   createCompletionModel?: typeof createCompletionModel;
+  resolveRecipeCompletionModel?: typeof resolveRecipeCompletionModel;
+  resolveRecipeImageTarget?: typeof resolveRecipeImageTarget;
   createMemoryStore?: (database: PrismaClient) => MemoryStore;
   sessionExists?: (sessionId: string, userId: string) => Promise<boolean>;
   onToolWaitProgress?: (event: ToolWaitProgress) => void | Promise<void>;
@@ -839,6 +1417,10 @@ export async function resolveChatAgentRecipe(
     dependencies?.imageGenerationConfig ?? imageGenerationConfig;
   const readImageModelCapabilities =
     dependencies?.loadImageModelCapabilities ?? loadImageModelCapabilities;
+  const readImageTargetSource =
+    dependencies?.imageTargetSource ??
+    ((selectionInput: ImageTargetSourceInput) =>
+      selectImageTargetSource({ db: prisma as RecipeImageDb, ...selectionInput }));
   // Keep profile policy resolution data-only. profileConfig() also creates a
   // completion-model handle for the profile worker, which does not belong in
   // the authenticated recipe resolver.
@@ -876,7 +1458,9 @@ export async function resolveChatAgentRecipe(
   const normalizedPrompt = input.promptMessage
     ? parseMessage(input.promptMessage)
     : undefined;
-  const modelInfo = await resolveModel(input.model);
+  // BYOK model ids only resolve inside their owner's scope, so the user id has
+  // to reach the catalog lookup or every connection model is "unknown".
+  const modelInfo = await resolveModel(input.model, input.userId);
   if (!modelInfo) throw new Error(`unknown model: ${input.model}`);
   if (
     input.reasoningEffort !== null &&
@@ -981,11 +1565,35 @@ export async function resolveChatAgentRecipe(
   }
 
   const imageConfig = readImageGenerationConfig();
-  const imageGenerationAvailable = imageConfig !== null;
+  // Parse the image settings once, here, so the availability read and the
+  // recipe carry exactly one pinned slug. (The request route already validated
+  // this shape; parsing early keeps a single source for the pin.)
+  const imageGenSettings =
+    input.imageGenSettings === null || input.imageGenSettings === undefined
+      ? null
+      : chatAgentImageGenSettingsSchema.parse(input.imageGenSettings);
+  // A user with a BYOK image model can generate even without the shared env
+  // pair. Availability comes from the SAME predicate the worker uses to resolve
+  // the run's target (`selectImageTargetSource`), so a frozen `true` always
+  // means the worker can build a target — they cannot disagree about the pinned
+  // slug. A user with the env pair and no BYOK model is unaffected.
+  const imageTargetSource = await readImageTargetSource({
+    userId: input.userId,
+    pinnedSlug: imageGenSettings?.modelId ?? null,
+    envConfig: imageConfig,
+  });
+  const byokImageAvailable = imageTargetSource?.source === "byok";
+  const imageGenerationAvailable = imageTargetSource !== null;
   const imageModelCapabilities = imageGenerationAvailable
     ? await readImageModelCapabilities()
     : [];
-  if (imageGenerationAvailable && imageModelCapabilities.length === 0) {
+  // A corrupt frozen catalog is a configuration error — but a BYOK-only run
+  // has its own capability source, so an empty catalog must not trip it.
+  if (
+    imageGenerationAvailable &&
+    imageModelCapabilities.length === 0 &&
+    !byokImageAvailable
+  ) {
     throw new Error("image-generation capability catalog is empty");
   }
   if (imageGenerationAvailable) {
@@ -1142,6 +1750,7 @@ export async function resolveChatAgentRecipe(
     },
     model: {
       id: input.model,
+      connectionId: modelInfo.connectionId ?? null,
       reasoningEffort: input.reasoningEffort,
     },
     memoryPolicy,
@@ -1153,10 +1762,7 @@ export async function resolveChatAgentRecipe(
     },
     userSkills: userEnhancements.userSkills,
     userMcp: userEnhancements.userMcp,
-    imageGenSettings:
-      input.imageGenSettings === null || input.imageGenSettings === undefined
-        ? null
-        : chatAgentImageGenSettingsSchema.parse(input.imageGenSettings),
+    imageGenSettings,
     budgets: {
       maxTurns: 20,
       deepResearchMaxTurns: limits.maxTurns,
@@ -1234,13 +1840,30 @@ export async function reconstructChatRunInput(input: {
   const profilingEnabled = recipe.capabilities.profilingEnabled;
   const resolvedWebConfig = webSearchConfig();
   const resolvedImageConfig = imageGenerationConfig();
+  // Resolve the BYOK image target at worker time. The resolver never throws, so
+  // a model/connection row deleted after the recipe was frozen degrades here.
+  const resolveImageTarget =
+    runtime?.resolveRecipeImageTarget ?? resolveRecipeImageTarget;
+  // Pass the env pair already read above, so the shared predicate sees the same
+  // value the guard below does (one env read per run).
+  const byokImageTarget = recipe.capabilities.imageGenerationAvailable
+    ? await resolveImageTarget(recipe, prisma, { envConfig: resolvedImageConfig })
+    : null;
 
   if (recipe.capabilities.webSearchAvailable && !resolvedWebConfig) {
     throw new Error(
       "frozen web-search capability is unavailable in this worker process",
     );
   }
-  if (recipe.capabilities.imageGenerationAvailable && !resolvedImageConfig) {
+  if (
+    recipe.capabilities.imageGenerationAvailable &&
+    !resolvedImageConfig &&
+    !byokImageTarget
+  ) {
+    // Accounting for a BYOK target: the frozen capability is satisfied by the
+    // shared env pair *or* a resolvable BYOK target. The BYOK resolver itself
+    // never throws — it returns null with a warning — so the only failure left
+    // here is a frozen surface the worker genuinely cannot reconstruct.
     throw new Error(
       "frozen image-generation capability is unavailable in this worker process",
     );
@@ -1257,8 +1880,23 @@ export async function reconstructChatRunInput(input: {
   }
 
   const makeAgent = runtime?.createAgent ?? createAgent;
-  const makeCompletionModel =
-    runtime?.createCompletionModel ?? createCompletionModel;
+  const makeCompletionModel = (target: ChatAgentRecipe) => {
+    if (runtime?.resolveRecipeCompletionModel) {
+      return runtime.resolveRecipeCompletionModel(target, prisma);
+    }
+    // Legacy seam: focused tests inject a plain model factory.
+    if (runtime?.createCompletionModel) {
+      return Promise.resolve(runtime.createCompletionModel(target.model.id));
+    }
+    return resolveRecipeCompletionModel(target, prisma);
+  };
+  // Reasoning summaries only apply to OpenAI-Responses-shaped models, so the
+  // request option is derived from the run's provider rather than assumed.
+  const providerShape = await resolveRecipeProviderShape(recipe, prisma);
+  const runReasoningOptions = responsesReasoningSummaryOptions(
+    providerShape.kind,
+    providerShape.api,
+  );
   const sessionExists = runtime?.sessionExists ??
     (async (scopeSessionId: string, scopeUserId: string) =>
       Boolean(
@@ -1283,14 +1921,20 @@ export async function reconstructChatRunInput(input: {
     ? guardedMemory
     : createNonVisionMemoryProxy(guardedMemory);
 
-  const compactorModel = makeCompletionModel(model);
+  const compactor = await resolveChatCompactorModel({
+    db: prisma,
+    userId,
+    chatModel: await makeCompletionModel(recipe),
+    chatShape: providerShape,
+    reasoningEffort,
+  });
   const nativeMemoryCompactor = createSummaryMemoryCompactor({
-    model: compactorModel,
+    model: compactor.model,
     instructions: NATIVE_MEMORY_COMPACTOR_INSTRUCTIONS,
     maxTokens: recipe.memoryPolicy.compactorMaxTokens,
-    providerOptions: providerOptionsForReasoning(
-      (reasoningEffort ?? "medium") as ReasoningEffort,
-    ),
+    ...(compactor.providerOptions
+      ? { providerOptions: compactor.providerOptions }
+      : {}),
     retries: { maxAttempts: 2 },
   });
   const nativeMemoryOptions = {
@@ -1403,6 +2047,27 @@ export async function reconstructChatRunInput(input: {
   };
   // Live order must match the frozen surface: clarification, site-build,
   // then artifacts (see the resolver toolDefinitions array).
+  const pushSiteVisionImage = async ({ imageId }: { imageId: string }): Promise<void> => {
+    const image = await getImageStore().getImage(imageId);
+    if (!image || image.userId !== userId) {
+      throw new Error("Screenshot not found in the current scope.");
+    }
+    const data = await getImageStore().getObjectBuffer(image.r2Key);
+    if (data.byteLength === 0) throw new Error("Screenshot bytes are empty.");
+    // url is inert for the pending buffer (only data/mediaType are read);
+    // the store reference marks it as non-navigable.
+    parentVisionImages.push([
+      {
+        url: `image-store:${imageId}`,
+        mediaType: image.mediaType,
+        data: Buffer.from(data).toString("base64"),
+        imageId,
+      },
+    ]);
+  };
+  // Live browse frames reach the browser as ephemeral Redis frames; only the
+  // small started/stopped events travel the chat stream. Wired per run.
+  setBrowseLiveNotifier((liveSessionId, event) => publishSiteLiveView(liveSessionId, event));
   const artifactTools = [
     ...createArtifactTools({
       list: ({ type, q }) =>
@@ -1434,36 +2099,40 @@ export async function reconstructChatRunInput(input: {
           ...(args.question !== undefined ? { question: args.question } : {}),
         }),
       includeImageBytes: modelAcceptsImage,
-      pushVisionImage: async ({ imageId }) => {
-        const image = await getImageStore().getImage(imageId);
-        if (!image || image.userId !== userId) {
-          throw new Error("Screenshot not found in the current scope.");
-        }
-        const data = await getImageStore().getObjectBuffer(image.r2Key);
-        if (data.byteLength === 0) throw new Error("Screenshot bytes are empty.");
-        // url is inert for the pending buffer (only data/mediaType are read);
-        // the store reference marks it as non-navigable.
-        parentVisionImages.push([
-          {
-            url: `image-store:${imageId}`,
-            mediaType: image.mediaType,
-            data: Buffer.from(data).toString("base64"),
-            imageId,
-          },
-        ]);
-      },
+      pushVisionImage: pushSiteVisionImage,
+      onFocus: (f) => focus(f.artifactId, f.artifactType, f.label),
+    }),
+    ...createBrowseSiteTools({
+      act: (args) =>
+        getBrowseSessions().act({
+          userId,
+          sessionId,
+          projectId,
+          siteId: args.siteId,
+          ...(args.version !== undefined ? { version: args.version } : {}),
+          action: args.action,
+          ...(args.selector !== undefined ? { selector: args.selector } : {}),
+          ...(args.text !== undefined ? { text: args.text } : {}),
+          ...(args.to !== undefined ? { to: args.to } : {}),
+        }),
+      includeImageBytes: modelAcceptsImage,
+      pushVisionImage: pushSiteVisionImage,
       onFocus: (f) => focus(f.artifactId, f.artifactType, f.label),
     }),
     ...createReportTools({
       createReport: async ({ title, markdown, assetIds, citationMap }) => {
         const svgAssets: string[] = [];
+        const svgAssetIds: string[] = [];
+        const svgCaptions: string[] = [];
         const rasterAssets: { buffer: Uint8Array; mediaType: string }[] = [];
+        const rasterAssetIds: string[] = [];
+        const rasterCaptions: string[] = [];
         const imageIds: string[] = [];
         const rejected: string[] = [];
         for (const assetId of assetIds ?? []) {
           const image = await prisma.generatedImage.findFirst({
             where: { id: assetId, userId, projectId },
-            select: { r2Key: true, mediaType: true },
+            select: { r2Key: true, mediaType: true, caption: true },
           });
           if (!image || !isReportAssetMediaType(image.mediaType)) {
             rejected.push(assetId);
@@ -1472,8 +2141,12 @@ export async function reconstructChatRunInput(input: {
           const bytes = await getObjectBuffer(image.r2Key);
           if (image.mediaType === "image/svg+xml") {
             svgAssets.push(new TextDecoder().decode(bytes));
+            svgAssetIds.push(assetId);
+            svgCaptions.push(image.caption?.trim() ?? "");
           } else {
             rasterAssets.push({ buffer: new Uint8Array(bytes), mediaType: image.mediaType });
+            rasterAssetIds.push(assetId);
+            rasterCaptions.push(image.caption?.trim() ?? "");
           }
           imageIds.push(assetId);
         }
@@ -1488,7 +2161,11 @@ export async function reconstructChatRunInput(input: {
           title,
           markdown,
           ...(svgAssets.length > 0 ? { svgAssets } : {}),
+          ...(svgAssetIds.length > 0 ? { svgAssetIds } : {}),
+          ...(svgCaptions.length > 0 ? { svgCaptions } : {}),
           ...(rasterAssets.length > 0 ? { rasterAssets } : {}),
+          ...(rasterAssetIds.length > 0 ? { rasterAssetIds } : {}),
+          ...(rasterCaptions.length > 0 ? { rasterCaptions } : {}),
           ...(imageIds.length > 0 ? { imageIds } : {}),
           ...(citationMap ? { citationMap: citationMap as never } : {}),
         });
@@ -1748,7 +2425,8 @@ export async function reconstructChatRunInput(input: {
     );
     const researcher = makeAgent({
       agentId: `${recipe.agentId}-deep-researcher`,
-      model: makeCompletionModel(model),
+      model: await makeCompletionModel(recipe),
+      ...(runReasoningOptions ? { providerOptions: runReasoningOptions } : {}),
       reasoningEffort: (reasoningEffort ?? undefined) as
         | ReasoningEffort
         | undefined,
@@ -1803,22 +2481,26 @@ export async function reconstructChatRunInput(input: {
     );
   }
 
-  // Image generation tools: registered only when the image provider env pair
-  // is set. Grants/overrides come from the approval registry (live per-call
-  // reads); references resolve to generated or document images.
-  const imgConfig = recipe.capabilities.imageGenerationAvailable
-    ? resolvedImageConfig
-    : null;
-  const imageGenerationAvailable = recipe.capabilities.imageGenerationAvailable;
-  if (imageGenerationAvailable && imgConfig) {
-    // Model/image capability policy was resolved into the recipe. Unknown
+  // Image generation tools: registered only when a model source exists — a
+  // BYOK target the session pinned, else the shared provider env pair. Grants/
+  // overrides come from the approval registry (live per-call reads); references
+  // resolve to generated or document images.
+  const runImageModel = selectRunImageModel({
+    envConfig: resolvedImageConfig,
+    byok: byokImageTarget,
+  });
+  const imageGenerationAvailable =
+    recipe.capabilities.imageGenerationAvailable && runImageModel !== null;
+  if (imageGenerationAvailable && runImageModel) {
+    // Model/image capability policy was resolved into the recipe; a BYOK
+    // target's own declaration overrides the frozen catalog for its id. Unknown
     // ids intentionally use the image tool's bounded defaults on resume.
-    const capabilities = new Map<string, ImageCapabilitySet>(
-      recipe.capabilities.imageModelCapabilities.map((entry) => [
-        entry.modelId,
-        entry.capabilities,
-      ]),
+    const capabilities = buildImageCapabilitySource(
+      recipe.capabilities.imageModelCapabilities,
+      byokImageTarget,
     );
+    // The frozen catalog guard exists to catch a corrupt catalog; a BYOK-only
+    // run serves capabilities from its own row and must not trip it.
     if (capabilities.size === 0) {
       throw new Error(
         "frozen image-generation capability catalog is empty",
@@ -1837,10 +2519,7 @@ export async function reconstructChatRunInput(input: {
     };
     tools.push(
       ...createImageGenerationTools({
-        model: new OpenRouterImageGenerationModel({
-          apiKey: imgConfig.apiKey,
-          baseUrl: imgConfig.baseUrl,
-        }),
+        model: runImageModel,
         store: {
           saveGeneratedImage: (input) => getImageStore().saveGeneratedImage(input),
         },
@@ -1854,6 +2533,9 @@ export async function reconstructChatRunInput(input: {
         resolveReference: (imageId) =>
           resolveImageReference({ imageId, userId, sessionId }, resolveDeps),
         capabilities: (modelId) => capabilities.get(modelId) ?? null,
+        ...(byokImageTarget
+          ? { imageProviderOptions: byokImageTarget.imageProviderOptions }
+          : {}),
         defaultSettings: recipe.imageGenSettings ?? undefined,
       }),
     );
@@ -1980,6 +2662,11 @@ export async function reconstructChatRunInput(input: {
         () => undefined,
       );
     }
+    await getBrowseSessions()
+      .closeFor(`${userId}:${sessionId}`, "run ended")
+      .catch((error) => {
+        console.warn("[browse] session cleanup failed", error);
+      });
   };
   try {
     if (recipe.userSkills.length > 0) {
@@ -2069,7 +2756,7 @@ export async function reconstructChatRunInput(input: {
   // Reconstruction follows the frozen tool surface so in-flight recipes that
   // still listed view_image for a vision model keep that tool.
   if (frozenHasViewImage) {
-    const visionModel = await resolveVisionHelperModel();
+    const visionModel = await resolveVisionHelperModel(userId);
     if (!visionModel) {
       throw new Error("frozen view-image capability is unavailable in this worker process");
     }
@@ -2140,7 +2827,8 @@ export async function reconstructChatRunInput(input: {
 
   const agent = makeAgent({
     agentId: recipe.agentId,
-    model: makeCompletionModel(model),
+    model: await makeCompletionModel(recipe),
+    ...(runReasoningOptions ? { providerOptions: runReasoningOptions } : {}),
     reasoningEffort: (reasoningEffort ?? undefined) as
       | ReasoningEffort
       | undefined,
@@ -2196,6 +2884,13 @@ export async function reconstructChatRunInput(input: {
     waitRegistry,
     cleanup: async () => {
       await closeUserEnhancements();
+    },
+    finalizeLiveSessions: async () => {
+      await getBrowseSessions()
+        .closeFor(`${userId}:${sessionId}`, "run ended")
+        .catch((error) => {
+          console.warn("[browse] live session finalize failed", error);
+        });
     },
   };
 }
