@@ -5,7 +5,7 @@
 <h1 align="center">anreal</h1>
 
 <p align="center">
-  A private workspace for questions that start in a document and end as something you can keep: a chart, a cited brief, a PDF, or a site.
+  A private AI workspace for your documents.
 </p>
 
 <p align="center">
