@@ -150,7 +150,6 @@ apps/
 packages/
   agent/          Agent factory, tools, prompts, providers, evals
 docs/images/      Stills used in this README
-recordings/       Screencasts the stills were taken from
 docker-compose.yml
 .env.example
 ```
@@ -172,19 +171,6 @@ curl -D - -X POST http://localhost:3001/api/auth/sign-in/email \
 curl http://localhost:3001/api/chat/sessions \
   -H "authorization: Bearer <set-auth-token>"
 ```
-
-## Screencasts
-
-The stills in this README are frames from the recordings in [`recordings/`](recordings).
-
-| Recording | What it shows |
-| --- | --- |
-| [01-login-logout.mp4](recordings/01-login-logout.mp4) | Sign in, the workspace handoff, sign out |
-| [02-muse-spark-web-search.mp4](recordings/02-muse-spark-web-search.mp4) | Model picker, approval, web search |
-| [03-sales-data-analysis.mp4](recordings/03-sales-data-analysis.mp4) | A CSV, then the chart |
-| [04-deep-research.mp4](recordings/04-deep-research.mp4) | A sourced research brief |
-| [05-pdf-report.mp4](recordings/05-pdf-report.mp4) | A multi-page PDF report |
-| [06-static-site.mp4](recordings/06-static-site.mp4) | A static site, built and previewed |
 
 ## License
 
