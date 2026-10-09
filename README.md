@@ -1,548 +1,191 @@
 # anreal
 
-**anreal** adalah workspace AI privat untuk bertanya, membandingkan, dan membuat sesuatu dari dokumen, data, serta gambar. Monorepo ini berbasis [Anvia](https://anvia.dev): UI React (`@anreal/platform`), API Hono (`@anreal/api`), dan package agent bersama (`@anreal/agent`). Percakapan tersimpan di Postgres lewat Prisma, streaming response ke client, serta tracing opsional ke Langfuse.
+A private AI workspace for documents, data, and the web. Ask in plain language. The agent answers in the thread, with the search, the chart, the citations, and the file it produced.
 
-## Apa yang dibangun
+[![Node.js](https://img.shields.io/badge/node-22.18%2B-339933?logo=node.js&logoColor=white)](https://nodejs.org)
+[![pnpm](https://img.shields.io/badge/pnpm-10.30.3-F69220?logo=pnpm&logoColor=white)](https://pnpm.io)
+[![TypeScript](https://img.shields.io/badge/TypeScript-monorepo-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
 
-Aplikasi chat full-stack di mana user bisa:
+anreal is a full-stack workspace built on [Anvia](https://anvia.dev). The React app streams an agent run from a Hono API. Sessions and memory stay in Postgres, document chunks stay in Qdrant, and ingestion, summaries, and site builds run on a background worker. Model access is whatever provider you configure in `.env`.
 
-- Mengobrol dengan agent AI secara **streaming** (JSONL event stream)
-- Mengelola **banyak session** (buat baru, ganti session, riwayat otomatis dari DB)
-- Melihat **tool calls** di UI (misalnya statistik deskriptif, korelasi, regresi)
-- Merender **Markdown + LaTeX math** (KaTeX) di pesan asisten
-- Menyimpan memory percakapan per `sessionId` di Postgres (`@anvia/memory-prisma`)
-- Melacak run agent di **Langfuse** (jika kredensial diisi)
-- **Generate & edit gambar** lewat agent (`generate_image`/`edit_image`) dengan galeri per session dan per proyek
-- Memberi **persetujuan tool** (sekali / per session) dan menjawab **wizard klarifikasi** agent
+<p align="center">
+  <img src="docs/images/report.png" alt="PDF preview of a three-page sales report the agent wrote from an uploaded spreadsheet, with charts in the page and in the document rail" width="1100">
+</p>
 
-## Arsitektur
+## What you can do
 
-```
-┌─────────────────┐     HTTP / JSONL      ┌─────────────────┐
-│  platform       │ ───────────────────►  │  api (Hono)     │
-│  React + Anvia  │  /api/chat            │  chat router    │
-│  :3000          │ ◄───────────────────  │  :3001          │
-└─────────────────┘     stream events     └────────┬────────┘
-                                                   │
-                                   ┌───────────────┼───────────────┐
-                                   ▼               ▼               ▼
-                           @anreal/agent     Prisma memory    Langfuse
-                          (OpenAI + tools)    (Postgres)       (tracing)
-```
-
-Alur singkat:
-
-1. UI mengirim `POST /api/chat` dengan `sessionId` + pesan terakhir.
-2. API membuat agent lewat `createAgent()`, memasang memory Prisma + tools analisis data.
-3. Agent memanggil model OpenAI, boleh memakai tools, lalu stream event ke client.
-4. Memory session/message tersimpan di Postgres; UI bisa `GET` pesan lama saat ganti session.
-
-## Fitur utama
-
-| Area | Detail |
+| | |
 | --- | --- |
-| Chat streaming | Anvia v1 client protocol v3 via `@anvia/client` + `@anvia/react` and `@anvia/react-ui` primitives |
-| Queued follow-ups | Kirim pesan saat streaming — antrean per session (localStorage), `PromptRequest.steer()` ke run aktif (1 pesan/turn FIFO), auto-flush saat idle, hold setelah stop/error, edit + drag reorder, persist lintas reload |
-| Multi-session | Session ID di `localStorage`; daftar session dari DB |
-| Agent tools | `descriptive_stats`, `pearson_correlation`, `linear_regression` |
-| Image generation | `generate_image`/`edit_image`, katalog model image, galeri session + proyek, background transparan |
-| Static sites | Chat builder: follow-up iterate via rekomendasi agent + konfirmasi user (wizard klarifikasi), riwayat versi + rollback, preview statis permanen + unduh `site.zip`, panel di atas composer |
-| Human approval | Policy consent gate (web + image tools) + `request_clarification` wizard |
-| Model registry | Katalog model text/image via `chat_model` (`outputType`/`imageCapabilities`), seed idempotent |
-| Math rendering | `react-markdown` + `remark-math` + `rehype-katex` |
-| Memory | Model `AgentMemorySession` / `AgentMemoryMessage` / `AgentMemoryError` |
-| Observability | Langfuse via `@anvia/langfuse` |
+| <img src="docs/images/research.png" alt="A cited research brief on Indonesia’s electric-vehicle market, with numbered citations and a rail of source documents and figures"> **Cited research.** A long brief stays grounded. Citations in the answer open the pages and figures the agent actually used. | <img src="docs/images/analysis.png" alt="Chat thread charting revenue by region from an attached sales.csv, with the analysis steps listed above the chart"> **Data in the thread.** Attach a spreadsheet. The agent reads it, runs the analysis, and draws the chart next to the explanation. |
+| <img src="docs/images/web-search.png" alt="Web search in progress, with the query and reason in the thread and a rail of web sources and result images"> **Web, with the trail visible.** Search queries, reasons, sources, and images stay on screen, so an answer from the public web can be checked. | <img src="docs/images/site.png" alt="Live preview of a generated one-page landing site for a Yogyakarta coffee shop, with a download control"> **A site, not a mock.** Describe a page. The agent builds a real static site, previews it, versions it, and packs a zip. |
 
-## Stack
+Around those four flows, the workspace also keeps projects, documents, images, tasks, and artifacts; renders Markdown and LaTeX; generates and edits images; and asks before it searches the web or spends an image call.
 
-| Layer | Tech |
+## How it fits together
+
+```mermaid
+flowchart LR
+  UI["Platform<br/>React · :3000"] -->|JSONL stream| API["API<br/>Hono · :3001"]
+  API --> Agent["@anreal/agent"]
+  Agent --> Models["Model providers"]
+  API --> PG[(Postgres)]
+  API --> Redis[(Redis)]
+  API --> Qdrant[(Qdrant)]
+  Worker["Worker"] --> PG
+  Worker --> Qdrant
+  API --> Store["Object storage"]
+```
+
+| Package | Role |
 | --- | --- |
-| Frontend | React 19, Vite 8, TanStack Router, Tailwind CSS 4, `@anvia/client` `1.0.10`, `@anvia/react`/`@anvia/react-ui` `1.0.11`, KaTeX |
-| API | Hono, `@hono/node-server`, Prisma 7 + Postgres (`@prisma/adapter-pg`), `@anvia/client`/`@anvia/server` `1.0.10`, `@anvia/core`/`@anvia/memory-prisma` `1.0.9` |
-| Agent | `@anvia/core`/`@anvia/langfuse`/`@anvia/mistral`/`@anvia/openai` `1.0.9`, `@anvia/mcp`/`@anvia/qdrant` `1.0.10`, Zod |
-| Tooling | pnpm workspaces, Docker Compose (Postgres 16) |
+| `@anreal/platform` | The workspace. TanStack Router, Tailwind CSS 4, the Anvia React client. |
+| `@anreal/api` | Chat, auth, documents, images, sites, providers. Hono, Prisma 7, BullMQ, OpenAPI. |
+| `@anreal/agent` | The agent factory: instructions, tools, providers, tracing, and evals. |
 
-## Struktur monorepo
+| | |
+| --- | --- |
+| UI | React 19, Vite 8, TanStack Router, Tailwind CSS 4, ECharts, KaTeX |
+| API | Hono, Better Auth, Prisma 7, Postgres 16, Redis 7, BullMQ |
+| Agent | Anvia, Zod, Qdrant, Tavily, optional Langfuse |
+| Sites and files | Sandboxed Vite builds, Playwright captures, S3-compatible storage for images |
+| Repo | pnpm 10 workspaces |
 
+A run is a `POST /api/chat` with a session id. The API builds an agent, restores that session’s memory, and streams events back. Tool calls that need a person (web search, image generation) pause on an approval card. Ambiguous requests pause on a short clarification wizard. The OpenAPI document at `/doc` is the contract for any other client.
+
+## Getting started
+
+### Prerequisites
+
+- Node.js 22.18 or newer
+- pnpm 10.30.3 (`packageManager` in the root `package.json`)
+- Docker, for Postgres, Redis, and Qdrant
+
+### Install
+
+```bash
+pnpm install
+cp .env.example .env
 ```
-apps/
-  api/                 # Hono API — chat endpoints + Prisma
-    prisma/            # schema + migrations
-    src/
-      modules/chat/    # GET/POST /api/chat, GET /api/chat/sessions
-      generated/       # Prisma client (gitignored)
-  platform/            # Vite React chat UI (port 3000)
-    src/
-      routes/          # halaman chat utama
-      components/      # MathMarkdown, dll.
-packages/
-  agent/               # Shared agent factory, prompts, providers, tools, tracing
-docker-compose.yml     # Postgres lokal di port 15433
-.env.example
+
+Fill `.env` from the root. The names below are the ones that decide whether the app actually runs. Everything else has a default in `.env.example`.
+
+| Variable | Required for |
+| --- | --- |
+| `OPENAI_API_KEY`, `OPENAI_BASE_URL` | Chat and image generation. The sample base URL is OpenRouter. |
+| `MISTRAL_API_KEY` | OCR and embeddings while documents are ingested. |
+| `BETTER_AUTH_SECRET` | Session cookies. `openssl rand -base64 32` |
+| `DATABASE_URL`, `REDIS_URL`, `QDRANT_URL` | Left as-is, these match `docker-compose.yml`. |
+| `TAVILY_API_KEY` | Web search. The control stays off when this is empty. |
+| `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME`, `R2_ENDPOINT` | Storing generated images. |
+| `CONTEXT7_API_KEY` | Library and API docs through Context7. Optional. |
+| `LANGFUSE_BASE_URL`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY` | Traces. Optional. Leave them empty to skip. |
+| `PROVIDER_CREDENTIALS_KEY` | Encrypting a user’s own provider keys. `openssl rand -hex 32`. Required in production. |
+| `MCP_CREDENTIALS_KEY` | Encrypting stored MCP tokens. Separate from the provider key. Required in production. |
+
+`PLATFORM_ORIGIN` defaults to `http://localhost:3000` and `BETTER_AUTH_URL` to `http://localhost:3001`. Add any extra browser origin to `TRUSTED_ORIGINS`.
+
+### Data stores
+
+```bash
+docker compose up -d
+pnpm --filter @anreal/api db:migrate
+pnpm --filter @anreal/api db:seed
 ```
 
-### Package `@anreal/agent`
+Compose publishes Postgres on `15433`, Redis on `16379`, and Qdrant on `16333`. `db:seed` loads the model catalog and is safe to run again.
 
-Factory agent yang dipakai API:
-
-- `createAgent()` — native Anvia v1 agent with base instructions and optional tools/memory/tracing
-- `createDataAnalysisTool()` — tiga tool statistik numerik
-- `tracing` — instance Langfuse dari env
-- Default model: OpenAI via OpenRouter Responses API (`openai/gpt-6-luna`), konfigurasi via `OPENAI_*`
-
-## Prerequisites
-
-- **Node.js** 22+
-- **[pnpm](https://pnpm.io/)** 10 (`packageManager` dipin ke `pnpm@10.30.3`)
-- **Docker** (untuk Postgres lokal)
-- API key OpenAI (atau provider yang kompatibel dengan `OPENAI_BASE_URL`)
-
-## Setup
-
-1. **Install dependencies**
-
-   ```bash
-   pnpm install
-   ```
-
-2. **Environment**
-
-   ```bash
-   cp .env.example .env
-   ```
-
-   Isi nilai di root `.env`:
-
-   | Variable | Purpose |
-   | --- | --- |
-   | `OPENAI_BASE_URL` / `OPENAI_API_KEY` | LLM provider — dipakai untuk chat **dan** image generation (tidak ada key baru) |
-   | `LANGFUSE_BASE_URL` / `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` | Observability (opsional) |
-   | `TAVILY_API_KEY` | API key Tavily untuk tool `web_search`/`web_fetch` (wajib untuk web search) |
-   | `R2_ACCOUNT_ID` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` / `R2_BUCKET_NAME` | Cloudflare R2 (S3-compatible) untuk penyimpanan gambar generated (wajib untuk image generation) |
-   | `CONTEXT7_API_KEY` | API key context7 untuk tool dokumentasi library/API (opsional; gratis di context7.com/dashboard) |
-   | `CONTEXT7_URL` | Endpoint MCP context7 (default `https://mcp.context7.com/mcp`) |
-   | `DATABASE_URL` | Koneksi Postgres (default cocok dengan Docker Compose) |
-   | `BETTER_AUTH_SECRET` | Secret cookie session (wajib; `openssl rand -base64 32`) |
-   | `PROVIDER_CREDENTIALS_KEY` | Enkripsi API key provider milik user saat disimpan (AES-256-GCM, 32 bytes as 64 hex chars; `openssl rand -hex 32`). Wajib di production; dev/test fallback ke ephemeral key sehingga credential tidak bertahan setelah restart. **Terpisah** dari `MCP_CREDENTIALS_KEY` — keduanya tidak bisa saling menggantikan |
-   | `BETTER_AUTH_URL` | Base URL API auth (default `http://localhost:3001`) |
-   | `PLATFORM_ORIGIN` | Origin frontend web untuk CORS + trustedOrigins (default `http://localhost:3000`) |
-   | `TRUSTED_ORIGINS` | Origin tambahan (comma-separated) yang boleh memanggil API dari browser / webview — Expo web, preview, custom scheme mobile, dll. Native HTTP client biasanya tidak mengirim `Origin` |
-   | `PORT` | Port API (default `3001`) |
-   | `NODE_ENV` | Environment untuk Langfuse (`development`, dll.) |
-   | `PROFILE_ENABLED` | Master toggle for user profiling (default `true`) |
-   | `PROFILE_REFRESH_DELAY_MINUTES` | Debounce window for background profile refresh (default `15`) |
-   | `PROFILE_WORKER_CONCURRENCY` | Parallel profile summary workers (default `3`) |
-   | `PROFILE_SUMMARY_MODEL` | Summarizer model; defaults to the chat default (`openai/gpt-6-luna`) |
-   | `SITE_ENABLED` | Worker static site builder (default `true`); set `false` untuk mematikan |
-   | `SITE_MODEL` | Model builder + brief parser (default `meta/muse-spark-1.3-contributor`) |
-   | `SITE_CONCURRENCY` | Parallel site builds (default `2`) |
-
-3. **Start Postgres**
-
-   ```bash
-   docker compose up -d
-   ```
-
-   Default URL: `postgresql://postgres:postgres@localhost:15433/postgres`
-
-4. **Database**
-
-   ```bash
-   pnpm --filter @anreal/api db:generate
-   pnpm --filter @anreal/api db:migrate
-   ```
-
-## Development
-
-Dari root repo, jalankan API dan platform bersamaan:
+### Run
 
 ```bash
 pnpm dev
 ```
 
-| App | URL |
+That starts the API, the worker, and the web app together.
+
+| | |
 | --- | --- |
-| Platform (chat UI) | `http://localhost:3000` and `http://<lan-ip>:3000` |
-| API | `http://localhost:3001` and `http://<lan-ip>:3001` |
-| API docs (Scalar) | http://localhost:3001/scalar |
-| OpenAPI document | http://localhost:3001/doc |
+| Workspace | http://localhost:3000 |
+| API | http://localhost:3001 |
+| Scalar reference | http://localhost:3001/scalar |
+| OpenAPI 3.1 | http://localhost:3001/doc |
+| Health | http://localhost:3001/health |
 
-`pnpm dev` listen di **semua interface** (`0.0.0.0`), jadi HP di Wi-Fi yang sama bisa buka `http://192.168.x.x:3000` (UI) atau `http://192.168.x.x:3001` (API / Scalar). Vite mencetak baris **Network**; API mencetak setiap IP LAN di log.
+The dev servers listen on every interface. Vite prints a Network URL, and a phone on the same Wi-Fi can open it. Set `HOST=127.0.0.1` in `.env` to keep the API on localhost.
 
-Kalau Windows Firewall prompt muncul, izinkan Node.js di **Private** network. Set `HOST=127.0.0.1` di `.env` kalau ingin kembali ke localhost saja.
+Sign up at `/register`, then start a chat. The first useful thing to try is a CSV in the composer, or a question that needs the web.
 
-Apps memuat env dari root `.env` lewat `dotenv-cli` (script `with-env`).
+## Scripts
 
-### Useful scripts
-
-```bash
-# API only
-pnpm --filter @anreal/api dev
-
-# Platform only
-pnpm --filter @anreal/platform dev
-
-# Prisma
-pnpm --filter @anreal/api db:generate   # regenerate client → apps/api/src/generated
-pnpm --filter @anreal/api db:migrate    # migrate (dev)
-pnpm --filter @anreal/api db:deploy     # migrate (deploy)
-pnpm --filter @anreal/api db:studio     # Prisma Studio
-
-# API smoke (register → login → chat + usage audit); API must be running
-pnpm --filter @anreal/api smoke:auth
-```
-
-### E2E (Playwright)
+Run these from the repo root.
 
 ```bash
-pnpm --filter @anreal/platform exec playwright test
+pnpm dev                  # API, worker, and platform
+pnpm dev:api              # API only
+pnpm dev:worker           # worker only
+pnpm dev:platform         # web app only
+
+pnpm --filter @anreal/api db:generate
+pnpm --filter @anreal/api db:migrate     # development
+pnpm --filter @anreal/api db:deploy      # production
+pnpm --filter @anreal/api db:seed
+pnpm --filter @anreal/api db:studio
+
+pnpm --filter @anreal/api test
+pnpm --filter @anreal/platform test
+pnpm --filter @anreal/agent test
+pnpm --filter @anreal/agent evals        # live-model behavior evals
+
+pnpm --filter @anreal/api smoke:auth     # register, sign in, chat; API must be up
+pnpm --filter @anreal/platform e2e
 ```
 
-Suite browser (8 test) di `apps/platform/e2e/` menguji alur image generation end-to-end terhadap stub LLM lokal. Prasyarat:
+The Playwright suite under `apps/platform/e2e/` boots its own stub model and dev stack. Postgres and Redis need to be up, the database migrated, and ports `3000`, `3001`, and `18765` free. Run it from a shell that does not already export a real `OPENAI_BASE_URL`. A second config, `playwright.real-llm.config.ts`, talks to the provider in `.env` against an already running `pnpm dev`.
 
-- **Docker up** (Postgres/Redis — `docker compose up -d`), DB sudah migrasi.
-- **Port 3000 / 3001 / 18765 bebas** — Playwright me-boot stub (port **18765**) + dev stack sendiri via `webServer`; kill proses stray dulu (`lsof -i :3000 -i :3001 -i :18765`).
-- **Node ≥ 22.18** — stub dijalankan langsung (`node e2e/stub-openrouter.ts`) dengan type-stripping bawaan Node.
-- **Jangan menjalankan dev server dengan real keys** — stub menolak jika shell mengekspor `OPENAI_BASE_URL` selain URL stub; jalankan tanpa env provider di shell.
+## Repository
 
-Auth e2e dibuat otomatis di `globalSetup` (sign-up user baru + cookie session).
-
-E2E **LLM asli** (OpenRouter dari `.env`, browser headed, tanpa stub):
-
-```bash
-# API :3001 + platform :3000 sudah `pnpm dev` dengan key real
-pnpm --filter @anreal/platform exec -- playwright test --config playwright.real-llm.config.ts
+```
+apps/
+  api/            Hono API, Prisma schema, workers, OpenAPI
+  platform/       React workspace
+packages/
+  agent/          Agent factory, tools, prompts, providers, evals
+docs/images/      Stills used in this README
+recordings/       Screencasts the stills were taken from
+docker-compose.yml
+.env.example
 ```
 
-Jangan campur dengan suite stub: suite stub menolak `OPENAI_BASE_URL` selain `:18765`.
+Prisma Client is generated into `apps/api/src/generated`, which is gitignored. `pnpm install` generates it. After a schema change, run `db:generate` again.
 
 ## Authentication
 
-- Email/password via **Better Auth** (`/api/auth/*`).
-- **Web platform** memakai HTTP-only cookie session (`credentials: include`).
-- **Mobile / extra-repo clients** memakai Bearer token:
-  1. `POST /api/auth/sign-in/email` (atau sign-up)
-  2. Baca header respons `set-auth-token`
-  3. Simpan di secure storage
-  4. Kirim `Authorization: Bearer <token>` di setiap request
-- Cookie dan Bearer setara — `requireUser` memakai `auth.api.getSession({ headers })`, yang menerima keduanya.
-- Browser client harus mengirim `Origin` yang ada di `PLATFORM_ORIGIN`, origin API itu sendiri (agar Scalar "Try it" jalan), atau `TRUSTED_ORIGINS`.
-- Platform routes `/login` and `/register`; chat (`/`) requires a session.
-- Chat memory di-scope Anvia dengan `userId`: `scopeKey = [sessionId, userId]`.
-- Documents **owned by user** (no sharing). Storage quota **200MB per user** (`GET /api/documents/storage`).
-- Setiap chat agent run menulis `AgentUsageEvent` (token counts dari Anvia `Usage`; cost USD hanya jika provider mengirim cost — biasanya `null` di OpenAI).
+Email and password go through Better Auth at `/api/auth/*`. The web app keeps an HTTP-only session cookie. A native client can read `set-auth-token` from the sign-in response and send `Authorization: Bearer <token>` after that. Both paths resolve to the same session. Chat memory is scoped by session and user. Documents belong to the user who uploaded them, with a 200 MB quota per account.
 
-## OpenAPI / Scalar
-
-Dokumentasi interaktif memakai [Scalar](https://scalar.com/products/api-references/integrations/hono) (integrasi resmi Hono):
-
-| URL | Isi |
-| --- | --- |
-| http://localhost:3001/scalar | UI Scalar (auth Bearer di panel Authenticate) |
-| http://localhost:3001/doc | OpenAPI 3.1 JSON |
-| http://localhost:3001/openapi.json | Alias dokumen yang sama |
-| http://localhost:3001/health | Liveness (tanpa auth) |
-
-Setiap operation punya deskripsi, status sukses + error, dan contoh request/response. Spec ini yang dipakai mobile client / generator SDK.
-
-Contoh sign-in + panggilan terautentikasi dari luar repo:
+Interactive requests are easiest in Scalar. For a raw call:
 
 ```bash
-# 1. Sign in
 curl -D - -X POST http://localhost:3001/api/auth/sign-in/email \
   -H "content-type: application/json" \
   -H "origin: http://localhost:3000" \
   -d '{"email":"ada@example.com","password":"correct-horse-battery"}'
 
-# 2. Salin header set-auth-token, lalu:
 curl http://localhost:3001/api/chat/sessions \
-  -H "authorization: Bearer <token>"
+  -H "authorization: Bearer <set-auth-token>"
 ```
 
-Native mobile (React Native / Flutter / Kotlin / Swift) tidak terkena CORS. Webview / Expo web harus ditambahkan ke `TRUSTED_ORIGINS`.
+## Screencasts
 
-## API chat
+The stills in this README are frames from the recordings in [`recordings/`](recordings).
 
-Base path: `/api/chat` (semua endpoint **require auth cookie**)
-
-| Method | Path | Keterangan |
-| --- | --- | --- |
-| `GET` | `/api/chat/sessions` | Daftar session milik user (urut `updatedAt` desc) |
-| `GET` | `/api/chat?sessionId=...` | Load history messages untuk session user |
-| `POST` | `/api/chat` | Kirim pesan; response **streaming** JSONL |
-| `POST` | `/api/chat/steer` | Queue follow-up ke run aktif (`{ sessionId, messages[] }`); worker meng-inject via `PromptRequest.steer()` 1/turn; `409 NO_ACTIVE_RUN` saat idle |
-| `POST` | `/api/chat/queue/sync` | Dedupe antrean lintas reload: `{ sessionId, ids[] }` → `{ appliedIds[] }` (id yang sudah masuk memory) |
-| `POST` | `/api/chat/approvals/:approvalId/decision` | Putusan approval card: `approved` (bool), opsional `grantScope` (`"session"` = Allow for session), `reason`, dan `overrideArgs` (arg tool yang diedit user, mis. param gambar) |
-| `POST` | `/api/chat/clarifications/:id/response` | Jawaban wizard klarifikasi: `answers` (object `string \| string[]`) + opsional `skipped` (string[]) |
-| `GET` | `/api/chat/capabilities` | Ketersediaan fitur: `webSearchAvailable`, `imageGenerationAvailable`, `context7Available` |
-
-Body `POST` (ringkas):
-
-```json
-{
-  "sessionId": "<uuid>",
-  "messages": [ /* canonical messages dari @anvia/client */ ],
-  "stream": true
-}
-```
-
-`sessionId` wajib (bisa juga dari `metadata.sessionId`). Tanpa auth → `401`. Tanpa `sessionId` → `400`.
-
-### API images
-
-Base path: `/api/images` (semua endpoint **require auth cookie**, kepemilikan user di-enforce)
-
-| Method | Path | Keterangan |
-| --- | --- | --- |
-| `GET` | `/api/images?sessionId=...` | Galeri per session (milik user) |
-| `GET` | `/api/images?projectId=...` | Galeri per proyek (milik user/member proyek) |
-| `GET` | `/api/images?scope=user` | Semua gambar milik user |
-| `GET` | `/api/images/:id` | Serve binary gambar dari R2 (ownership check; `404`/`403` jika tidak berhak) |
-
-Metadata gambar tidak pernah mengekspos `r2Key`. Regenerasi/truncate session otomatis me-refresh galeri.
-
-## Agent tools
-
-Tools ini di-inject ke agent saat handle chat:
-
-| Tool | Fungsi |
+| Recording | What it shows |
 | --- | --- |
-| `descriptive_stats` | count, mean, median, mode, min/max, range, quartiles, IQR, variance, stdDev, skewness |
-| `pearson_correlation` | korelasi Pearson, covariance, arah, kekuatan, R² |
-| `linear_regression` | regresi sederhana `y = slope * x + intercept`, residual, prediksi opsional |
-| `web_search` | Cari web (Tavily) — butuh persetujuan saat toggle off; kini juga `images[]` |
-| `web_fetch` | Ambil isi halaman web tertentu (Tavily) — kini juga `images[]` |
-| `view_image` | Lihat gambar dari `web_search`/`web_fetch` `images[]` atau `imageId` session/dokumen — vision: bytes, text-only: deskripsi (via vision helper) |
-| `generate_image` | Generate gambar dari prompt; param (model, aspect ratio, quality, background) hanya diisi saat user minta, selainnya pakai default session |
-| `edit_image` | Edit gambar generated sebelumnya (via `referenceImageId`) — dikirim sebagai `input_references` (data URL) |
-| `request_clarification` | Tanya user saat request ambigu (max 5 pertanyaan, tipe single/multiple choice/free text) |
-| `view_site_page` | Lihat site pinned: cuplikan teks + screenshot Playwright (vision: bytes inline, text-only: via `view_image`); cache permanen per versi |
-| `browse_site` | Browse interaktif site pinned: `open`/`scroll`/`click`/`snapshot`/`close` satu aksi per call; user menonton frame live + cursor Playwright di kartu atas composer |
-
-### Agent site viewing (screenshot Playwright)
-
-`view_site_page` membuka site dari registry scope, membaca `index.html` (cuplikan ≤6000 char, baca terbatas 256 KB) dan mengambil screenshot lewat **Playwright** (`playwright-core`). Hasilnya di-cache permanen per `(siteId, version)` di manifest site — versi site immutable, jadi tidak ada stale.
-
-| Aspek | Detail |
-| --- | --- |
-| Browser | `chromium.launch({ channel: "chrome" })` (Chrome sistem) dengan fallback Chromium bawaan; kalau belum ada, jalankan `pnpm --filter @anreal/api exec playwright install chromium` |
-| Env | Tidak ada key baru; origin internal mengikuti `BETTER_AUTH_URL`/`PORT` (`getApiOrigin()`) |
-| Batas | Viewport 1440×900, fullPage → fallback viewport PNG → JPEG (cap 5 MB), tinggi ≤16.000 px, timeout navigasi 15 dtk / total 30 dtk |
-| Konkurensi | Maks 2 capture paralel (FIFO) + single-flight per `(siteId, version)` |
-| Pengiriman ke model | Bytes diantrekan ke pending vision buffer (pola sama dengan `web_search` images) untuk model vision; model text-only memakai `view_image(imageId)` |
-| Error | Capture gagal → cuplikan teks tetap dikembalikan + `captureError` + `retryable: true` (agent bisa menjawab parsial / retry) |
-
-### Agent live browse (`browse_site`)
-
-`browse_site` menjalankan **sesi browser persisten** di worker untuk site pinned: agent membuka sesi lalu scroll/klik satu aksi per tool call, dan setiap aksi mengembalikan screenshot baru (`imageId`; vision inline, text-only via `view_image`). Selama sesi hidup, frame browser di-stream sebagai JPEG ephemeral (Redis TTL 30 dtk, throttle ≥300 ms) dan disajikan lewat `GET /api/sites/live/:sessionId/frame` (auth + ownership sesi; 204 bila tidak ada frame). UI menampilkan kartu **Live** di atas composer dengan cursor + label aksi bawaan Playwright (`page.screencast` + `showActions({ cursor: "pointer" })`).
-
-| Aspek | Detail |
-| --- | --- |
-| Aksi | `open` → `scroll`/`click`/`snapshot` → `close`; `click` butuh tepat satu `selector` atau `text`; maks 12 aksi/sesi |
-| Idle | 120 dtk tanpa aksi → auto-close (sweeper 30 dtk); sesi juga ditutup saat run berakhir |
-| Keamanan | Hanya origin API lokal (`getApiOrigin()`); navigasi top-level keluar diblokir (`blocked: true`), dialog auto-dismiss, download/popup ditolak |
-| Browser | Berbagi semaphore dengan capture screenshot (maks 2 browser total) |
-| Frame | JPEG ≤1024×640 q60, Redis `site-live:<sessionId>`, TTL 30 dtk; event kecil `siteLiveView` (started/stopped) lewat stream chat |
-| Error | Sesi tidak ada → error "call open first"; screenshot gagal → `captureError` + `retryable` (sesi tetap hidup) |
-
-Contoh prompt: *“Buka site yang saya pin, scroll ke bawah, klik link Kontak, lalu jelaskan isinya.”* — agent memanggil `browse_site` dan user menonton prosesnya secara live.
-
-Contoh prompt: *“Hitung mean dan standar deviasi dari [12, 15, 18, 20, 22]”* — agent akan memanggil `descriptive_stats`.
-
-### Web search
-
-Web search aktif per-session lewat toggle di composer (ikon globe, tanpa label, default **off**). Saat toggle off, agent tetap bisa memanggil tool web lalu *suspend* dan meminta persetujuan user via *glass approval card* dengan alasan dinamis yang dihasilkan agent — user bisa **Allow once**, **Allow for session**, atau **Reject**. Sumber web yang dikumpulkan dari pencarian tampil di sidebar kanan (bagian **Web sources**). Tool web hanya terdaftar jika `TAVILY_API_KEY` diisi (toggle nonaktif jika kosong). Dokumentasi library/API via MCP context7 (`resolve-library-id`, `query-docs`) opsional dengan `CONTEXT7_API_KEY`.
-
-- `web_search` kini mengembalikan `images[]` (`{ url, description }`, max 5, deskripsi truncate 300 chars) dari Tavily `includeImages`+`includeImageDescriptions`; `web_fetch` mengembalikan `images[]` (string URLs, max 5) dari `extract` `includeImages`.
-- `view_image` universal: model vision menerima **image bytes** (`ToolResultContent` `{type:"image", data:base64, mediaType}`), model text-only menerima **deskripsi** via cheap vision helper model (sub-agent-as-tool). Pass `url` dari `web_search`/`web_fetch` `images[]` ke `view_image(url)` — lihat `docs/superpowers/specs/2026-08-19-web-search-image-view-design.md`.
-
-### Image generation
-
-Agent dapat generate dan edit gambar lewat tool `generate_image`/`edit_image` (lihat tabel tool di atas):
-
-| Aspek | Detail |
-| --- | --- |
-| Model | Katalog image dari model registry — `openai/gpt-5-image-mini` (**default**), `google/gemini-3.1-flash-lite-image`, `x-ai/grok-imagine-image-quality`; dipilih per session di composer |
-| Env | Tidak ada key baru — reuse `OPENAI_BASE_URL` / `OPENAI_API_KEY` (endpoint `/api/v1/images` OpenRouter) |
-| Persetujuan | Toggle per-session di composer; saat off, run *suspend* dan minta persetujuan (Allow once / Allow for session / Reject) |
-| Klarifikasi | Saat request ambigu (style, aspect ratio, subjek), agent memanggil `request_clarification` — UI menampilkan **wizard** multi-pertanyaan, jawaban dipetakan kembali ke agent |
-| Galeri | Right rail per session (gambar hasil regenerasi/truncate ikut ter-refresh) + sidebar kiri **Images** (modal galeri lintas chat dengan filter proyek) |
-| Background remover | Opsi background `transparent` di editor param gambar — hanya tersedia untuk model OpenAI (`gpt-5-image-mini`) yang mendukung `background: transparent`; output dikirim sebagai `output_format: png` |
-| Edit | `edit_image` mereferensikan gambar hasil generate sebelumnya (`referenceImageId`) dan mengirimnya sebagai `input_references` data URL |
-| Penyimpanan | **1 gambar = 1 generate** — setiap gambar disimpan sebagai 1 baris `GeneratedImage` + objek R2 (ada cap `n` per model di katalog) |
-
-### Human approval & clarification
-
-Kontrol user atas aksi agent memakai **dua lapis**:
-
-1. **Policy consent gate** — untuk tool yang "berisiko" (`web_search`, `web_fetch`, `generate_image`, `edit_image`). Saat toggle fitur off dan belum ada grant, panggilan tool men-suspend run dan memunculkan *glass approval card* (alasan dinamis dari agent) dengan tombol **Allow once**, **Allow for session**, dan **Reject**. "Allow for session" menulis grant Redis sehingga gate dilewati untuk sisa session; arg tool yang diedit user (mis. prompt/aspect ratio di kartu approval) di-stage sebagai override yang dikonsumsi sekali (atomik).
-2. **Generic `request_clarification` tool** — untuk request ambigu, bukan permission. Agent bisa menanyakan hingga 5 pertanyaan (single choice / multiple choice / free text) lewat wizard; user bisa skip pertanyaan opsional, dan jawaban dipetakan kembali ke agent.
-
-Status disimpan di Redis:
-
-| Key | Fungsi |
-| --- | --- |
-| `chat-tool-grant:<sessionId>:<toolName>` | Grant "Allow for session" untuk tool |
-| `chat-tool-override:<sessionId>:<toolName>` | Override arg tool satu-kali (dari kartu approval) |
-| `chat-clarification:<id>` (+ `:decision`) | Rekam permintaan klarifikasi + jawabannya |
-
-Response yang terlambat (approval/klarifikasi sudah resolved atau TTL) bersifat idempoten — endpoint mengembalikan `{ ok: true, alreadyResolved: true }`, tidak error.
-
-### Model registry
-
-Katalog model ada di tabel `chat_model` (diseed oleh `pnpm --filter @anreal/api db:seed` — **idempotent**, run ulang menghasilkan `created=0 updated=0 removed=0`):
-
-| Kolom | Keterangan |
-| --- | --- |
-| `outputType` | `"text"` (default) atau `"image"`; model image tidak punya reasoning efforts |
-| `imageCapabilities` | JSONB — `quality`, `background`, `n` (min/max), `aspectRatios`/`resolutions` sesuai model |
-| harga, `iconSvg`, dll. | Metadata katalog untuk UI pemilih model |
-
-`GET /api/models` menyajikan katalog ke UI; seed melakukan **upsert** per model (created/updated dihitung, tidak ada duplikat). Response endpoint ini kini **digabung** dengan model milik connection BYOK pemanggil: setiap baris membawa `source` (`"catalog"` atau `"connection"`) dan `connectionId` (terisi hanya untuk baris `connection`).
-
-## BYOK provider connections
-
-Selain katalog model yang di-seed, tiap user bisa membawa **API key provider sendiri** (BYOK). BYOK mencakup **model chat/teks** dan **model image**: user mendaftarkan provider **connection** beserta model di atasnya, dan model-model itu ikut muncul di pemilih model composer. Model chat muncul di picker chat; model image muncul di picker model image dan, saat dipilih, dipakai **menggantikan key server bersama**. Kalau user belum punya satu pun model image BYOK, tidak ada yang berubah: generation image tetap dilayani key `OPENAI_*` bersama.
-
-**Menambah model.** Menu model di composer juga punya baris **"Add a model…"** yang membuka form **Settings → Providers** yang sama — hanya ada satu form, bukan dua — sehingga model bisa ditambahkan dari composer maupun dari Settings → Providers. Model yang ditambahkan dari salah satu tempat itu bisa dipakai untuk chat maupun kelima peran background (memory compaction, profile summary, site builder, vision helper, scheduled chat). Satu pengecualian: peran **Image understanding** hanya menerima model yang mendeklarasikan image input — model text-only tidak akan muncul di picker-nya (lihat catatan di bawah).
-
-**Connection, vendor, dan model.** Kosakatanya tiga lapis, dan dulu ambigu:
-
-- **Connection** — gateway/rute yang user tambahkan ("My Gateway", "OpenCode", "OpenRouter"). Satu connection melayani **model dari banyak vendor** sekaligus.
-- **Vendor** — siapa yang membuat model itu (`openai`, `google`, `deepseek`, `meta`, `xai`, atau apa pun yang user deklarasikan).
-- **Model** — model spesifiknya.
-
-"Kompatibel dengan API mana" **bukan lapisan keempat**: itu provider kind + API shape milik connection, yang mendeskripsikan **rute**-nya, bukan model satu per satu. Alur input-nya tetap dua tingkat — sebuah **connection** (provider kind + base URL opsional + API key + custom headers opsional), lalu **model** di atasnya (upstream model id, display name, context window, reasoning efforts, icon opsional); **vendor** adalah atribut yang user deklarasikan pada model itu. Semua connection dan model di-scope ke user pembuatnya — user lain tidak bisa melihat atau memakainya.
-
-**Vendor dideklarasikan, bukan diturunkan.** Gateway menamai model secara tidak konsisten, dan itulah alasan field ini ada: **OpenRouter** memberi prefix vendor (`openai/gpt-4o`, `anthropic/claude-sonnet-4`), sedangkan **OpenCode Zen** memberi prefix **dirinya sendiri** — `opencode/gpt-5.5` dengan `gpt-5.5` sebagai id modelnya yang polos. Jadi prefix tidak bisa dipercaya. Editor **menyarankan** vendor ketika prefix-nya cocok dengan vendor yang sudah dikenal katalog, tetapi keputusannya tetap milik user.
-
-**`vendorLabel` hanya facet filter.** Ia tidak pernah memengaruhi routing, konstruksi model, atau apa pun yang dilakukan sebuah run — mendeklarasikan vendor tidak mengubah cara request dikirim; ia hanya memberi label pada model agar bisa difilter dan diurutkan di picker.
-
-**Perilaku picker model.** Search selalu terlihat; **Filter** dan **Sort** adalah tombol ikon di sebelahnya yang membuka kontrolnya secara inline, dan masing-masing menampilkan titik kecil saat nilainya berbeda dari default. Chip dan threshold **diturunkan dari katalog**, tidak pernah dari daftar tetap — facet yang tidak bisa membedakan tidak ditampilkan sama sekali (satu vendor, atau tidak ada model dengan kemampuan image, berarti tidak ada barisnya). Filter **bergabung**: AND antar grup, OR di dalam satu grup. Sort: **Default** (urutan katalog), **Name**, **Price**, **Context**, dan **Vendor** — sengaja **tidak ada "popular"**, karena aplikasi tidak punya sinyal popularitas dan tidak memalsukannya. Model **tanpa context window yang dideklarasikan** diperlakukan sebagai belum dideklarasikan, bukan sebagai yang terkecil: ia dikeluarkan dari threshold Context dan diurutkan paling akhir di sort Context. Tampilan **list atau grid**, diingat per browser; panel grid lebih lebar dan menampilkan tag kapabilitas di tiap kartu, serta daftar opsinya bergulir setelah **8 baris** (list) atau **3 baris** (grid). Jumlah hasil **diumumkan ke screen reader, bukan ditampilkan**, dan **"Add a model…" tetap di luar area yang bergulir** supaya selalu bisa dijangkau.
-
-**Enkripsi.** API key provider dienkripsi saat disimpan (at rest) memakai AES-256-GCM dengan `PROVIDER_CREDENTIALS_KEY`. Key ini **wajib di production**; di dev/test, jika kosong, app memakai ephemeral key dengan peringatan sekali di console, sehingga credential yang tersimpan **tidak bertahan setelah restart**. Key ini **terpisah** dari `MCP_CREDENTIALS_KEY` — keduanya tidak bisa saling menggantikan.
-
-**API key bersifat write-only.** Tidak ada endpoint yang pernah mengembalikan API key, nilai custom header, atau `credentialsRef`. Sebagai gantinya, sebuah connection melaporkan `hasCredentials: true`. Credential hanya didekripsi di proses API/worker, saat run berjalan, dan tidak pernah masuk ke run recipe yang durable — recipe hanya menyimpan `connectionId`.
-
-**Slug model.** Model id diturunkan sebagai `<connection-slug>/<upstream-id tersanitasi>`, dengan suffix `-2`, `-3`, … sampai unik untuk user itu dan tidak bertabrakan dengan katalog global. Connection slug sendiri tidak boleh memakai namespace yang sudah dimiliki katalog. Daftar namespace terlarang itu **mengikuti katalog**: ia adalah gabungan dari set bawaan (`openai`, `deepseek`, `google`, `xai`, `meta`) dan slug provider aktif di katalog — jadi **menambahkan provider baru ke katalog otomatis menandai namespace-nya terlarang**, tanpa perubahan kode.
-
-**Batas.** Maks **10 connection** per user, **100 model** per user, dan **16 custom header** per connection (nama header ≤128 char, value ≤2048 char). Header bernama `authorization` ditolak — field API key adalah satu-satunya cara autentikasi. Base URL wajib memakai `https`, kecuali `localhost`/`127.0.0.1`.
-
-**Provider kind.** Ada enam: `openai`, `anthropic`, `gemini`, `grok`, `mistral`, dan `compatible` (endpoint apa pun yang OpenAI-compatible — OpenRouter, DeepSeek, Groq, Together, Fireworks, Ollama, vLLM, LM Studio, termasuk shim OpenAI-compat Anthropic/Gemini). Kind `compatible` wajib mengisi base URL. Reasoning effort bersifat adapter-neutral; kosakata per model adalah gabungan `none | minimal | low | medium | high | xhigh | max`.
-
-**Model image.** Model image hanya bisa didaftarkan di atas kind yang punya endpoint image: `compatible` (OpenAI-compatible, berbicara `POST /images` ala OpenRouter), `gemini`, dan `grok`. Connection native `openai`, `anthropic`, dan `mistral` tidak bisa membawa model image — alasannya tetap seperti sebelumnya: API images native OpenAI punya parameter berbeda dan tidak punya `input_references`, sedangkan alur `edit_image` aplikasi mengirim reference image dan membutuhkannya.
-
-**Kapabilitas image divalidasi saat disimpan.** `imageCapabilities` dideklarasikan saat save dan diperiksa terhadap apa yang benar-benar bisa dipenuhi kind itu, sehingga provider tidak pernah menerima request yang akan ditolaknya karena alasan yang sudah dideklarasikan. Bedanya antar kind besar:
-
-- `compatible` memenuhi `sizes`, `quality`, `background`, dan `n` — dengan `n` dibatasi execution limit tool.
-- `gemini` dan `grok` **tidak memenuhi kontrol opsional apa pun**: `quality`, `background`, dan `sizes` ditolak, dan `n` dipatok `1`, karena kedua adapter menurunkan bentuk image dari dimensi piksel, bukan dari opsi yang dikirim.
-- `gemini` dan `grok` juga menolak aspect ratio yang tidak bisa dinyatakan sebagai rasio gcd-reduced — jadi `21:9`, `19.5:9`, dan `9:19.5` tidak bisa dideklarasikan untuk keduanya.
-
-**Batasan yang jujur.** Tiga hal yang akan ditemui user:
-
-1. Connection **Gemini** tidak bisa membawa custom header — klien Gemini tidak punya seam untuk itu — sehingga gateway Gemini yang autentikasi lewat custom header tidak bisa mengautentikasi request image-nya.
-2. Untuk **Gemini**, keluarga **Imagen** (API `generateImages`) **tidak didukung** di versi ini: aplikasi mendorong image Gemini lewat `generateContent` saja. Tidak ada yang menolak id Imagen saat save, tetapi mendaftarkannya menghasilkan request yang dibawa shapes API yang salah — jadi id Imagen tidak didukung.
-3. Custom header Grok sampai ke request, tetapi lewat provider SDK, bukan lewat option wire-level yang dikendalikan aplikasi.
-
-Editor model di Settings → Providers menawarkan output type `image` hanya untuk kind yang mendukungnya, dan kapabilitas image **dikirim ulang penuh di setiap save** — save yang menghilangkannya akan mengosongkannya.
-
-**Model per peran.** Setiap peran background — memory compaction, profile summarization, site builder, vision helper, dan scheduled chat — bisa diarahkan ke model pilihannya sendiri. Detailnya di subsection **Model per peran** di bawah. Yang bisa dipilih per peran lewat katalog gabungan adalah model chat/teks; model image dipilih di picker image-nya sendiri.
-
-**Menguji connection.** `POST /api/providers/test` memvalidasi credential ke provider **tanpa menyimpan apa pun**; endpoint menerima `connectionId` opsional sehingga field key yang dibiarkan kosong akan memakai credential yang tersimpan. Test yang gagal mengembalikan pesan yang mudah dibaca dan bebas credential.
-
-### API providers
-
-Semua endpoint **require auth**, dan setiap respons di-scope ke user pemanggil:
-
-| Method | Path | Keterangan |
-| --- | --- | --- |
-| `GET` | `/api/providers/kinds` | Daftar provider kind + kosakata reasoning effort |
-| `GET` | `/api/providers` | Daftar connection user (tanpa secret) |
-| `POST` | `/api/providers` | Tambah connection |
-| `GET` | `/api/providers/:id` | Detail satu connection |
-| `PATCH` | `/api/providers/:id` | Ubah connection; kalau `apiKey` dihilangkan, key tersimpan tetap dipakai |
-| `DELETE` | `/api/providers/:id` | Hapus connection (cascade ke model-modelnya) |
-| `PATCH` | `/api/providers/:id/enabled` | Enable/disable connection |
-| `POST` | `/api/providers/test` | Validasi credential, tanpa persist |
-| `GET` | `/api/providers/:id/models` | Daftar model di connection |
-| `POST` | `/api/providers/:id/models` | Daftarkan model (auto-slug) |
-| `PATCH` | `/api/providers/:id/models/:modelId` | Ubah model |
-| `DELETE` | `/api/providers/:id/models/:modelId` | Hapus model |
-| `POST` | `/api/providers/:id/models/discover` | Inventory model dari provider |
-| `POST` | `/api/providers/:id/models/prefill` | Metadata yang dideklarasikan adapter |
-
-UI-nya ada di **Settings → Providers**.
-
-### Model per peran
-
-Setiap **peran background** bisa diarahkan ke model pilihannya sendiri lewat **Settings → Account → Model assignments** — satu picker per peran. Pilihan **Default** (opsi kosong) menghapus assignment dan mengembalikan peran itu ke jalur default-nya.
-
-| Peran | Label di UI | Yang diatur |
-| --- | --- | --- |
-| `memoryCompaction` | Memory compaction | Summarizer yang memadatkan memory percakapan lama di dalam satu run |
-| `profileSummary` | Profile summary | Summarizer profil user/proyek yang jalan di background |
-| `siteBuilder` | Site builder | Worker static site builder |
-| `visionHelper` | Image understanding | Model yang mendeskripsikan gambar untuk model chat text-only |
-| `scheduledChat` | Scheduled chats | Model yang dipakai run chat terjadwal (cron) |
-
-**Precedence.** Model sebuah peran diresolusi dengan urutan **assignment user → env var yang ada → default yang ada**. User yang belum pernah menyentuh pengaturan ini berjalan byte-identik seperti sebelum fitur ini ada — properti itulah yang dijaga seluruh desainnya.
-
-**Model chat tidak punya default tingkat akun.** Peran `chat` dihapus: model chat adalah model terakhir yang user pilih di composer, dengan urutan **model tersimpan di browser → model pertama di katalog → default aplikasi**. Sebelum fitur ini, efek reconcile sempat menulis fallback ke `chat.selectedModel`, sehingga nilai tersimpan bisa berarti "user memilih ini" atau "aplikasi yang menulis ini" — default chat yang kalah diam-diam dari nilai tulisan aplikasi sendiri lebih buruk daripada tidak ada default chat.
-
-**Lapisan env var.** Tiga peran masih membaca env var sebagai lapisan tengah: `PROFILE_SUMMARY_MODEL` (profile summary), `SITE_MODEL` (site builder), dan `VISION_HELPER_MODEL` (vision helper). `scheduledChat` tidak punya env var dan jatuh ke default completion model aplikasi (`openai/gpt-6-luna`). `memoryCompaction` tidak punya default sendiri.
-
-**Memory compaction mengikuti model chat** kecuali di-assign eksplisit. Default-nya adalah model chat milik run itu sendiri, bukan model terpisah — karena itu picker-nya menampilkan **"Using the chat model"**. **Vision helper** tanpa `VISION_HELPER_MODEL` memilih otomatis model gambar termurah ("Using the cheapest available image model").
-
-**Assignment yang menggantung turun diam-diam ke default.** Kalau user menghapus connection BYOK atau model yang ditunjuk assignment (atau seed memangkas model katalog), peran itu kembali ke jalur env/default-nya dan server menulis peringatan di log — user tidak diblokir dan tidak ada yang error.
-
-**Vision helper hanya menerima model yang mendeklarasikan image input.** Model text-only ditolak saat assignment disimpan, dengan pesan yang menyebutkannya — bukan gagal belakangan saat ada gambar masuk.
-
-**Tanpa restart.** Assignment diresolusi secara live; untuk `memoryCompaction` bahkan di dalam run yang sedang berjalan, sehingga percakapan aktif bisa memakai compactor model yang baru di tengah percakapan.
-
-Endpoint (semua **require auth**, di-scope ke user pemanggil):
-
-| Method | Path | Keterangan |
-| --- | --- | --- |
-| `GET` | `/api/models/roles` | Satu entri per peran: assignment (`modelId`, `null` bila dikosongkan) + default yang diresolusi (`defaultModelId`) |
-| `PUT` | `/api/models/roles` | Body `{ role, modelId }` — `modelId` adalah id katalog gabungan, atau `null` untuk menghapus assignment |
-
-## User profiling
-
-- Per-user (all chats) and per-project profiles are summarized in the background
-  (BullMQ `profile-summary` queue) from user messages only — tool calls and
-  assistant replies are excluded.
-- Profiles are injected into every chat as context blocks (`user_profile`,
-  `project_profile`); policy lives in agent instructions.
-- The agent can persist explicit facts immediately via `remember_user_profile`
-  when the user says "remember…".
-- View/reset profiles in Settings → Personalization (`GET`/`DELETE /api/profiling`).
-- Failed summary jobs are not retried forever: after `attempts: 3` the job dies
-  and the next chat re-opens a refresh window (watermark-derived delta keeps
-  nothing lost).
-
-## Frontend notes
-
-- Endpoint API di UI mengikuti hostname halaman dan VITE_API_PORT dari root `.env` (localhost → `:<VITE_API_PORT>`, `192.168.x.x` → `http://192.168.x.x:<VITE_API_PORT>`). Override lewat `VITE_API_BASE`.
-- Session aktif disimpan di `localStorage` (`chat.sessionId`).
-- Pesan asisten dirender lewat `MathMarkdown`: normalisasi delimiter LaTeX umum (`\[...\]`, `\(...\)`, `[ \frac{...} ]`) lalu KaTeX.
-
-## Notes
-
-- Prisma Client di-generate ke `apps/api/src/generated/prisma` (gitignored). Jalankan `db:generate` setelah clone atau ubah schema.
-- Chat memory memakai `@anvia/memory-prisma` terhadap model `AgentMemory*` di `apps/api/prisma/schema.prisma`.
-- CORS di API mengizinkan `PLATFORM_ORIGIN`, origin API (Scalar), dan `TRUSTED_ORIGINS`. Native mobile tidak terkena CORS.
-- Tanpa `OPENAI_API_KEY` yang valid, stream chat akan gagal di sisi agent.
-- Langfuse opsional: kosongkan `LANGFUSE_*` jika tidak dipakai (pastikan tracing tidak memblok request di setup Anda).
-- Semua package Anvia pada monorepo ini dikunci ke patch 1.0.x terbaru yang dipakai aplikasi (`@anvia/core` `1.0.9`, `@anvia/client`/`@anvia/server`/`@anvia/mcp`/`@anvia/qdrant` `1.0.10`, `@anvia/react`/`@anvia/react-ui` `1.0.11`); browser memakai `@anvia/client` untuk UI/protocol types dan exact `*Primitive` exports dari `@anvia/react-ui`.
-- Memory memakai token-aware compaction native Anvia v1 dengan atomic prefix replacement dari `@anvia/memory-prisma`; aplikasi tidak memiliki engine, metadata log, event status, atau fallback summary sendiri.
-- Composer editor adalah native textarea yang dimiliki aplikasi: tetap editable saat status `submitted`/`streaming`, mengirim saat `ready`, dan queue/steer atau stop saat run aktif. Tidak ada patch `node_modules`, package patch, alias kompatibilitas, atau fallback v0.
-- Antrean follow-up per session disimpan di `localStorage` (`chat.queue.<sessionId>`); event stream `queued_message_applied` adalah ack dari worker saat pesan steered masuk ke run.
-
-## Troubleshooting singkat
-
-| Masalah | Cek |
-| --- | --- |
-| API tidak connect ke DB | `docker compose ps`, pastikan port `15433`, cocokkan `DATABASE_URL` |
-| Prisma error setelah pull | `pnpm --filter @anreal/api db:generate` lalu `db:migrate` |
-| UI kosong / CORS | Pastikan API jalan di `:3001` dan `pnpm --filter @anreal/api dev` |
-| Math tidak ter-render | Pastikan asisten memakai `$...$` / `$$...$$` (instruksi ada di base prompt) |
+| [01-login-logout.mp4](recordings/01-login-logout.mp4) | Sign in, the workspace handoff, sign out |
+| [02-muse-spark-web-search.mp4](recordings/02-muse-spark-web-search.mp4) | Model picker, approval, web search |
+| [03-sales-data-analysis.mp4](recordings/03-sales-data-analysis.mp4) | A CSV, then the chart |
+| [04-deep-research.mp4](recordings/04-deep-research.mp4) | A sourced research brief |
+| [05-pdf-report.mp4](recordings/05-pdf-report.mp4) | A multi-page PDF report |
+| [06-static-site.mp4](recordings/06-static-site.mp4) | A static site, built and previewed |
+
+## License
+
+[ISC](https://www.isc.org/licenses/), as declared in `package.json`.
