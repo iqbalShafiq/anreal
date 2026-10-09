@@ -1,10 +1,18 @@
-# anreal
+<p align="center">
+  <img src="docs/images/anreal-mark.svg" alt="anreal" width="80" height="80">
+</p>
 
-A private workspace for questions that start in a document and end as something you can keep: a chart, a cited brief, a PDF, or a site.
+<h1 align="center">anreal</h1>
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
-[![Node.js](https://img.shields.io/badge/node-22.18%2B-339933?logo=node.js&logoColor=white)](https://nodejs.org)
-[![pnpm](https://img.shields.io/badge/pnpm-10.30.3-F69220?logo=pnpm&logoColor=white)](https://pnpm.io)
+<p align="center">
+  A private workspace for questions that start in a document and end as something you can keep: a chart, a cited brief, a PDF, or a site.
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License"></a>
+  <a href="https://nodejs.org"><img src="https://img.shields.io/badge/node-22.18%2B-339933?logo=node.js&logoColor=white" alt="Node.js 22.18+"></a>
+  <a href="https://pnpm.io"><img src="https://img.shields.io/badge/pnpm-10.30.3-F69220?logo=pnpm&logoColor=white" alt="pnpm 10.30.3"></a>
+</p>
 
 anreal is a full-stack workspace built on [Anvia](https://anvia.dev). You attach a file or ask in plain language. The agent streams the work into the same thread: the search, the numbers, the sources, and the file it just made. Sessions live in Postgres, document chunks live in Qdrant, and the model is whichever provider you configure.
 
