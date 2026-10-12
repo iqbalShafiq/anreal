@@ -18,23 +18,23 @@ importers:
         specifier: workspace:*
         version: link:../../packages/agent
       '@anvia/client':
-        specifier: 1.2.0
-        version: 1.2.0(@anvia/core@1.5.0(zod@4.6.5))
+        specifier: 1.4.2
+        version: 1.4.2(@anvia/core@1.14.0(zod@4.6.5))
       '@anvia/core':
-        specifier: 1.5.0
-        version: 1.5.0(zod@4.6.5)
+        specifier: 1.14.0
+        version: 1.14.0(zod@4.6.5)
       '@anvia/mcp':
-        specifier: 1.1.3
-        version: 1.1.3(@anvia/core@1.5.0(zod@4.6.5))
+        specifier: 1.2.4
+        version: 1.2.4(@anvia/core@1.14.0(zod@4.6.5))
       '@anvia/memory-prisma':
-        specifier: 1.2.1
-        version: 1.2.1(@anvia/core@1.5.0(zod@4.6.5))(@prisma/client@7.10.0(prisma@7.10.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(typescript@7.0.2))(typescript@7.0.2))
+        specifier: 1.2.2
+        version: 1.2.2(@anvia/core@1.14.0(zod@4.6.5))(@prisma/client@7.10.0(prisma@7.10.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(typescript@7.0.2))(typescript@7.0.2))
       '@anvia/sandbox':
-        specifier: 1.1.4
-        version: 1.1.4(@anvia/core@1.5.0(zod@4.6.5))
+        specifier: 1.2.0
+        version: 1.2.0(@anvia/core@1.14.0(zod@4.6.5))
       '@anvia/server':
-        specifier: 1.1.4
-        version: 1.1.4(@anvia/client@1.2.0(@anvia/core@1.5.0(zod@4.6.5)))
+        specifier: 1.3.2
+        version: 1.3.2(@anvia/client@1.4.2(@anvia/core@1.14.0(zod@4.6.5)))
       '@aws-sdk/client-s3':
         specifier: ^3.888.0
         version: 3.1096.0
@@ -131,17 +131,17 @@ importers:
   apps/platform:
     dependencies:
       '@anvia/client':
-        specifier: 1.2.0
-        version: 1.2.0(@anvia/core@1.5.0(zod@4.6.5))
+        specifier: 1.4.2
+        version: 1.4.2(@anvia/core@1.14.0(zod@4.6.5))
       '@anvia/core':
-        specifier: 1.5.0
-        version: 1.5.0(zod@4.6.5)
+        specifier: 1.14.0
+        version: 1.14.0(zod@4.6.5)
       '@anvia/react':
-        specifier: 1.1.3
-        version: 1.1.3(@anvia/client@1.2.0(@anvia/core@1.5.0(zod@4.6.5)))(@anvia/core@1.5.0(zod@4.6.5))(react@19.2.8)
+        specifier: 1.1.4
+        version: 1.1.4(@anvia/client@1.4.2(@anvia/core@1.14.0(zod@4.6.5)))(@anvia/core@1.14.0(zod@4.6.5))(react@19.2.8)
       '@anvia/react-ui':
-        specifier: 1.1.5
-        version: 1.1.5(@anvia/client@1.2.0(@anvia/core@1.5.0(zod@4.6.5)))(@anvia/react@1.1.3(@anvia/client@1.2.0(@anvia/core@1.5.0(zod@4.6.5)))(@anvia/core@1.5.0(zod@4.6.5))(react@19.2.8))(@floating-ui/dom@1.8.0)(@tiptap/extensions@3.31.3(@tiptap/core@3.31.3(@tiptap/pm@3.31.3))(@tiptap/pm@3.31.3))(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+        specifier: 1.1.7
+        version: 1.1.7(@anvia/client@1.4.2(@anvia/core@1.14.0(zod@4.6.5)))(@anvia/react@1.1.4(@anvia/client@1.4.2(@anvia/core@1.14.0(zod@4.6.5)))(@anvia/core@1.14.0(zod@4.6.5))(react@19.2.8))(@floating-ui/dom@1.8.0)(@tiptap/extensions@3.31.3(@tiptap/core@3.31.3(@tiptap/pm@3.31.3))(@tiptap/pm@3.31.3))(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@fontsource-variable/geist':
         specifier: ^5.3.0
         version: 5.3.0
@@ -243,32 +243,32 @@ importers:
   packages/agent:
     dependencies:
       '@anvia/anthropic':
-        specifier: 1.1.6
-        version: 1.1.6(@anvia/core@1.5.0(zod@4.6.5))(zod@4.6.5)
+        specifier: 1.1.7
+        version: 1.1.7(@anvia/core@1.14.0(zod@4.6.5))(zod@4.6.5)
       '@anvia/core':
-        specifier: 1.5.0
-        version: 1.5.0(zod@4.6.5)
+        specifier: 1.14.0
+        version: 1.14.0(zod@4.6.5)
       '@anvia/gemini':
-        specifier: 1.1.6
-        version: 1.1.6(@anvia/core@1.5.0(zod@4.6.5))
+        specifier: 1.1.7
+        version: 1.1.7(@anvia/core@1.14.0(zod@4.6.5))
       '@anvia/grok':
-        specifier: 1.1.7
-        version: 1.1.7(@anvia/core@1.5.0(zod@4.6.5))(@aws-sdk/credential-provider-node@3.972.73)(@smithy/signature-v4@5.6.11)(undici@8.10.2)(ws@8.21.1)(zod@4.6.5)
+        specifier: 1.1.10
+        version: 1.1.10(@anvia/core@1.14.0(zod@4.6.5))(@aws-sdk/credential-provider-node@3.972.73)(@smithy/signature-v4@5.6.11)(undici@8.11.2)(ws@8.21.1)(zod@4.6.5)
       '@anvia/langfuse':
-        specifier: 1.2.0
-        version: 1.2.0(@anvia/core@1.5.0(zod@4.6.5))(@opentelemetry/core@2.11.0(@opentelemetry/api@1.9.1))(@opentelemetry/exporter-trace-otlp-http@0.221.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.11.0(@opentelemetry/api@1.9.1))
+        specifier: 1.2.1
+        version: 1.2.1(@anvia/core@1.14.0(zod@4.6.5))(@opentelemetry/core@2.11.0(@opentelemetry/api@1.9.1))(@opentelemetry/exporter-trace-otlp-http@0.221.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.11.0(@opentelemetry/api@1.9.1))
       '@anvia/mcp':
-        specifier: 1.1.3
-        version: 1.1.3(@anvia/core@1.5.0(zod@4.6.5))
+        specifier: 1.2.4
+        version: 1.2.4(@anvia/core@1.14.0(zod@4.6.5))
       '@anvia/mistral':
-        specifier: 1.1.4
-        version: 1.1.4(@anvia/core@1.5.0(zod@4.6.5))(@opentelemetry/api@1.9.1)(@opentelemetry/exporter-trace-otlp-http@0.221.0(@opentelemetry/api@1.9.1))(@opentelemetry/resources@2.11.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.11.0(@opentelemetry/api@1.9.1))
+        specifier: 1.1.5
+        version: 1.1.5(@anvia/core@1.14.0(zod@4.6.5))(@opentelemetry/api@1.9.1)(@opentelemetry/exporter-trace-otlp-http@0.221.0(@opentelemetry/api@1.9.1))(@opentelemetry/resources@2.11.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.11.0(@opentelemetry/api@1.9.1))
       '@anvia/openai':
-        specifier: 1.1.7
-        version: 1.1.7(@anvia/core@1.5.0(zod@4.6.5))(@aws-sdk/credential-provider-node@3.972.73)(@smithy/signature-v4@5.6.11)(undici@8.10.2)(ws@8.21.1)(zod@4.6.5)
+        specifier: 1.3.0
+        version: 1.3.0(@anvia/core@1.14.0(zod@4.6.5))(@aws-sdk/credential-provider-node@3.972.73)(@smithy/signature-v4@5.6.11)(undici@8.11.2)(ws@8.21.1)(zod@4.6.5)
       '@anvia/qdrant':
-        specifier: 1.1.3
-        version: 1.1.3(@anvia/core@1.5.0(zod@4.6.5))(typescript@7.0.2)
+        specifier: 1.1.4
+        version: 1.1.4(@anvia/core@1.14.0(zod@4.6.5))(typescript@7.0.2)
       '@qdrant/js-client-rest':
         specifier: ^1.19.0
         version: 1.19.0(typescript@7.0.2)
@@ -279,8 +279,8 @@ importers:
         specifier: ^11.0.0
         version: 11.0.0
       openai:
-        specifier: ^7.25.0
-        version: 7.25.0(@aws-sdk/credential-provider-node@3.972.73)(@smithy/signature-v4@5.6.11)(undici@8.10.2)(ws@8.21.1)(zod@4.6.5)
+        specifier: ^7.30.0
+        version: 7.32.0(@aws-sdk/credential-provider-node@3.972.73)(@smithy/signature-v4@5.6.11)(undici@8.11.2)(ws@8.21.1)(zod@4.6.5)
       read-excel-file:
         specifier: ^9.3.10
         version: 9.3.10
@@ -321,18 +321,22 @@ packages:
   '@anthropic-ai/vertex-sdk@0.19.11':
     resolution: {integrity: sha512-yrXCUBL4RiW1dK/So/jyMCutDX2KeiY7jyOIWkU1qiZbuhWoIzPk7s1BDL+QaTKnScX+Ygg+/HHLAcgp9jEsUg==}
 
-  '@anvia/anthropic@1.1.6':
-    resolution: {integrity: sha512-qEVDq1uVuKqBXhmrXCDwHyWu+WYD6CuaR2uYtj1eOWFhmkNORywNVgmKQzInzhYu+Jj3mH60EBBlhyJrHtuNYg==}
+  '@anvia/anthropic@1.1.7':
+    resolution: {integrity: sha512-fcq1gkRJKPJJ4a7mWOOLraJ+OqEddhHAtHiERBXKURJ/FOMU0u267lz4as4TFEtvWV9cmkogwpE9mdsJ6cURKA==}
     peerDependencies:
-      '@anvia/core': ^1.5.0
+      '@anvia/core': ^1.6.1
 
-  '@anvia/client@1.2.0':
-    resolution: {integrity: sha512-nF+QsbdbVe/b2xnGfKTkO7ooNq/bENA5wvT/0EtCQlHE4zurhZKGV3HIkF0+dTUiBpdiyt6V0DFc4hfS0jH75w==}
+  '@anvia/client@1.4.2':
+    resolution: {integrity: sha512-j5ZnycPavIekowLYOs8Jx55D+K3dq7/r2s2W8hc7Kr6cs131NOfZJD8VW8smPjERDJK8uTo1lUbizOPfBRjgog==}
     peerDependencies:
-      '@anvia/core': ^1.2.1
+      '@anvia/core': ^1.14.0
+      '@anvia/durable': ^0.8.0 || ^0.9.0 || ^0.10.0
+    peerDependenciesMeta:
+      '@anvia/durable':
+        optional: true
 
-  '@anvia/core@1.5.0':
-    resolution: {integrity: sha512-oGhutUnp9DbOWwAiTih5fJgOUbdXaITHE83sNsc1m+PWo2im8Rzs1W68CSJy1LfFTlSye7AWOsnuZDMnijwUyg==}
+  '@anvia/core@1.14.0':
+    resolution: {integrity: sha512-YNnyVgtF2OxIiUFa7h5D4lDGHMrq479SIR4d489IuVQMSWAMKWRH6h6DKw0aiM+HeVW80L1innfjiZyjw0M8ag==}
     peerDependencies:
       '@valibot/to-json-schema': ^1.8.0
       zod: ^4.6.5
@@ -340,32 +344,32 @@ packages:
       '@valibot/to-json-schema':
         optional: true
 
-  '@anvia/gemini@1.1.6':
-    resolution: {integrity: sha512-652FcI0Vm9YLlm3ngh95MU2vUrn5HqruK1KM01feu4I0BMfyUuAh6jhS2xksHC6KEP763nGSEHC5jXi3EcQGdg==}
+  '@anvia/gemini@1.1.7':
+    resolution: {integrity: sha512-qmB/XCO3Ue460NNuu4coEMZQtpaWVltQAkakgufsCNX0KqBTYIyprKTEqQeJ4ZkZWcIhigfbrekmn2UIhq4rXQ==}
     peerDependencies:
-      '@anvia/core': ^1.5.0
+      '@anvia/core': ^1.6.1
 
-  '@anvia/grok@1.1.7':
-    resolution: {integrity: sha512-kLsozpM3on2Ntr+SoMrj6WbsFigm09PmYW/7aTwkVvyHg76X2fQsyzxQ8/+54/6/z8J6Y3JPLL+RwP3NS8uwMQ==}
+  '@anvia/grok@1.1.10':
+    resolution: {integrity: sha512-02TQGdzJp4dgcxF9rDLC53S9YRruGDzoC9u+fwo/WZYl3HsPtA0U7oIqLNffDe9XycES4Pguwie9zScNxMpr7Q==}
     peerDependencies:
-      '@anvia/core': ^1.5.0
+      '@anvia/core': ^1.10.0
 
-  '@anvia/langfuse@1.2.0':
-    resolution: {integrity: sha512-nrA5JArl6uG3pom9py3zfMT5EfKL4OQXQirY3gFkZpy+xX5fiBszTdbtYMP/qBIn3jNM4ymHsJfG51Co8pOHGw==}
+  '@anvia/langfuse@1.2.1':
+    resolution: {integrity: sha512-IXjP8uFsOsUu5XX46mPHYu6N/Nk11jbPR191nuNhSwDWsP826xTGZZowR5zgQI5LTMnYXbK/7g8gFGUKC35vxA==}
     peerDependencies:
-      '@anvia/core': ^1.4.0
+      '@anvia/core': ^1.6.1
 
-  '@anvia/mcp@1.1.3':
-    resolution: {integrity: sha512-NBvymuPk4RGYNRqrvKWjVyKnX+38gd68jPIyWZpEzD5neQ49/1YOKKtOrTmGdl2B31VZf4mrc5n6JnQUOJBrnQ==}
+  '@anvia/mcp@1.2.4':
+    resolution: {integrity: sha512-2867gLFJcuOwNmMxMK9r6Vb1GZLJZX0Kjg09e1CjJyBFDP5EJZj/oVdb88BQnfcq6ngv8/WTog39k3QTTWv5KA==}
     engines: {node: '>=20'}
     peerDependencies:
-      '@anvia/core': ^1.2.0
+      '@anvia/core': ^1.11.1
 
-  '@anvia/memory-prisma@1.2.1':
-    resolution: {integrity: sha512-hvDH90Bn8vFz2LWDNmOXNPCRIN0FdH4eLmZ5PDaiYxu6EQjuPlTKSr0Ydkqp5JaFC/6XqDKt3wDDPkZ6Xr7bcA==}
+  '@anvia/memory-prisma@1.2.2':
+    resolution: {integrity: sha512-CnJc80/MqoZ6RnQSGw2gsri/tx7yYSLHdbvb6p6CpAM+TRKpjHnpSiBjLyN/d+bTquHMsfQWlAvMkYamA0B5eg==}
     hasBin: true
     peerDependencies:
-      '@anvia/core': ^1.3.1
+      '@anvia/core': ^1.6.1
       '@prisma/client': '>=7.10.0 <8.0.0'
       '@prisma/orm-postgres': 8.0.0-rc.11
     peerDependenciesMeta:
@@ -374,55 +378,59 @@ packages:
       '@prisma/orm-postgres':
         optional: true
 
-  '@anvia/mistral@1.1.4':
-    resolution: {integrity: sha512-ZBgpxcoaP7xwBYP7urMad+UH5tSh7XYdQ7DHM9t1APY6TrEjIOf3+gWEXluNak/0BD1b39f62V7bPShLrs7Y5A==}
+  '@anvia/mistral@1.1.5':
+    resolution: {integrity: sha512-kV5K8F3A2CAwtasoWuFMPtscQh8QVe3AA4GNM7N4r1Aa0XnEqaVQKvnl+/0k9eHKxoTGhaesB/DQhVZVFuajyA==}
     peerDependencies:
-      '@anvia/core': ^1.3.1
+      '@anvia/core': ^1.6.1
 
-  '@anvia/openai@1.1.7':
-    resolution: {integrity: sha512-qB9cmFV5975vFe2EFpRmyk//t6WZds/lpeSzujP8i4G83AsZdFvsPEm7PBSus3e8Y7UFrDCcs4rtxYYbFmsT2Q==}
+  '@anvia/openai@1.3.0':
+    resolution: {integrity: sha512-fj4leLSBkbpfu7nmBFaZsafeEtgbe0YJDmXJu+fn5eCP0IThVp4dxqJq+aQ9vjKIiC6RKJM0xoUda8Sy0pHj3A==}
     peerDependencies:
-      '@anvia/core': ^1.5.0
+      '@anvia/core': ^1.10.0
 
-  '@anvia/qdrant@1.1.3':
-    resolution: {integrity: sha512-+Uql4grK+qKx6KtT0xuittP5u2xghPdw8hrA7whqeO6CyF3fGG/bJil+7p2ITTIt9zlAWcdWsAdP4aF/H3UjIQ==}
+  '@anvia/qdrant@1.1.4':
+    resolution: {integrity: sha512-B9J7Sbsc5ta1lq9qJCyDFjF99UzcDn048ul4YXL+FslaeqY8tGVaHf8TVqGwlilCj714Vd/EvOrWHJthKo0dTA==}
     peerDependencies:
-      '@anvia/core': ^1.2.0
+      '@anvia/core': ^1.6.1
 
-  '@anvia/react-ui@1.1.5':
-    resolution: {integrity: sha512-GYcUYnqn+HkALGUUWAQaNV/Qp7zeItPtKZp4+SMAkggPVvGaS1hukz/bvmWHTVZ6nq/zXALv3KINV3hbx8jBtw==}
+  '@anvia/react-ui@1.1.7':
+    resolution: {integrity: sha512-XGryNsznwxtw/oQqItpSTDN68T3gr+UkQ2LbTKfzIZJaPt03+HUvN62b+BsM8BhVkB4EJkn9/FTMCpTQOqG3kg==}
     peerDependencies:
-      '@anvia/client': ^1.2.0
-      '@anvia/graph': ^1.1.4
-      '@anvia/react': ^1.1.3
+      '@anvia/client': ^1.2.1
+      '@anvia/graph': ^1.1.5
+      '@anvia/react': ^1.1.4
       react: '>=18'
       react-dom: '>=18'
     peerDependenciesMeta:
       '@anvia/graph':
         optional: true
 
-  '@anvia/react@1.1.3':
-    resolution: {integrity: sha512-FuZNQI0JCxF4yTStHJV4+YjYJIko9X+A/xmVcu+EHax97UyIJq+DuAOhYTHWsKF8y1w0BLPTPdQPBX910zFZQQ==}
+  '@anvia/react@1.1.4':
+    resolution: {integrity: sha512-2nhyFgurTWYjNYR4/0cogiXs4wrGxDgBRYa/svkCadXIz4ph4BbRCSWDwezUonXulJa/miwpUi/zIFBkP8QQ+g==}
     peerDependencies:
-      '@anvia/client': ^1.1.3
-      '@anvia/core': ^1.2.0
-      '@anvia/graph': ^1.1.3
+      '@anvia/client': ^1.2.1
+      '@anvia/core': ^1.6.1
+      '@anvia/graph': ^1.1.5
       react: '>=18'
     peerDependenciesMeta:
       '@anvia/graph':
         optional: true
 
-  '@anvia/sandbox@1.1.4':
-    resolution: {integrity: sha512-EF/3/1SPoKqQid/7qzUFefzsLjT61kkIb3TNgzI/+mV74kf+ZRWTucSKd9+tV0EDwvFUzeG2fdHHegGJjGubLw==}
+  '@anvia/sandbox@1.2.0':
+    resolution: {integrity: sha512-lTt7S+YWrHc9TGOvhHAUZUZypkVWVjltxHhPYZ3qVzsZWVAON0rE/ZYOqKoWFu8Y2DFnKNEpzK48H8Xr/AP6Kw==}
     engines: {node: '>=20.12.0'}
     hasBin: true
     peerDependencies:
-      '@anvia/core': ^1.3.1
+      '@anvia/core': ^1.13.0
 
-  '@anvia/server@1.1.4':
-    resolution: {integrity: sha512-iGzAhUp5jrLEcnX1tzRuso0RMW2kojczd23ur3d411ZLDkBZnMEWgqxCRxgNa9zjlwP47m3Vjrv1e5TAMewXVQ==}
+  '@anvia/server@1.3.2':
+    resolution: {integrity: sha512-lgzwUd5QAVlnDgvgA8mRX9EeSYDEckimh/3788XlPta0b3jcjFQtYzeqr8ypBFFU1evOwsSeFrwFpR6lp2v0UQ==}
     peerDependencies:
-      '@anvia/client': ^1.2.0
+      '@anvia/client': ^1.4.2
+      '@anvia/durable': ^0.8.0 || ^0.9.0 || ^0.10.0
+    peerDependenciesMeta:
+      '@anvia/durable':
+        optional: true
 
   '@asamuzakjp/css-color@6.0.7':
     resolution: {integrity: sha512-vC/bk1Lz7Tn/EfU9/apOTBk80/8dyGyWMowPoV1tJ52muDGsDqt2HPT2klrFUiY60MQmQv9q8yIht15JnBgDGw==}
@@ -992,12 +1000,12 @@ packages:
       '@opentelemetry/sdk-trace-base':
         optional: true
 
-  '@modelcontextprotocol/client@2.0.0':
-    resolution: {integrity: sha512-8f1OghQ2rjzIOfqgUCP+8GiUWqRs89njoWLNqAe8kWmDePv3s1fZXseej+QXemssEuuOvLLmLO/kqM3IQHtISw==}
+  '@modelcontextprotocol/client@2.3.1':
+    resolution: {integrity: sha512-mIGZXpHsjnZ6lD+gD/WCMpR5k8yVQQ8nNFH1N0Srf7AvnwTUMYD6pvTY8ng2+He5FfV7YMZLmrjL7cLa/cc3dQ==}
     engines: {node: '>=20'}
 
-  '@modelcontextprotocol/core@2.0.0':
-    resolution: {integrity: sha512-pJCEwGG7Lfr/+PQp9ZTwKXNeO5wzbfKL7H3MYpCorM4oFBoQrdjnBgEoqG+RjhsvS1FKrDbKux+M1HhlnGWqcA==}
+  '@modelcontextprotocol/core@2.3.1':
+    resolution: {integrity: sha512-laVmIhPGpWi7rG9q+0UigblRN0Hws/Yjlb6qLFtVqryXVLkc4h+yN8z731POD2LnAGQlFe7/tXhUm7Bi0YB91g==}
     engines: {node: '>=20'}
 
   '@msgpackr-extract/msgpackr-extract-darwin-arm64@3.0.4':
@@ -3484,8 +3492,8 @@ packages:
   markdown-table@3.0.4:
     resolution: {integrity: sha512-wiYz4+JrLyb/DqW2hkFJxP7Vd7JuTDm77fvbM8VfEQdmSMqcImWeeRbHwZjBjIFki/VaMK2BhFi7oUUZeM5bqw==}
 
-  marked@18.0.13:
-    resolution: {integrity: sha512-xTxVzZsBFwunP6HDmtBkabUQEYArnP7/rMDGmPj9SlrKlQ4i8MdYVow+nJL0eOqwpUqhzBoTBRADGN6uYwPyOw==}
+  marked@18.1.0:
+    resolution: {integrity: sha512-PamYXWWWg2nboG3oX5Ffzpy3EFZROqZJK9hSlMmUnekp7TxPs5DcT95vwd46m73/exfKCRVMtgXoPMI4FEJL6w==}
     engines: {node: '>= 20'}
     hasBin: true
 
@@ -3704,8 +3712,8 @@ packages:
   ohash@2.0.11:
     resolution: {integrity: sha512-RdR9FQrFwNBNXAr4GixM8YaRZRJ5PUWbKYbE5eOsrwAjJW0q2REGcf79oYPsLyskQCZG1PLN+S/K1V00joZAoQ==}
 
-  openai@7.25.0:
-    resolution: {integrity: sha512-cnk0d4QT58Vq0vl2KG+DCa/C2+cXthsK2rUeaqtprq33mKv9dlX8o7fWSS283wa2IE/aVdsRyX1+Dqwz551olg==}
+  openai@7.32.0:
+    resolution: {integrity: sha512-avqxu/jl1gsVBCBgFNPr9sTh+wZppQphuhhFy1zEvAJxEaJ4t0ery6hZdOT9kws/EcNTARoQcZs2IT3bliE1SA==}
     engines: {node: '>=22.0.0'}
     peerDependencies:
       '@aws-sdk/credential-provider-node': '>=3.972.0 <4'
@@ -4271,8 +4279,8 @@ packages:
     resolution: {integrity: sha512-HvltHd7avK13QIw/oLe4qoOLyoVSoafqJ2jYOrtMRBkbYT31eiBQ8O0ehRKZiEZCMEyLFQNIADpgCWC5fALvYQ==}
     engines: {node: '>=22.19.0'}
 
-  undici@8.10.2:
-    resolution: {integrity: sha512-/y4/bH9YNU5hi9NIrpOuvGXFcxrj3CMrV+/AYpowAYTpHn8gX/XPFjNy766FPoYY0miQhdW977JFWKGNhBdwyQ==}
+  undici@8.11.2:
+    resolution: {integrity: sha512-u4UB2/IrKdU6lFxumHmmo1a3fCQO5tzQllRorfoRS63txhrB7xTpSn1PftwC4qEHkOaqP95fCWW4lJzwErwzhQ==}
     engines: {node: '>=22.19.0'}
 
   unicode-properties@1.4.1:
@@ -4622,27 +4630,27 @@ snapshots:
       - supports-color
       - zod
 
-  '@anvia/anthropic@1.1.6(@anvia/core@1.5.0(zod@4.6.5))(zod@4.6.5)':
+  '@anvia/anthropic@1.1.7(@anvia/core@1.14.0(zod@4.6.5))(zod@4.6.5)':
     dependencies:
       '@anthropic-ai/sdk': 0.128.0(zod@4.6.5)
       '@anthropic-ai/vertex-sdk': 0.19.11(zod@4.6.5)
-      '@anvia/core': 1.5.0(zod@4.6.5)
+      '@anvia/core': 1.14.0(zod@4.6.5)
     transitivePeerDependencies:
       - supports-color
       - zod
 
-  '@anvia/client@1.2.0(@anvia/core@1.5.0(zod@4.6.5))':
+  '@anvia/client@1.4.2(@anvia/core@1.14.0(zod@4.6.5))':
     dependencies:
-      '@anvia/core': 1.5.0(zod@4.6.5)
+      '@anvia/core': 1.14.0(zod@4.6.5)
 
-  '@anvia/core@1.5.0(zod@4.6.5)':
+  '@anvia/core@1.14.0(zod@4.6.5)':
     dependencies:
       yaml: 2.9.1
       zod: 4.6.5
 
-  '@anvia/gemini@1.1.6(@anvia/core@1.5.0(zod@4.6.5))':
+  '@anvia/gemini@1.1.7(@anvia/core@1.14.0(zod@4.6.5))':
     dependencies:
-      '@anvia/core': 1.5.0(zod@4.6.5)
+      '@anvia/core': 1.14.0(zod@4.6.5)
       '@google/genai': 2.24.0
     transitivePeerDependencies:
       - '@modelcontextprotocol/sdk'
@@ -4650,11 +4658,11 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  '@anvia/grok@1.1.7(@anvia/core@1.5.0(zod@4.6.5))(@aws-sdk/credential-provider-node@3.972.73)(@smithy/signature-v4@5.6.11)(undici@8.10.2)(ws@8.21.1)(zod@4.6.5)':
+  '@anvia/grok@1.1.10(@anvia/core@1.14.0(zod@4.6.5))(@aws-sdk/credential-provider-node@3.972.73)(@smithy/signature-v4@5.6.11)(undici@8.11.2)(ws@8.21.1)(zod@4.6.5)':
     dependencies:
-      '@anvia/core': 1.5.0(zod@4.6.5)
-      '@anvia/openai': 1.1.7(@anvia/core@1.5.0(zod@4.6.5))(@aws-sdk/credential-provider-node@3.972.73)(@smithy/signature-v4@5.6.11)(undici@8.10.2)(ws@8.21.1)(zod@4.6.5)
-      openai: 7.25.0(@aws-sdk/credential-provider-node@3.972.73)(@smithy/signature-v4@5.6.11)(undici@8.10.2)(ws@8.21.1)(zod@4.6.5)
+      '@anvia/core': 1.14.0(zod@4.6.5)
+      '@anvia/openai': 1.3.0(@anvia/core@1.14.0(zod@4.6.5))(@aws-sdk/credential-provider-node@3.972.73)(@smithy/signature-v4@5.6.11)(undici@8.11.2)(ws@8.21.1)(zod@4.6.5)
+      openai: 7.32.0(@aws-sdk/credential-provider-node@3.972.73)(@smithy/signature-v4@5.6.11)(undici@8.11.2)(ws@8.21.1)(zod@4.6.5)
     transitivePeerDependencies:
       - '@aws-sdk/credential-provider-node'
       - '@smithy/hash-node'
@@ -4663,9 +4671,9 @@ snapshots:
       - ws
       - zod
 
-  '@anvia/langfuse@1.2.0(@anvia/core@1.5.0(zod@4.6.5))(@opentelemetry/core@2.11.0(@opentelemetry/api@1.9.1))(@opentelemetry/exporter-trace-otlp-http@0.221.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.11.0(@opentelemetry/api@1.9.1))':
+  '@anvia/langfuse@1.2.1(@anvia/core@1.14.0(zod@4.6.5))(@opentelemetry/core@2.11.0(@opentelemetry/api@1.9.1))(@opentelemetry/exporter-trace-otlp-http@0.221.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.11.0(@opentelemetry/api@1.9.1))':
     dependencies:
-      '@anvia/core': 1.5.0(zod@4.6.5)
+      '@anvia/core': 1.14.0(zod@4.6.5)
       '@langfuse/otel': 5.11.1(@opentelemetry/api@1.9.1)(@opentelemetry/core@2.11.0(@opentelemetry/api@1.9.1))(@opentelemetry/exporter-trace-otlp-http@0.221.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.11.0(@opentelemetry/api@1.9.1))
       '@langfuse/tracing': 5.11.1(@opentelemetry/api@1.9.1)
       '@opentelemetry/api': 1.9.1
@@ -4677,21 +4685,21 @@ snapshots:
       - '@opentelemetry/exporter-trace-otlp-http'
       - '@opentelemetry/sdk-trace-base'
 
-  '@anvia/mcp@1.1.3(@anvia/core@1.5.0(zod@4.6.5))':
+  '@anvia/mcp@1.2.4(@anvia/core@1.14.0(zod@4.6.5))':
     dependencies:
-      '@anvia/core': 1.5.0(zod@4.6.5)
-      '@modelcontextprotocol/client': 2.0.0
-      undici: 8.10.2
+      '@anvia/core': 1.14.0(zod@4.6.5)
+      '@modelcontextprotocol/client': 2.3.1
+      undici: 8.11.2
 
-  '@anvia/memory-prisma@1.2.1(@anvia/core@1.5.0(zod@4.6.5))(@prisma/client@7.10.0(prisma@7.10.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(typescript@7.0.2))(typescript@7.0.2))':
+  '@anvia/memory-prisma@1.2.2(@anvia/core@1.14.0(zod@4.6.5))(@prisma/client@7.10.0(prisma@7.10.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(typescript@7.0.2))(typescript@7.0.2))':
     dependencies:
-      '@anvia/core': 1.5.0(zod@4.6.5)
+      '@anvia/core': 1.14.0(zod@4.6.5)
     optionalDependencies:
       '@prisma/client': 7.10.0(prisma@7.10.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(typescript@7.0.2))(typescript@7.0.2)
 
-  '@anvia/mistral@1.1.4(@anvia/core@1.5.0(zod@4.6.5))(@opentelemetry/api@1.9.1)(@opentelemetry/exporter-trace-otlp-http@0.221.0(@opentelemetry/api@1.9.1))(@opentelemetry/resources@2.11.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.11.0(@opentelemetry/api@1.9.1))':
+  '@anvia/mistral@1.1.5(@anvia/core@1.14.0(zod@4.6.5))(@opentelemetry/api@1.9.1)(@opentelemetry/exporter-trace-otlp-http@0.221.0(@opentelemetry/api@1.9.1))(@opentelemetry/resources@2.11.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.11.0(@opentelemetry/api@1.9.1))':
     dependencies:
-      '@anvia/core': 1.5.0(zod@4.6.5)
+      '@anvia/core': 1.14.0(zod@4.6.5)
       '@mistralai/mistralai': 2.7.0(@opentelemetry/api@1.9.1)(@opentelemetry/exporter-trace-otlp-http@0.221.0(@opentelemetry/api@1.9.1))(@opentelemetry/resources@2.11.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.11.0(@opentelemetry/api@1.9.1))
     transitivePeerDependencies:
       - '@opentelemetry/api'
@@ -4701,10 +4709,10 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  '@anvia/openai@1.1.7(@anvia/core@1.5.0(zod@4.6.5))(@aws-sdk/credential-provider-node@3.972.73)(@smithy/signature-v4@5.6.11)(undici@8.10.2)(ws@8.21.1)(zod@4.6.5)':
+  '@anvia/openai@1.3.0(@anvia/core@1.14.0(zod@4.6.5))(@aws-sdk/credential-provider-node@3.972.73)(@smithy/signature-v4@5.6.11)(undici@8.11.2)(ws@8.21.1)(zod@4.6.5)':
     dependencies:
-      '@anvia/core': 1.5.0(zod@4.6.5)
-      openai: 7.25.0(@aws-sdk/credential-provider-node@3.972.73)(@smithy/signature-v4@5.6.11)(undici@8.10.2)(ws@8.21.1)(zod@4.6.5)
+      '@anvia/core': 1.14.0(zod@4.6.5)
+      openai: 7.32.0(@aws-sdk/credential-provider-node@3.972.73)(@smithy/signature-v4@5.6.11)(undici@8.11.2)(ws@8.21.1)(zod@4.6.5)
     transitivePeerDependencies:
       - '@aws-sdk/credential-provider-node'
       - '@smithy/hash-node'
@@ -4713,17 +4721,17 @@ snapshots:
       - ws
       - zod
 
-  '@anvia/qdrant@1.1.3(@anvia/core@1.5.0(zod@4.6.5))(typescript@7.0.2)':
+  '@anvia/qdrant@1.1.4(@anvia/core@1.14.0(zod@4.6.5))(typescript@7.0.2)':
     dependencies:
-      '@anvia/core': 1.5.0(zod@4.6.5)
+      '@anvia/core': 1.14.0(zod@4.6.5)
       '@qdrant/js-client-rest': 1.19.0(typescript@7.0.2)
     transitivePeerDependencies:
       - typescript
 
-  '@anvia/react-ui@1.1.5(@anvia/client@1.2.0(@anvia/core@1.5.0(zod@4.6.5)))(@anvia/react@1.1.3(@anvia/client@1.2.0(@anvia/core@1.5.0(zod@4.6.5)))(@anvia/core@1.5.0(zod@4.6.5))(react@19.2.8))(@floating-ui/dom@1.8.0)(@tiptap/extensions@3.31.3(@tiptap/core@3.31.3(@tiptap/pm@3.31.3))(@tiptap/pm@3.31.3))(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
+  '@anvia/react-ui@1.1.7(@anvia/client@1.4.2(@anvia/core@1.14.0(zod@4.6.5)))(@anvia/react@1.1.4(@anvia/client@1.4.2(@anvia/core@1.14.0(zod@4.6.5)))(@anvia/core@1.14.0(zod@4.6.5))(react@19.2.8))(@floating-ui/dom@1.8.0)(@tiptap/extensions@3.31.3(@tiptap/core@3.31.3(@tiptap/pm@3.31.3))(@tiptap/pm@3.31.3))(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
     dependencies:
-      '@anvia/client': 1.2.0(@anvia/core@1.5.0(zod@4.6.5))
-      '@anvia/react': 1.1.3(@anvia/client@1.2.0(@anvia/core@1.5.0(zod@4.6.5)))(@anvia/core@1.5.0(zod@4.6.5))(react@19.2.8)
+      '@anvia/client': 1.4.2(@anvia/core@1.14.0(zod@4.6.5))
+      '@anvia/react': 1.1.4(@anvia/client@1.4.2(@anvia/core@1.14.0(zod@4.6.5)))(@anvia/core@1.14.0(zod@4.6.5))(react@19.2.8)
       '@radix-ui/react-slot': 1.3.3(@types/react@19.2.17)(react@19.2.8)
       '@tiptap/core': 3.31.3(@tiptap/pm@3.31.3)
       '@tiptap/extension-document': 3.31.3(@tiptap/core@3.31.3(@tiptap/pm@3.31.3))
@@ -4735,7 +4743,7 @@ snapshots:
       '@tiptap/pm': 3.31.3
       '@tiptap/react': 3.31.3(@floating-ui/dom@1.8.0)(@tiptap/core@3.31.3(@tiptap/pm@3.31.3))(@tiptap/pm@3.31.3)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@tiptap/suggestion': 3.31.3(@floating-ui/dom@1.8.0)(@tiptap/core@3.31.3(@tiptap/pm@3.31.3))(@tiptap/pm@3.31.3)
-      marked: 18.0.13
+      marked: 18.1.0
       react: 19.2.8
       react-dom: 19.2.8(react@19.2.8)
       react-markdown: 10.1.0(@types/react@19.2.17)(react@19.2.8)
@@ -4747,21 +4755,21 @@ snapshots:
       - '@types/react-dom'
       - supports-color
 
-  '@anvia/react@1.1.3(@anvia/client@1.2.0(@anvia/core@1.5.0(zod@4.6.5)))(@anvia/core@1.5.0(zod@4.6.5))(react@19.2.8)':
+  '@anvia/react@1.1.4(@anvia/client@1.4.2(@anvia/core@1.14.0(zod@4.6.5)))(@anvia/core@1.14.0(zod@4.6.5))(react@19.2.8)':
     dependencies:
-      '@anvia/client': 1.2.0(@anvia/core@1.5.0(zod@4.6.5))
-      '@anvia/core': 1.5.0(zod@4.6.5)
+      '@anvia/client': 1.4.2(@anvia/core@1.14.0(zod@4.6.5))
+      '@anvia/core': 1.14.0(zod@4.6.5)
       react: 19.2.8
 
-  '@anvia/sandbox@1.1.4(@anvia/core@1.5.0(zod@4.6.5))':
+  '@anvia/sandbox@1.2.0(@anvia/core@1.14.0(zod@4.6.5))':
     dependencies:
-      '@anvia/core': 1.5.0(zod@4.6.5)
+      '@anvia/core': 1.14.0(zod@4.6.5)
       '@clack/prompts': 1.8.1
       zod: 4.6.5
 
-  '@anvia/server@1.1.4(@anvia/client@1.2.0(@anvia/core@1.5.0(zod@4.6.5)))':
+  '@anvia/server@1.3.2(@anvia/client@1.4.2(@anvia/core@1.14.0(zod@4.6.5)))':
     dependencies:
-      '@anvia/client': 1.2.0(@anvia/core@1.5.0(zod@4.6.5))
+      '@anvia/client': 1.4.2(@anvia/core@1.14.0(zod@4.6.5))
 
   '@asamuzakjp/css-color@6.0.7':
     dependencies:
@@ -5352,9 +5360,9 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  '@modelcontextprotocol/client@2.0.0':
+  '@modelcontextprotocol/client@2.3.1':
     dependencies:
-      '@modelcontextprotocol/core': 2.0.0
+      '@modelcontextprotocol/core': 2.3.1
       cross-spawn: 7.0.6
       eventsource: 3.0.7
       eventsource-parser: 3.1.0
@@ -5362,7 +5370,7 @@ snapshots:
       pkce-challenge: 5.0.1
       zod: 4.6.5
 
-  '@modelcontextprotocol/core@2.0.0':
+  '@modelcontextprotocol/core@2.3.1':
     dependencies:
       zod: 4.6.5
 
@@ -7753,7 +7761,7 @@ snapshots:
 
   markdown-table@3.0.4: {}
 
-  marked@18.0.13: {}
+  marked@18.1.0: {}
 
   math-intrinsics@1.1.0: {}
 
@@ -8196,11 +8204,11 @@ snapshots:
 
   ohash@2.0.11: {}
 
-  openai@7.25.0(@aws-sdk/credential-provider-node@3.972.73)(@smithy/signature-v4@5.6.11)(undici@8.10.2)(ws@8.21.1)(zod@4.6.5):
+  openai@7.32.0(@aws-sdk/credential-provider-node@3.972.73)(@smithy/signature-v4@5.6.11)(undici@8.11.2)(ws@8.21.1)(zod@4.6.5):
     optionalDependencies:
       '@aws-sdk/credential-provider-node': 3.972.73
       '@smithy/signature-v4': 5.6.11
-      undici: 8.10.2
+      undici: 8.11.2
       ws: 8.21.1
       zod: 4.6.5
 
@@ -8867,7 +8875,7 @@ snapshots:
 
   undici@8.10.0: {}
 
-  undici@8.10.2: {}
+  undici@8.11.2: {}
 
   unicode-properties@1.4.1:
     dependencies:

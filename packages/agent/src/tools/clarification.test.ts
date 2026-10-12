@@ -67,13 +67,17 @@ describe("createClarificationTool", () => {
   it("rejects duplicate question ids", () => {
     const tool = createClarificationTool();
 
-    const input = parseInput(tool, {
+    // Anvia Core validates question ids in the tool input schema (1.12.0+).
+    expect(() =>
+      parseInput(tool, {
         questions: [
           { id: "scope", text: "First?" },
           { id: "scope", text: "Second?" },
         ],
-      });
+      }),
+    ).toThrow(/unique/i);
 
+    // The interaction request parser keeps its own duplicate-id guard.
     expect(() =>
       parseAgentInteractionRequest({
         type: "tool-question",
@@ -81,7 +85,10 @@ describe("createClarificationTool", () => {
         toolName: tool.name,
         toolCallId: "call-1",
         internalCallId: "internal-1",
-        questions: input.questions,
+        questions: [
+          { id: "scope", text: "First?" },
+          { id: "scope", text: "Second?" },
+        ],
       }),
     ).toThrow(/unique/i);
   });
