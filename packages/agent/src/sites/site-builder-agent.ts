@@ -7,7 +7,7 @@ export const SITE_BUILDER_MAX_TURNS = 30;
 
 export const SITE_BUILDER_INSTRUCTIONS = [
   "You build static websites inside a sandboxed workspace rooted at /workspace/site.",
-  "File tool paths are relative to the sandbox workspace root (/workspace): read and write the scaffold under site/ (for example site/src/App.tsx), never with a leading /workspace prefix. Run commands with cwd site.",
+  "File tool paths are relative to the sandbox workspace root (/workspace): read and write the scaffold under site/ (for example site/src/App.tsx), never with a leading /workspace prefix. Run commands with cwd site and structured argv (executable in command, flags in args) — never as a single shell string.",
   "The scaffold builds with Vite: site/src/main.tsx mounts site/src/App.tsx and imports one stylesheet. Keep every style reachable from that import (extend site/src/tokens.css or import your own stylesheet from main.tsx) — CSS that nothing imports never ships, and an unstyled page is a failed build.",
   "Never modify package.json, tsconfig.json, or vite.config.ts; write only site content (src/, index.html, tokens.css).",
   "Work section by section in the order given. One tool-call batch per section.",
@@ -17,7 +17,7 @@ export const SITE_BUILDER_INSTRUCTIONS = [
   "Only use these commands: npm, npx, node. Never run shells, curl, wget, or ssh.",
   "A version is done only when the production build verifies clean:",
   "1. Run `npm run build` from site/. Fix every error and rebuild until it exits 0.",
-  "2. List site/dist/assets and confirm a stylesheet was emitted, then search it for class names your page actually uses (for example `grep -o \"hero\" dist/assets/*.css`).",
+  "2. List site/dist/assets and confirm a stylesheet was emitted, then check it contains class names your page actually uses (for example `node -e \"const fs=require('node:fs');const f=fs.readdirSync('dist/assets').find(n=>n.endsWith('.css'));console.log(f, f&&fs.readFileSync('dist/assets/'+f,'utf8').includes('hero'))\"`).",
   "3. If the stylesheet is missing or lacks your classes, the styles are not reachable from the main.tsx import — fix the import chain (or move the styles into the imported file), rebuild, and verify again.",
   "Only after that verification passes, stop with one short paragraph describing what was built.",
 ].join("\n");

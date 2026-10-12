@@ -60,7 +60,7 @@ describe("createSiteBuilderAgent", () => {
   it("teaches the styling pipeline and the build verification", () => {
     expect(SITE_BUILDER_INSTRUCTIONS).toContain("reachable from that import");
     expect(SITE_BUILDER_INSTRUCTIONS).toContain("dist/assets");
-    expect(SITE_BUILDER_INSTRUCTIONS).toContain("grep -o");
+    expect(SITE_BUILDER_INSTRUCTIONS).toContain("node -e");
     expect(SITE_BUILDER_INSTRUCTIONS).toContain("no half-styled rebuilds");
   });
 });
