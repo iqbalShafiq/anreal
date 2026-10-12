@@ -285,7 +285,10 @@ describe("run recipe reconstruction capability boundary", () => {
         savePolicy: "turn",
         compaction: expect.objectContaining({
           trigger: { afterTokens: frozen.memoryPolicy.triggerAfterTokens },
-          retention: { recentTokens: frozen.memoryPolicy.retentionRecentTokens },
+          retention: {
+            recentTokens: frozen.memoryPolicy.retentionRecentTokens,
+            recentToolTurns: 1,
+          },
           conflictRetries: { maxAttempts: frozen.memoryPolicy.conflictRetries },
           compactor: expect.any(Function),
         }),

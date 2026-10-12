@@ -67,6 +67,11 @@ export type NativeMemoryPolicy = {
   /** The complete frozen prompt/tool surface counted before serialization. */
   staticContextTokens: number;
   triggerAfterTokens: number;
+  /**
+   * Token-budget retention (30% of the model window) passed to Anvia's
+   * deprecated-but-supported `recentTokens` retention form; see
+   * `build-run-input.ts` for why it is not migrated to `recentTurns`.
+   */
   retentionRecentTokens: number;
   compactorMaxTokens: number;
   conflictRetries: number;

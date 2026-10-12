@@ -1942,7 +1942,16 @@ export async function reconstructChatRunInput(input: {
     savePolicy: recipe.memoryPolicy.savePolicy,
     compaction: {
       trigger: { afterTokens: recipe.memoryPolicy.triggerAfterTokens },
-      retention: { recentTokens: recipe.memoryPolicy.retentionRecentTokens },
+      // Deliberate token-budget retention (30% of the model window, frozen in
+      // the recipe). The deprecated `recentTokens` form is the documented path
+      // for existing token-budget policies and keeps as many recent complete
+      // turns as fit the budget; switching to `recentTurns` would change when
+      // history is summarized. `recentToolTurns: 1` pins the mid-tool-loop
+      // retention Core added in 1.11.0 so compaction behavior stays fixed.
+      retention: {
+        recentTokens: recipe.memoryPolicy.retentionRecentTokens,
+        recentToolTurns: 1,
+      },
       compactor: nativeMemoryCompactor,
       conflictRetries: { maxAttempts: recipe.memoryPolicy.conflictRetries },
     },
